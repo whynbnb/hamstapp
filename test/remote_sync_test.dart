@@ -7,6 +7,7 @@ import 'package:hamstapp/models/app_info.dart';
 import 'package:hamstapp/models/remote_source.dart';
 import 'package:hamstapp/screens/orphan_cache_screen.dart';
 import 'package:hamstapp/screens/remote_apk_detail_screen.dart';
+import 'package:hamstapp/screens/sync_screen.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
 
@@ -179,5 +180,64 @@ void main() {
     expect(find.text('v2.0 (2)'), findsOneWidget);
     expect(find.text('v1.0 (1)'), findsOneWidget);
     expect(find.text('包名'), findsOneWidget);
+  });
+
+  testWidgets('tapping a remote APK row opens the detail page, not install', (
+    tester,
+  ) async {
+    var downloads = 0;
+    mock((call) async {
+      switch (call.method) {
+        case 'remoteList':
+          return [
+            {
+              'name': 'app.apk',
+              'rel': 'app.apk',
+              'path': '/apks/app.apk',
+              'size': 10,
+              'modified': 1,
+            },
+          ];
+        case 'cacheIndex':
+          return {'entries': [], 'totalBytes': 0};
+        case 'cachePrune':
+          return 0;
+        case 'remoteDownload':
+          downloads++;
+          return '/cache/app.apk';
+      }
+      return null;
+    });
+
+    final source = RemoteSource(
+      id: 's1',
+      protocol: 'ftp',
+      host: 'nas',
+      port: 21,
+      path: '/apks',
+      anonymous: true,
+    );
+    final state = AppState(_MemStorage())..initialized = true;
+    state.settings = {
+      'sync_sources': [source.toMap()],
+      'sync_active': source.id,
+    };
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: SyncScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('app.apk'), findsOneWidget);
+    await tester.tap(find.text('app.apk'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.byType(RemoteApkDetailScreen), findsOneWidget);
+    expect(downloads, 0, reason: 'row tap must not start an install/download');
   });
 }
