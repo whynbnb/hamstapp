@@ -7,6 +7,7 @@ import 'package:hamstapp/models/category.dart';
 import 'package:hamstapp/models/tile.dart';
 import 'package:hamstapp/models/tile_page.dart';
 import 'package:hamstapp/screens/app_detail_screen.dart';
+import 'package:hamstapp/screens/apps_screen.dart';
 import 'package:hamstapp/screens/categories_tab.dart';
 import 'package:hamstapp/screens/quick_launch_screen.dart';
 import 'package:hamstapp/services/storage.dart';
@@ -584,5 +585,46 @@ void main() {
 
     expect(state.categories.single.name, '测试');
     expect(state.categories.single.emoji, '🦄');
+  });
+
+  testWidgets('filter panel toggles sort order and resets', (tester) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'Alpha'), _ai('com.b', 'Beta')];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: AppsScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('筛选与排序'), findsOneWidget);
+
+    // Direction toggle.
+    await tester.tap(find.text('倒序'));
+    await tester.pump();
+    expect(state.sortAscending, isFalse);
+
+    // Pick a sort field; it switches to its natural direction.
+    await tester.tap(find.text('按大小'));
+    await tester.pump();
+    expect(state.sort, AppSort.size);
+    expect(state.sortAscending, isFalse);
+
+    // Choose a filter so the badge/reset activate.
+    await tester.tap(find.text('用户'));
+    await tester.pump();
+    expect(state.scope, AppScope.user);
+
+    await tester.tap(find.text('重置'));
+    await tester.pump();
+    expect(state.activeAppFilterCount, 0);
+    expect(state.scope, AppScope.all);
   });
 }

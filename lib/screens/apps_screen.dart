@@ -73,7 +73,6 @@ class AppsScreen extends StatelessWidget {
       body: Column(
         children: [
           _SearchBar(state: state),
-          _FilterRow(state: state),
           Expanded(
             child: RefreshIndicator(
               onRefresh: state.scan,
@@ -178,6 +177,7 @@ class _SearchBarState extends State<_SearchBar> {
               onChanged: (v) {
                 widget.state.query = v;
                 widget.state.refresh();
+                setState(() {});
               },
               decoration: InputDecoration(
                 hintText: context.strings.t('搜索应用名 / 包名 / 拼音首字母'),
@@ -190,6 +190,7 @@ class _SearchBarState extends State<_SearchBar> {
                           _controller.clear();
                           widget.state.query = '';
                           widget.state.refresh();
+                          setState(() {});
                         },
                       ),
                 isDense: true,
@@ -202,203 +203,252 @@ class _SearchBarState extends State<_SearchBar> {
             ),
           ),
           const SizedBox(width: 8),
-          _SortMenu(state: widget.state),
+          _FilterButton(state: widget.state),
         ],
       ),
     );
   }
 }
 
-class _SortMenu extends StatelessWidget {
-  const _SortMenu({required this.state});
+/// Opens the combined filter/sort panel as a bottom sheet. Shows a badge with
+/// how many non-default options are active so the collapsed bar stays clean.
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({required this.state});
   final AppState state;
 
   @override
   Widget build(BuildContext context) {
     final s = context.strings;
-    return PopupMenuButton<AppSort>(
-      icon: const Icon(Icons.sort),
-      tooltip: s.t('排序'),
-      initialValue: state.sort,
-      onSelected: (v) {
-        state.sort = v;
-        state.refresh();
-      },
-      itemBuilder: (context) => [
-        PopupMenuItem(value: AppSort.name, child: Text(s.t('按名称'))),
-        PopupMenuItem(value: AppSort.installTime, child: Text(s.t('按安装时间'))),
-        PopupMenuItem(value: AppSort.updateTime, child: Text(s.t('按更新时间'))),
-        PopupMenuItem(value: AppSort.size, child: Text(s.t('按大小'))),
-      ],
+    final scheme = Theme.of(context).colorScheme;
+    final count = state.activeAppFilterCount;
+    return IconButton(
+      tooltip: s.t('筛选与排序'),
+      onPressed: () => showAppFilterSheet(context, state),
+      icon: Badge(
+        isLabelVisible: count > 0,
+        label: Text('$count'),
+        backgroundColor: scheme.primary,
+        child: const Icon(Icons.tune),
+      ),
     );
   }
 }
 
-class _FilterRow extends StatelessWidget {
-  const _FilterRow({required this.state});
+/// Bottom sheet holding every list control: app type (scope), annotation
+/// filter, category filter and sort order/direction.
+void showAppFilterSheet(BuildContext context, AppState state) {
+  showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => _AppFilterSheet(state: state),
+  );
+}
+
+class _AppFilterSheet extends StatelessWidget {
+  const _AppFilterSheet({required this.state});
   final AppState state;
 
   @override
   Widget build(BuildContext context) {
     final s = context.strings;
-    final labels = {
-      AppFilter.all: s.t('全部'),
-      AppFilter.favorite: '⭐${s.t('收藏')}',
-      AppFilter.categorized: s.t('已分类'),
-      AppFilter.uncategorized: s.t('未分类'),
-      AppFilter.hasReason: s.t('有原因'),
-      AppFilter.unorganized: '🫥${s.t('未整理')}',
-      AppFilter.uninstalled: '🗑️${s.t('已卸载')}',
-    };
-    return SizedBox(
-      height: 44,
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          _ScopeDropdown(state: state),
-          const SizedBox(width: 4),
-          Expanded(
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              children: [
-                ...labels.entries.map(
-                  (e) => Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Tooltip(
-                      message: e.key == AppFilter.unorganized
-                          ? s.t('未分组、无原因/备注，且未收藏、未固定到磁贴')
-                          : '',
-                      child: FilterChip(
-                        label: Text(e.value),
-                        selected: state.filter == e.key,
-                        onSelected: (_) {
-                          state.filter = e.key;
-                          state.refresh();
-                        },
+    // Rebuild the sheet as filters change so chips/switches stay in sync.
+    return ListenableBuilder(
+      listenable: state,
+      builder: (context, _) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      s.t('筛选与排序'),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
                       ),
                     ),
                   ),
-                ),
-                if (state.categories.isNotEmpty) ...[
-                  const VerticalDivider(width: 12),
-                  ...state.categories.map(
-                    (c) => Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 4),
-                      child: FilterChip(
-                        label: Text('${c.emoji} ${c.name}'),
-                        selected: state.filterCategoryId == c.id,
-                        onSelected: (_) {
+                  TextButton(
+                    onPressed: state.activeAppFilterCount == 0
+                        ? null
+                        : state.resetAppFilters,
+                    child: Text(s.t('重置')),
+                  ),
+                ],
+              ),
+              _label(context, s.t('应用类型')),
+              Wrap(
+                spacing: 8,
+                children: [
+                  _choice(
+                    context,
+                    s.t('全部'),
+                    state.scope == AppScope.all,
+                    () {
+                      state.scope = AppScope.all;
+                      state.refresh();
+                    },
+                  ),
+                  _choice(
+                    context,
+                    s.t('用户'),
+                    state.scope == AppScope.user,
+                    () {
+                      state.scope = AppScope.user;
+                      state.refresh();
+                    },
+                  ),
+                  _choice(
+                    context,
+                    s.t('系统'),
+                    state.scope == AppScope.system,
+                    () {
+                      state.scope = AppScope.system;
+                      state.refresh();
+                    },
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              _label(context, s.t('筛选')),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final e in <AppFilter, String>{
+                    AppFilter.all: s.t('全部'),
+                    AppFilter.favorite: '⭐${s.t('收藏')}',
+                    AppFilter.categorized: s.t('已分类'),
+                    AppFilter.uncategorized: s.t('未分类'),
+                    AppFilter.hasReason: s.t('有原因'),
+                    AppFilter.unorganized: '🫥${s.t('未整理')}',
+                    AppFilter.uninstalled: '🗑️${s.t('已卸载')}',
+                  }.entries)
+                    e.key == AppFilter.unorganized
+                        ? Tooltip(
+                            message: s.t('未分组、无原因/备注，且未收藏、未固定到磁贴'),
+                            child: _choice(
+                              context,
+                              e.value,
+                              state.filter == e.key,
+                              () {
+                                state.filter = e.key;
+                                state.refresh();
+                              },
+                            ),
+                          )
+                        : _choice(
+                            context,
+                            e.value,
+                            state.filter == e.key,
+                            () {
+                              state.filter = e.key;
+                              state.refresh();
+                            },
+                          ),
+                ],
+              ),
+              if (state.categories.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                _label(context, s.t('分类')),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 4,
+                  children: [
+                    _choice(
+                      context,
+                      s.t('全部'),
+                      state.filterCategoryId == null,
+                      () {
+                        state.filterCategoryId = null;
+                        state.refresh();
+                      },
+                    ),
+                    for (final c in state.categories)
+                      _choice(
+                        context,
+                        '${c.emoji} ${c.name}',
+                        state.filterCategoryId == c.id,
+                        () {
                           state.filterCategoryId =
                               state.filterCategoryId == c.id ? null : c.id;
                           state.refresh();
                         },
                       ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 16),
+              _label(context, s.t('排序')),
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
+                children: [
+                  for (final e in <AppSort, String>{
+                    AppSort.name: s.t('按名称'),
+                    AppSort.installTime: s.t('按安装时间'),
+                    AppSort.updateTime: s.t('按更新时间'),
+                    AppSort.size: s.t('按大小'),
+                  }.entries)
+                    _choice(
+                      context,
+                      e.value,
+                      state.sort == e.key,
+                      () => state.setAppSort(e.key),
                     ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SegmentedButton<bool>(
+                segments: [
+                  ButtonSegment(
+                    value: true,
+                    icon: const Icon(Icons.arrow_upward, size: 16),
+                    label: Text(s.t('正序')),
+                  ),
+                  ButtonSegment(
+                    value: false,
+                    icon: const Icon(Icons.arrow_downward, size: 16),
+                    label: Text(s.t('倒序')),
                   ),
                 ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Collapsed combo box for the app-type scope (全部/用户/系统). Independent of
-/// the annotation filter radio group.
-class _ScopeDropdown extends StatelessWidget {
-  const _ScopeDropdown({required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final s = context.strings;
-    final (label, icon) = switch (state.scope) {
-      AppScope.all => (s.t('全部'), Icons.apps),
-      AppScope.user => (s.t('用户'), Icons.person_outline),
-      AppScope.system => (s.t('系统'), Icons.settings_outlined),
-    };
-    final active = state.scope != AppScope.all;
-    return PopupMenuButton<AppScope>(
-      tooltip: s.t('应用类型'),
-      initialValue: state.scope,
-      onSelected: (v) {
-        state.scope = v;
-        state.refresh();
-      },
-      itemBuilder: (_) => [
-        PopupMenuItem(
-          value: AppScope.all,
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.apps),
-            title: Text(s.t('全部')),
-          ),
-        ),
-        PopupMenuItem(
-          value: AppScope.user,
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.person_outline),
-            title: Text(s.t('用户')),
-          ),
-        ),
-        PopupMenuItem(
-          value: AppScope.system,
-          child: ListTile(
-            dense: true,
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.settings_outlined),
-            title: Text(s.t('系统')),
-          ),
-        ),
-      ],
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: active
-              ? scheme.primaryContainer
-              : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(20),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              icon,
-              size: 16,
-              color: active
-                  ? scheme.onPrimaryContainer
-                  : scheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: active
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
+                selected: {state.sortAscending},
+                onSelectionChanged: (v) => state.setSortAscending(v.first),
               ),
-            ),
-            Icon(
-              Icons.arrow_drop_down,
-              size: 18,
-              color: active
-                  ? scheme.onPrimaryContainer
-                  : scheme.onSurfaceVariant,
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+
+  Widget _label(BuildContext context, String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 6),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w700,
+        color: Theme.of(context).colorScheme.primary,
+      ),
+    ),
+  );
+
+  Widget _choice(
+    BuildContext context,
+    String label,
+    bool selected,
+    VoidCallback onTap,
+  ) => FilterChip(
+    label: Text(label),
+    selected: selected,
+    onSelected: (_) => onTap(),
+  );
 }
 
 class _EmptyView extends StatelessWidget {

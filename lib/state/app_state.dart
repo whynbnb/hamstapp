@@ -128,6 +128,9 @@ class AppState extends ChangeNotifier {
   AppScope scope = AppScope.all;
   AppFilter filter = AppFilter.all;
   AppSort sort = AppSort.name;
+
+  /// Whether [sort] is applied ascending (正序) or descending (倒序).
+  bool sortAscending = true;
   String? filterCategoryId;
 
   final Random _rand = Random();
@@ -135,6 +138,44 @@ class AppState extends ChangeNotifier {
   /// Public wrapper so widgets can trigger a rebuild after mutating a
   /// filter/sort field directly.
   void refresh() => notifyListeners();
+
+  /// Number of non-default filter/sort options, shown as a badge next to the
+  /// filter button on the apps screen.
+  int get activeAppFilterCount {
+    var n = 0;
+    if (scope != AppScope.all) n++;
+    if (filter != AppFilter.all) n++;
+    if (filterCategoryId != null) n++;
+    if (sort != AppSort.name) n++;
+    if (!sortAscending) n++;
+    return n;
+  }
+
+  /// Natural direction for a freshly picked sort: names read A→Z, while time
+  /// and size are most useful newest/largest first.
+  static bool _defaultAscending(AppSort s) => s == AppSort.name;
+
+  void setAppSort(AppSort value) {
+    if (sort == value) return;
+    sort = value;
+    sortAscending = _defaultAscending(value);
+    refresh();
+  }
+
+  void setSortAscending(bool value) {
+    if (sortAscending == value) return;
+    sortAscending = value;
+    refresh();
+  }
+
+  void resetAppFilters() {
+    scope = AppScope.all;
+    filter = AppFilter.all;
+    filterCategoryId = null;
+    sort = AppSort.name;
+    sortAscending = true;
+    refresh();
+  }
 
   String _newId() =>
       '${DateTime.now().microsecondsSinceEpoch}_${_rand.nextInt(1 << 32)}';
@@ -1758,22 +1799,23 @@ class AppState extends ChangeNotifier {
       return list;
     }
 
+    late final Comparator<AppInfo> cmp;
     switch (sort) {
       case AppSort.name:
-        list.sort(
-          (a, b) => a.appName.toLowerCase().compareTo(b.appName.toLowerCase()),
-        );
+        cmp = (a, b) =>
+            a.appName.toLowerCase().compareTo(b.appName.toLowerCase());
         break;
       case AppSort.installTime:
-        list.sort((a, b) => b.firstInstallTime.compareTo(a.firstInstallTime));
+        cmp = (a, b) => a.firstInstallTime.compareTo(b.firstInstallTime);
         break;
       case AppSort.updateTime:
-        list.sort((a, b) => b.lastUpdateTime.compareTo(a.lastUpdateTime));
+        cmp = (a, b) => a.lastUpdateTime.compareTo(b.lastUpdateTime);
         break;
       case AppSort.size:
-        list.sort((a, b) => b.sizeBytes.compareTo(a.sizeBytes));
+        cmp = (a, b) => a.sizeBytes.compareTo(b.sizeBytes);
         break;
     }
+    list.sort(sortAscending ? cmp : (a, b) => cmp(b, a));
     return list;
   }
 

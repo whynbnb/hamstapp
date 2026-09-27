@@ -382,6 +382,57 @@ void main() {
     expect(state.navMode, NavMode.rail);
   });
 
+  test('app sort supports ascending and descending order', () async {
+    AppInfo mk(String pkg, String name, int size, int time) => AppInfo(
+      packageName: pkg,
+      appName: name,
+      versionName: '1',
+      versionCode: 1,
+      firstInstallTime: time,
+      lastUpdateTime: time,
+      isSystem: false,
+      enabled: true,
+      apkPath: '',
+      sizeBytes: size,
+      targetSdk: 33,
+      minSdk: 21,
+      uid: 0,
+    );
+    final state = AppState(_MemStorage())
+      ..apps = [
+        mk('com.b', 'Bravo', 100, 200),
+        mk('com.a', 'Alpha', 300, 100),
+      ];
+
+    // Name defaults to ascending (A→Z).
+    expect(state.sort, AppSort.name);
+    expect(state.sortAscending, isTrue);
+    expect(state.visibleApps.map((a) => a.appName), ['Alpha', 'Bravo']);
+
+    // Flip direction.
+    state.setSortAscending(false);
+    expect(state.visibleApps.map((a) => a.appName), ['Bravo', 'Alpha']);
+
+    // Switching field picks the field's natural direction: time/size show the
+    // newest/largest first, so 倒序 is selected automatically.
+    state.setAppSort(AppSort.size);
+    expect(state.sortAscending, isFalse);
+    expect(state.visibleApps.map((a) => a.appName), ['Alpha', 'Bravo']);
+
+    // Explicit ascending overrides the natural default.
+    state.setSortAscending(true);
+    expect(state.visibleApps.map((a) => a.appName), ['Bravo', 'Alpha']);
+
+    // Reset returns to name ascending and clears the badge count.
+    state.scope = AppScope.system;
+    state.filter = AppFilter.favorite;
+    expect(state.activeAppFilterCount, 3);
+    state.resetAppFilters();
+    expect(state.activeAppFilterCount, 0);
+    expect(state.sort, AppSort.name);
+    expect(state.sortAscending, isTrue);
+  });
+
   test('theme mode and seed color persist through settings', () async {
     final state = AppState(_MemStorage());
     expect(state.themeMode, AppThemeMode.system);
