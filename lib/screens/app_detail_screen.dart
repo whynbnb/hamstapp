@@ -11,6 +11,7 @@ import '../utils/actions.dart';
 import '../utils/format.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_tile.dart';
+import '../widgets/chip_scroller.dart';
 
 class AppDetailScreen extends StatefulWidget {
   const AppDetailScreen({
@@ -245,26 +246,25 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               ),
             ],
           ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: state.categories.map((c) {
-              final selected = meta.categoryIds.contains(c.id);
-              return FilterChip(
-                label: Text('${c.emoji} ${c.name}'),
-                selected: selected,
-                onSelected: (v) {
-                  final ids = List<String>.from(meta.categoryIds);
-                  if (v) {
-                    ids.add(c.id);
-                  } else {
-                    ids.remove(c.id);
-                  }
-                  state.updateMeta(widget.packageName, categoryIds: ids);
-                },
-              );
-            }).toList(),
-          ),
+          if (state.categories.isNotEmpty)
+            ChipScroller(
+              children: state.categories.map((c) {
+                final selected = meta.categoryIds.contains(c.id);
+                return FilterChip(
+                  label: Text('${c.emoji} ${c.name}'),
+                  selected: selected,
+                  onSelected: (v) {
+                    final ids = List<String>.from(meta.categoryIds);
+                    if (v) {
+                      ids.add(c.id);
+                    } else {
+                      ids.remove(c.id);
+                    }
+                    state.updateMeta(widget.packageName, categoryIds: ids);
+                  },
+                );
+              }).toList(),
+            ),
           if (state.categories.isEmpty)
             Text(context.strings.t('还没有分类，点击「新建分类」创建一个吧'),
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),

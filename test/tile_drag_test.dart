@@ -14,6 +14,7 @@ import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
 import 'package:hamstapp/widgets/app_icon.dart';
 import 'package:hamstapp/widgets/category_editor.dart';
+import 'package:hamstapp/widgets/chip_scroller.dart';
 
 class _MemStorage implements Storage {
   final Map<String, dynamic> _data = <String, dynamic>{};
@@ -626,5 +627,37 @@ void main() {
     await tester.pump();
     expect(state.activeAppFilterCount, 0);
     expect(state.scope, AppScope.all);
+  });
+
+  testWidgets('long category list stays on one scrollable row', (
+    tester,
+  ) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'Alpha')]
+      ..categories = [
+        for (var i = 0; i < 12; i++)
+          AppCategory(id: 'c$i', name: '分类$i', emoji: '📁'),
+      ];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: AppsScreen()),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    final scroller = find.byType(ChipScroller);
+    expect(scroller, findsOneWidget);
+    expect(tester.getSize(scroller).height, 48);
+    final list = tester.widget<ListView>(
+      find.descendant(of: scroller, matching: find.byType(ListView)),
+    );
+    expect(list.scrollDirection, Axis.horizontal);
   });
 }

@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_strings.dart';
 import '../state/app_state.dart';
 import '../widgets/app_tile.dart';
+import '../widgets/chip_scroller.dart';
 import '../widgets/floating_nav.dart';
 import '../widgets/uninstall_reason.dart';
 import 'app_detail_screen.dart';
@@ -356,9 +357,7 @@ class _AppFilterSheet extends StatelessWidget {
               if (state.categories.isNotEmpty) ...[
                 const SizedBox(height: 16),
                 _label(context, s.t('分类')),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
+                ChipScroller(
                   children: [
                     _choice(
                       context,
