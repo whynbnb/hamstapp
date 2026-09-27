@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
 import '../models/category.dart';
+import '../services/native_apps.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/format.dart';
@@ -35,6 +36,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
   late final TextEditingController _reason;
   late final TextEditingController _note;
   Timer? _debounce;
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -70,6 +72,31 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     });
   }
 
+  void _snack(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  /// Copies the installed APK to a temp dir and opens the system share sheet.
+  Future<void> _exportApk(AppInfo? app) async {
+    if (_exporting) return;
+    final path = app?.apkPath ?? '';
+    if (path.isEmpty) {
+      _snack(context.strings.t('找不到该应用的 APK 文件'));
+      return;
+    }
+    setState(() => _exporting = true);
+    final base = (app!.appName.isEmpty ? widget.packageName : app.appName) +
+        (app.versionName.isEmpty ? '' : '_${app.versionName}');
+    final ok = await NativeApps.shareApk(path, name: base);
+    if (!mounted) return;
+    setState(() => _exporting = false);
+    if (!ok) {
+      _snack(context.strings.t('导出失败，可能无法读取该应用的 APK'));
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
@@ -83,6 +110,23 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
       appBar: AppBar(
         title: Text(name, overflow: TextOverflow.ellipsis),
         actions: [
+          if (app != null)
+            _exporting
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  )
+                : IconButton(
+                    tooltip: context.strings.t('导出 APK（分享）'),
+                    icon: const Icon(Icons.ios_share),
+                    onPressed: () => _exportApk(app),
+                  ),
           if (app != null)
             IconButton(
               tooltip: context.strings.t('应用信息'),

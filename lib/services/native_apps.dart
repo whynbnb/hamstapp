@@ -192,4 +192,16 @@ class NativeApps {
     final ok = await _channel.invokeMethod<bool>('installApk', {'path': path});
     return ok ?? false;
   }
+
+  /// Copies an installed APK into a temporary cache directory and opens the
+  /// system share sheet so it can be sent to another app. [name] is the
+  /// suggested file name (without extension). Returns false when the APK could
+  /// not be read or shared.
+  static Future<bool> shareApk(String path, {String name = ''}) async {
+    final ok = await _channel.invokeMethod<bool>('shareApk', {
+      'path': path,
+      'name': name,
+    });
+    return ok ?? false;
+  }
 }

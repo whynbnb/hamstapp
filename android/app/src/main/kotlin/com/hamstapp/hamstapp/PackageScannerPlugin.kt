@@ -1,5 +1,6 @@
 package com.hamstapp.hamstapp
 
+import android.content.ClipData
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -206,6 +207,15 @@ class PackageScannerPlugin(
             "installApk" -> {
                 val path = call.argument<String>("path")
                 mainHandler.post { result.success(path != null && installApk(path)) }
+            }
+            "shareApk" -> {
+                val path = call.argument<String>("path")
+                val name = call.argument<String>("name") ?: ""
+                executor.execute {
+                    val ok = path != null &&
+                        runCatching { shareApk(path, name) }.getOrDefault(false)
+                    mainHandler.post { result.success(ok) }
+                }
             }
             else -> result.notImplemented()
         }
@@ -1002,6 +1012,48 @@ class PackageScannerPlugin(
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
+
+    /**
+     * Copies an installed APK into the app's private cache and hands it to the
+     * system share sheet. The installed APK lives under /data/app, which is
+     * outside the FileProvider roots, so it has to be copied first.
+     */
+    private fun shareApk(sourcePath: String, displayName: String): Boolean {
+        val src = File(sourcePath)
+        if (!src.exists() || !src.isFile) return false
+        return try {
+            val dir = File(context.cacheDir, "share")
+            dir.listFiles()?.forEach { it.delete() }
+            dir.mkdirs()
+            val base = displayName.ifBlank { src.nameWithoutExtension }
+                .replace(Regex("[^A-Za-z0-9._\u4e00-\u9fff-]"), "_")
+                .take(80)
+            val dest = File(dir, "$base.apk")
+            src.inputStream().use { input ->
+                dest.outputStream().use { output -> input.copyTo(output) }
+            }
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                dest
+            )
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "application/vnd.android.package-archive"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                putExtra(Intent.EXTRA_SUBJECT, displayName)
+                clipData = ClipData.newUri(context.contentResolver, "apk", uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            val chooser = Intent.createChooser(send, null).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(chooser)
             true
         } catch (t: Throwable) {
             false

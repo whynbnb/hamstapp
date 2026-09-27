@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
@@ -659,5 +660,63 @@ void main() {
       find.descendant(of: scroller, matching: find.byType(ListView)),
     );
     expect(list.scrollDirection, Axis.horizontal);
+  });
+
+  testWidgets('app detail exports the APK through the native share channel', (
+    tester,
+  ) async {
+    const channel = MethodChannel('hamstapp/apps');
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      if (call.method == 'shareApk') return true;
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [
+        AppInfo(
+          packageName: 'com.a',
+          appName: 'Alpha',
+          versionName: '1.2',
+          versionCode: 3,
+          firstInstallTime: 0,
+          lastUpdateTime: 0,
+          isSystem: false,
+          enabled: true,
+          apkPath: '/data/app/com.a/base.apk',
+          sizeBytes: 10,
+          targetSdk: 33,
+          minSdk: 21,
+          uid: 0,
+        ),
+      ];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(
+          home: AppDetailScreen(packageName: 'com.a'),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.byIcon(Icons.ios_share));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final call = calls.firstWhere((c) => c.method == 'shareApk');
+    expect(call.arguments['path'], '/data/app/com.a/base.apk');
+    expect(call.arguments['name'], 'Alpha_1.2');
   });
 }

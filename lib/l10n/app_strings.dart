@@ -303,6 +303,10 @@ const Map<String, String> _en = <String, String>{
 
   // ---- app detail
   '应用信息': 'App info',
+  '导出 APK（分享）': 'Export APK (share)',
+  '找不到该应用的 APK 文件': 'No APK file found for this app',
+  '导出失败，可能无法读取该应用的 APK':
+      "Export failed — this app's APK may not be readable",
   '应用详情': 'App details',
   '安装原因': 'Install reason',
   '安装原因：{reason}': 'Install reason: {reason}',
