@@ -382,6 +382,8 @@ const Map<String, String> _en = <String, String>{
       '{total} total · {installed} installed · {missing} missing',
   '{n} 个应用 · 已安装 {installed}': '{n} apps · {installed} installed',
   '更新于 {ago}': 'Updated {ago}',
+  '安装于 {date}': 'Installed {date}',
+  '大小 {size}': 'Size {size}',
   '将把当前扫描到的 {n} 个应用全部加入「{list}」，':
       'All {n} scanned apps will be added to "{list}" ',
   '并替换原有内容。': 'and replace the existing content.',

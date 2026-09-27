@@ -91,6 +91,7 @@ class AppsScreen extends StatelessWidget {
                         return AppListTile(
                           app: app,
                           state: state,
+                          showSortFact: true,
                           onTap: () {
                             FocusManager.instance.primaryFocus?.unfocus();
                             Navigator.push(

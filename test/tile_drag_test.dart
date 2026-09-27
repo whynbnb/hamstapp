@@ -14,6 +14,7 @@ import 'package:hamstapp/screens/quick_launch_screen.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
 import 'package:hamstapp/widgets/app_icon.dart';
+import 'package:hamstapp/widgets/app_tile.dart';
 import 'package:hamstapp/widgets/category_editor.dart';
 import 'package:hamstapp/widgets/chip_scroller.dart';
 
@@ -718,5 +719,60 @@ void main() {
     final call = calls.firstWhere((c) => c.method == 'shareApk');
     expect(call.arguments['path'], '/data/app/com.a/base.apk');
     expect(call.arguments['name'], 'Alpha_1.2');
+  });
+
+  testWidgets('list items show the active sort field', (tester) async {
+    final state = AppState(_MemStorage())..initialized = true;
+    final app = AppInfo(
+      packageName: 'com.a',
+      appName: 'Alpha',
+      versionName: '1',
+      versionCode: 1,
+      firstInstallTime: DateTime(2023, 1, 2).millisecondsSinceEpoch,
+      lastUpdateTime: DateTime.now()
+          .subtract(const Duration(days: 3))
+          .millisecondsSinceEpoch,
+      isSystem: false,
+      enabled: true,
+      apkPath: '',
+      sizeBytes: 5 * 1024 * 1024,
+      targetSdk: 33,
+      minSdk: 21,
+      uid: 0,
+    );
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: state,
+              builder: (_, _) => AppListTile(
+                app: app,
+                state: state,
+                showSortFact: true,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+
+    // Name sort: the title is already the sort element, no extra fact.
+    expect(find.textContaining('大小'), findsNothing);
+
+    state.setAppSort(AppSort.size);
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(find.textContaining('大小 5.0 MB'), findsOneWidget);
+
+    state.setAppSort(AppSort.installTime);
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(find.textContaining('安装于'), findsOneWidget);
+
+    state.setAppSort(AppSort.updateTime);
+    await tester.pump(const Duration(milliseconds: 20));
+    expect(find.textContaining('更新于'), findsOneWidget);
   });
 }

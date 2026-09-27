@@ -16,6 +16,7 @@ class AppListTile extends StatelessWidget {
     this.onTap,
     this.trailing,
     this.showCategories = true,
+    this.showSortFact = false,
   });
 
   final AppInfo app;
@@ -24,12 +25,34 @@ class AppListTile extends StatelessWidget {
   final Widget? trailing;
   final bool showCategories;
 
+  /// When true, the value of the field the list is currently sorted by is
+  /// shown under the name (install time, update time, size...).
+  final bool showSortFact;
+
+  /// The sort key's value for this app, or null for an alphabetical sort where
+  /// the name itself (already the title) is the sort element.
+  String? _sortFact(BuildContext context) {
+    if (!showSortFact) return null;
+    final s = context.strings;
+    switch (state.sort) {
+      case AppSort.name:
+        return null;
+      case AppSort.installTime:
+        return s.t('安装于 {date}', {'date': Fmt.day(app.firstInstallTime)});
+      case AppSort.updateTime:
+        return s.t('更新于 {ago}', {'ago': Fmt.relative(app.lastUpdateTime)});
+      case AppSort.size:
+        return s.t('大小 {size}', {'size': Fmt.size(app.sizeBytes)});
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final meta = state.metaFor(app.packageName);
     final cats = state.categories
         .where((c) => meta.categoryIds.contains(c.id))
         .toList();
+    final fact = _sortFact(context);
 
     final subtitleParts = <String>[
       if (app.versionName.isNotEmpty) 'v${app.versionName}',
@@ -69,6 +92,19 @@ class AppListTile extends StatelessWidget {
             overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
           ),
+          if (fact != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                fact,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
           if (meta.reason.isNotEmpty)
             Padding(
               padding: const EdgeInsets.only(top: 2),
