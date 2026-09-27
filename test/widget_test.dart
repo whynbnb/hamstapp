@@ -462,6 +462,33 @@ void main() {
     expect(reopened.hapticLevel, HapticLevel.heavy);
   });
 
+  test('position memory restores nav, launch tab and tile page', () async {
+    final state = AppState(_MemStorage());
+    await state.init();
+    await state.addTilePage('P2');
+    await state.addTilePage('P3');
+    expect(state.currentTilePageIndex, 2);
+
+    await state.setLastHomeIndex(2);
+    await state.setLastLaunchTab(3);
+
+    final reopened = AppState(state.storage);
+    await reopened.init();
+    expect(reopened.rememberPosition, isTrue);
+    expect(reopened.lastHomeIndex, 2);
+    expect(reopened.lastLaunchTab, 3);
+    expect(reopened.currentTilePageIndex, 2);
+
+    // Turning the switch off ignores the saved position on the next launch.
+    await state.setRememberPosition(false);
+    final fresh = AppState(state.storage);
+    await fresh.init();
+    expect(fresh.rememberPosition, isFalse);
+    expect(fresh.lastHomeIndex, 0);
+    expect(fresh.lastLaunchTab, 0);
+    expect(fresh.currentTilePageIndex, 0);
+  });
+
   test('language setting resolves and translates', () async {
     addTearDown(() => AppStrings.current = const AppStrings('zh'));
     final state = AppState(_MemStorage());

@@ -42,12 +42,17 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this)..addListener(_onTabChanged);
+    final start = context.read<AppState>().lastLaunchTab.clamp(0, 3);
+    _lastTab = start;
+    _lastHapticTab = start;
+    _tabs = TabController(length: 4, vsync: this, initialIndex: start)
+      ..addListener(_onTabChanged);
   }
 
   void _onTabChanged() {
     if (_tabs.index == _lastTab) return;
     _lastTab = _tabs.index;
+    context.read<AppState>().setLastLaunchTab(_tabs.index);
     // Tapping a tab updates the index immediately; swiping settles here after
     // the animation, by which point the drag-release handler already fired.
     if (!_draggingTabs && _tabs.index != _lastHapticTab) {

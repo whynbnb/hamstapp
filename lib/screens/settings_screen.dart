@@ -134,6 +134,15 @@ class SettingsScreen extends StatelessWidget {
                   : Icons.visibility_off_outlined,
             ),
           ),
+          SwitchListTile(
+            value: state.rememberPosition,
+            onChanged: (v) => state.setRememberPosition(v),
+            title: Text(context.strings.t('记忆最后的位置')),
+            subtitle: Text(
+              context.strings.t('下次启动时回到上次的导航页、子标签和磁贴页'),
+            ),
+            secondary: const Icon(Icons.history),
+          ),
           ListTile(
             leading: const Icon(Icons.vibration),
             title: Text(context.strings.t('触感反馈')),

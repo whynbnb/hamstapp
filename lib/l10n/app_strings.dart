@@ -194,6 +194,9 @@ const Map<String, String> _en = <String, String>{
   '显示系统状态栏': 'Show system status bar',
   '关闭后隐藏系统状态栏，内容更沉浸；向下滑动可临时唤出':
       'Hide the system status bar for a more immersive view; swipe down to reveal it temporarily.',
+  '记忆最后的位置': 'Remember last position',
+  '下次启动时回到上次的导航页、子标签和磁贴页':
+      'Reopen on the last navigation tab, sub-tab and tile page you were on',
   '新增磁贴默认大小': 'Default size for new tiles',
   '显示应用名称': 'Show app name',
   '关闭后磁贴只显示图标': 'When off, the tile shows only its icon',

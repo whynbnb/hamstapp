@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 
@@ -158,6 +159,11 @@ class AppState extends ChangeNotifier {
         ),
       );
       await _persistTilePages();
+    }
+    // Restore the last viewed tile page when position memory is enabled.
+    if (rememberPosition) {
+      final saved = (settings['last_tile_page'] as num?)?.toInt() ?? 0;
+      currentTilePageIndex = saved.clamp(0, tilePages.length - 1);
     }
     // Tiles are independent of apps; load them and migrate legacy pins
     // (stored on AppMeta as a single `pinned` flag) into concrete tile entries.
@@ -983,6 +989,7 @@ class AppState extends ChangeNotifier {
     );
     tilePages.add(page);
     currentTilePageIndex = tilePages.length - 1;
+    _rememberTilePage();
     await _persistTilePages();
     notifyListeners();
     return page;
@@ -1013,6 +1020,7 @@ class AppState extends ChangeNotifier {
       currentTilePageIndex = tilePages.length - 1;
     }
     if (currentTilePageIndex < 0) currentTilePageIndex = 0;
+    _rememberTilePage();
     await _persistTilePages();
     await _persistTiles();
     notifyListeners();
@@ -1026,12 +1034,14 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Currently visible tile page (transient, not persisted).
+  /// Currently visible tile page. Held in memory; mirrored to settings so it
+  /// can be restored on the next launch when position memory is on.
   int currentTilePageIndex = 0;
 
   void setCurrentTilePage(int i) {
     if (i == currentTilePageIndex) return;
     currentTilePageIndex = i;
+    _rememberTilePage();
     notifyListeners();
   }
 
@@ -1163,6 +1173,48 @@ class AppState extends ChangeNotifier {
     settings['tile_default_size'] = value.clamp(1, kTileMaxH);
     await _persistSettings();
     notifyListeners();
+  }
+
+  // ---- position memory
+
+  /// Whether the last visited position (nav destination, launch sub-tab and
+  /// tile page) is restored on the next launch. Defaults to true.
+  bool get rememberPosition => settings['remember_position'] as bool? ?? true;
+
+  Future<void> setRememberPosition(bool value) async {
+    settings['remember_position'] = value;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Last top-level destination (启动/应用/快照/设置).
+  int get lastHomeIndex {
+    if (!rememberPosition) return 0;
+    return (settings['last_home_index'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> setLastHomeIndex(int value) async {
+    if (!rememberPosition || lastHomeIndex == value) return;
+    settings['last_home_index'] = value;
+    await _persistSettings();
+  }
+
+  /// Last launch sub-tab (磁贴/分类/收藏/最近).
+  int get lastLaunchTab {
+    if (!rememberPosition) return 0;
+    return (settings['last_launch_tab'] as num?)?.toInt() ?? 0;
+  }
+
+  Future<void> setLastLaunchTab(int value) async {
+    if (!rememberPosition || lastLaunchTab == value) return;
+    settings['last_launch_tab'] = value;
+    await _persistSettings();
+  }
+
+  void _rememberTilePage() {
+    if (!rememberPosition) return;
+    settings['last_tile_page'] = currentTilePageIndex;
+    unawaited(_persistSettings());
   }
 
   // ---- haptics
@@ -1562,6 +1614,10 @@ class AppState extends ChangeNotifier {
     tilePages = newPages;
     apps = newApps;
     settings = newSettings;
+    // Don't carry the exporter's position memory into this device.
+    settings.remove('last_home_index');
+    settings.remove('last_launch_tab');
+    settings.remove('last_tile_page');
     pendingUninstalls = <AppMeta>[];
     currentTilePageIndex = 0;
     tileEditMode = false;
@@ -1627,6 +1683,7 @@ class AppState extends ChangeNotifier {
     final page = tilePages.removeAt(index);
     tilePages.insert(target, page);
     currentTilePageIndex = target;
+    _rememberTilePage();
     await _persistTilePages();
     notifyListeners();
   }

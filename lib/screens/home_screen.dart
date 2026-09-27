@@ -18,9 +18,15 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _index = 0;
+  late int _index;
   bool _uninstallSheetVisible = false;
   bool _navOpen = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _index = context.read<AppState>().lastHomeIndex.clamp(0, 3);
+  }
 
   void _select(AppState state, int i) {
     if (state.tileEditMode) {
@@ -32,6 +38,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (i != _index) state.haptic(HapticTrigger.mainTabs);
+    state.setLastHomeIndex(i);
     setState(() => _index = i);
   }
 
