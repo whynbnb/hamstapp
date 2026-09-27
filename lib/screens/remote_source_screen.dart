@@ -28,6 +28,7 @@ class _SyncSourceEditScreenState extends State<SyncSourceEditScreen> {
   late final TextEditingController _domain;
   late bool _anonymous;
   late bool _secure;
+  late bool _keepAllVersions;
   bool _busy = false;
 
   bool get _isNew => widget.source == null;
@@ -47,6 +48,7 @@ class _SyncSourceEditScreenState extends State<SyncSourceEditScreen> {
     _domain = TextEditingController(text: s.domain);
     _anonymous = s.anonymous;
     _secure = s.secure;
+    _keepAllVersions = s.keepAllVersions;
   }
 
   @override
@@ -74,6 +76,7 @@ class _SyncSourceEditScreenState extends State<SyncSourceEditScreen> {
         anonymous: _anonymous,
         domain: _domain.text,
         secure: _secure,
+        keepAllVersions: _keepAllVersions,
       );
 
   void _snack(String msg) {
@@ -231,6 +234,37 @@ class _SyncSourceEditScreenState extends State<SyncSourceEditScreen> {
               title: Text(s.t('使用 HTTPS')),
               subtitle: const Text('WebDAV over TLS'),
             ),
+          const SizedBox(height: 8),
+          Text(
+            s.t('缓存版本'),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          SegmentedButton<bool>(
+            segments: [
+              ButtonSegment(
+                value: false,
+                icon: const Icon(Icons.compress, size: 16),
+                label: Text(s.t('仅保留最新版')),
+              ),
+              ButtonSegment(
+                value: true,
+                icon: const Icon(Icons.layers_outlined, size: 16),
+                label: Text(s.t('全部保留')),
+              ),
+            ],
+            selected: {_keepAllVersions},
+            onSelectionChanged: (v) =>
+                setState(() => _keepAllVersions = v.first),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            s.t('「仅保留最新版」用新版覆盖缓存；「全部保留」保留历史版本以便离线重装。'),
+            style: TextStyle(
+              fontSize: 12,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             value: _anonymous,

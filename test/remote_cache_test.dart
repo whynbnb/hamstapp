@@ -36,6 +36,8 @@ void main() {
           return 7;
         case 'cacheDelete':
           return 1234;
+        case 'cacheDeleteById':
+          return 4321;
         case 'cacheIndexAll':
           return {
             'entries': [
@@ -126,5 +128,40 @@ void main() {
     expect(list.first['sourceId'], 'src1');
     expect(list.first['packageName'], 'com.a');
     expect(list[1]['packageName'], 'com.b');
+  });
+
+  test('download and prune forward the keep-all-versions setting', () async {
+    final keep = source.copyWith(keepAllVersions: true);
+    await RemoteClient.download(keep, {
+      'name': 'a.apk',
+      'path': '/apks/a.apk',
+      'size': 1,
+      'modified': 2,
+    });
+    expect(argsOf(callTo('remoteDownload'))['keepAllVersions'], isTrue);
+
+    calls.clear();
+    await RemoteClient.pruneCache(keep, [
+      {'path': '/apks/a.apk', 'size': 1, 'modified': 2},
+    ]);
+    expect(argsOf(callTo('cachePrune'))['keepAllVersions'], isTrue);
+  });
+
+  test('deleteCacheById forwards the entry id', () async {
+    final freed = await RemoteClient.deleteCacheById('src1::/apks/a.apk#h:2');
+    expect(freed, 4321);
+    expect(
+      argsOf(callTo('cacheDeleteById'))['id'],
+      'src1::/apks/a.apk#h:2',
+    );
+  });
+
+  test('keepAllVersions round-trips through the source model', () {
+    expect(source.keepAllVersions, isFalse);
+    final keep = source.copyWith(keepAllVersions: true);
+    expect(keep.keepAllVersions, isTrue);
+    final restored = RemoteSource.fromMap(keep.toMap());
+    expect(restored.keepAllVersions, isTrue);
+    expect(RemoteSource.fromMap(source.toMap()).keepAllVersions, isFalse);
   });
 }

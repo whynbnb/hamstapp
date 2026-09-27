@@ -35,6 +35,7 @@ class RemoteApkDetailScreen extends StatefulWidget {
 
 class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
   Map<String, Map<String, dynamic>> _cache = {};
+  List<Map<String, dynamic>> _history = [];
   final Set<String> _busy = {};
   final Map<String, double?> _progress = {};
   final Map<String, Uint8List?> _icons = {};
@@ -47,8 +48,17 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
 
   Future<void> _loadCache() async {
     final cache = await RemoteClient.cacheIndex(widget.source);
+    final all = await RemoteClient.cacheIndexAll();
     if (!mounted) return;
-    setState(() => _cache = cache);
+    setState(() {
+      _cache = cache;
+      _history = all
+          .where(
+            (e) =>
+                e['sourceId'] == widget.source.id && e['historical'] == true,
+          )
+          .toList();
+    });
   }
 
   String _keyOf(Map<String, dynamic> f) =>
@@ -168,6 +178,11 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
     final pkg = _pkgOf(entry, state);
     final installed = pkg.isNotEmpty ? state.appByPackage(pkg) : null;
     final versions = _versions(state, pkg);
+    final history = pkg.isEmpty
+        ? const <Map<String, dynamic>>[]
+        : _history
+              .where((e) => ((e['packageName'] as String?) ?? '') == pkg)
+              .toList();
     final cachedForEntry = meta != null;
     final key = _keyOf(entry);
     final busy = _busy.contains(key);
@@ -233,11 +248,14 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
           _sectionTitle(
             pkg.isEmpty
                 ? s.t('历史版本（先获取信息以归组）')
-                : s.t('历史版本 · {n} 个', {'n': versions.length}),
+                : s.t('历史版本 · {n} 个', {
+                    'n': versions.length + history.length,
+                  }),
           ),
           ...versions.map(
             (f) => _versionTile(state, f, installed, current: f == entry),
           ),
+          ...history.map(_historyTile),
         ],
       ),
     );
@@ -427,6 +445,90 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
               child: LinearProgressIndicator(value: progress, minHeight: 3),
             ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _installCached(Map<String, dynamic> e) async {
+    final s = context.strings;
+    final path = (e['localPath'] as String?) ?? '';
+    if (path.isEmpty) {
+      _snack(s.t('缓存文件不存在'));
+      return;
+    }
+    final outcome = await installLocalApk(path);
+    if (!mounted) return;
+    switch (outcome) {
+      case InstallOutcome.handedOff:
+        _snack(s.t('已交给系统安装器'));
+      case InstallOutcome.permissionNeeded:
+        _snack(s.t('请先允许「安装未知应用」，然后重试'));
+      case InstallOutcome.failed:
+        _snack(s.t('无法调起系统安装器'));
+    }
+  }
+
+  Future<void> _deleteHistory(Map<String, dynamic> e) async {
+    final id = (e['id'] as String?) ?? '';
+    final freed = await RemoteClient.deleteCacheById(id);
+    await _loadCache();
+    if (!mounted) return;
+    _snack(
+      context.strings.t('已删除该项缓存（{size}）', {'size': Fmt.size(freed)}),
+    );
+  }
+
+  Widget _historyTile(Map<String, dynamic> e) {
+    final s = context.strings;
+    final key = (e['id'] as String?) ?? '';
+    final busy = _busy.contains(key);
+    final version = (e['versionName'] as String?)?.trim() ?? '';
+    final code = (e['versionCode'] as num?)?.toInt() ?? 0;
+    final title = version.isEmpty
+        ? ((e['name'] as String?) ?? '')
+        : 'v$version${code > 0 ? ' ($code)' : ''}';
+    return Card(
+      elevation: 0,
+      color: Theme.of(
+        context,
+      ).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+      child: ListTile(
+        contentPadding: const EdgeInsets.only(left: 12, right: 4),
+        leading: Icon(
+          Icons.inventory_2_outlined,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        title: Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+        subtitle: Text(
+          [
+            (e['name'] as String?) ?? '',
+            Fmt.size((e['size'] as num?)?.toInt() ?? 0),
+            s.t('历史缓存'),
+          ].join('\n'),
+          style: const TextStyle(height: 1.35),
+        ),
+        isThreeLine: true,
+        trailing: busy
+            ? const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    tooltip: s.t('安装'),
+                    icon: const Icon(Icons.download_for_offline_outlined),
+                    onPressed: () => _installCached(e),
+                  ),
+                  IconButton(
+                    tooltip: s.t('删除该项缓存'),
+                    icon: const Icon(Icons.close),
+                    onPressed: () => _deleteHistory(e),
+                  ),
+                ],
+              ),
       ),
     );
   }

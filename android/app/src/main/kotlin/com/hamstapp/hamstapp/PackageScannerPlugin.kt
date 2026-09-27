@@ -205,6 +205,14 @@ class PackageScannerPlugin(
                     mainHandler.post { result.success(freed) }
                 }
             }
+            "cacheDeleteById" -> {
+                val id = call.argument<String>("id") ?: ""
+                executor.execute {
+                    val freed = runCatching { cacheDeleteById(id) }
+                        .getOrDefault(0L)
+                    mainHandler.post { result.success(freed) }
+                }
+            }
             "cacheClear" -> executor.execute {
                 val freed = runCatching { cacheClear() }.getOrDefault(0L)
                 mainHandler.post { result.success(freed) }
@@ -616,6 +624,41 @@ class PackageScannerPlugin(
 
     private fun cacheKey(sourceId: String, remotePath: String) = "$sourceId::$remotePath"
 
+    /** Marker appended to a cache key when an old copy is kept as history. */
+    private val histMark = "#h:"
+
+    private fun isHistoricalKey(key: String) = key.contains(histMark)
+
+    /**
+     * Re-keys [obj] under a unique historical key so an outdated cached copy is
+     * kept instead of deleted (used when the source keeps all versions). The
+     * file itself is left in place.
+     */
+    private fun archiveEntry(cache: JSONObject, key: String, obj: JSONObject) {
+        if (isHistoricalKey(key)) return
+        val base = "$key$histMark${obj.optLong("modified", 0L)}"
+        var histKey = base
+        var seq = 0
+        while (cache.has(histKey)) {
+            seq++
+            histKey = "$base:$seq"
+        }
+        obj.put("historical", true)
+        cache.put(histKey, obj)
+        cache.remove(key)
+    }
+
+    private fun deleteCacheEntry(cache: JSONObject, key: String): Long {
+        val obj = cache.optJSONObject(key) ?: return 0L
+        var freed = 0L
+        val file = File(cacheDir(), obj.optString("file"))
+        if (file.exists() && file.delete()) freed += obj.optLong("size", 0L)
+        val icon = obj.optString("icon")
+        if (icon.isNotEmpty()) runCatching { File(cacheDir(), icon).delete() }
+        cache.remove(key)
+        return freed
+    }
+
     private fun safeName(name: String): String {
         val s = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
         return s.ifEmpty { "download.apk" }
@@ -635,6 +678,7 @@ class PackageScannerPlugin(
         val remoteSize = longArg(config, "size", -1L)
         val remoteModified = longArg(config, "modified", 0L)
         val force = boolArg(config, "force")
+        val keepAll = boolArg(config, "keepAllVersions")
         val key = cacheKey(sourceId, remotePath)
 
         val cache = loadCache()
@@ -652,14 +696,20 @@ class PackageScannerPlugin(
             if (!force && local.exists() && sizeSame && modifiedSame) {
                 return local.absolutePath
             }
-            // Remote changed (or a refresh was forced): drop the stale copy.
-            local.delete()
-            val oldIcon = existing.optString("icon")
-            if (oldIcon.isNotEmpty()) runCatching { File(cacheDir(), oldIcon).delete() }
-            cache.remove(key)
+            // Remote changed (or a refresh was forced): drop the stale copy, or
+            // keep it as history when the source keeps all versions.
+            if (keepAll && local.exists()) {
+                archiveEntry(cache, key, existing)
+            } else {
+                local.delete()
+                val oldIcon = existing.optString("icon")
+                if (oldIcon.isNotEmpty()) runCatching { File(cacheDir(), oldIcon).delete() }
+                cache.remove(key)
+            }
         }
 
-        val fileName = "${Integer.toHexString(key.hashCode())}_${safeName(name)}"
+        val fileName =
+            "${Integer.toHexString(key.hashCode())}_${remoteModified}_${remoteSize}_${safeName(name)}"
         val target = File(cacheDir(), fileName)
         val downloadId = strArg(config, "downloadId")
         val onProgress: (Long, Long) -> Unit = { received, total ->
@@ -911,7 +961,7 @@ class PackageScannerPlugin(
         val keys = cache.keys()
         while (keys.hasNext()) {
             val key = keys.next()
-            if (!key.startsWith(prefix)) continue
+            if (!key.startsWith(prefix) || isHistoricalKey(key)) continue
             val obj = cache.optJSONObject(key) ?: continue
             val entry = cacheEntryMap(key, obj) ?: continue
             total += (entry["size"] as? Long) ?: 0L
@@ -941,6 +991,8 @@ class PackageScannerPlugin(
         if (!file.exists()) return null
         val iconFile = File(cacheDir(), obj.optString("icon"))
         return mapOf(
+            "id" to key,
+            "historical" to obj.optBoolean("historical", false),
             "sourceId" to key.substringBefore("::"),
             "path" to obj.optString("path"),
             "rel" to obj.optString("rel"),
@@ -972,10 +1024,11 @@ class PackageScannerPlugin(
         }
         val cache = loadCache()
         var freed = 0L
+        val keepAll = boolArg(payload, "keepAllVersions")
         val prefix = "$sourceId::"
         val keys = cache.keys().asSequence().toList()
         for (key in keys) {
-            if (!key.startsWith(prefix)) continue
+            if (!key.startsWith(prefix) || isHistoricalKey(key)) continue
             val remotePath = key.substring(prefix.length)
             val obj = cache.optJSONObject(key) ?: continue
             val remote = remotes[remotePath]
@@ -989,28 +1042,43 @@ class PackageScannerPlugin(
                     cachedModified == remoteModified)
             if (fresh) continue
             val file = File(cacheDir(), obj.optString("file"))
-            if (file.exists() && file.delete()) freed += obj.optLong("size", 0L)
-            val icon = obj.optString("icon")
-            if (icon.isNotEmpty()) runCatching { File(cacheDir(), icon).delete() }
-            cache.remove(key)
+            if (keepAll && file.exists()) {
+                // Keep the outdated copy as history instead of deleting it.
+                archiveEntry(cache, key, obj)
+            } else {
+                if (file.exists() && file.delete()) freed += obj.optLong("size", 0L)
+                val icon = obj.optString("icon")
+                if (icon.isNotEmpty()) runCatching { File(cacheDir(), icon).delete() }
+                cache.remove(key)
+            }
         }
         saveCache(cache)
         return freed
     }
 
-    /** Deletes a single cached APK (by source + remote path). Returns freed bytes. */
+    /**
+     * Deletes a cached APK (by source + remote path) together with any kept
+     * historical copies of the same file. Returns freed bytes.
+     */
     private fun cacheDelete(sourceId: String, remotePath: String): Long {
         if (remotePath.isEmpty()) return 0L
         val cache = loadCache()
-        val key = cacheKey(sourceId, remotePath)
+        val prefix = cacheKey(sourceId, remotePath)
         var freed = 0L
-        cache.optJSONObject(key)?.let { obj ->
-            val file = File(cacheDir(), obj.optString("file"))
-            if (file.exists() && file.delete()) freed += obj.optLong("size", 0L)
-            val icon = obj.optString("icon")
-            if (icon.isNotEmpty()) runCatching { File(cacheDir(), icon).delete() }
+        val keys = cache.keys().asSequence().toList()
+        for (key in keys) {
+            if (key != prefix && !key.startsWith("$prefix$histMark")) continue
+            freed += deleteCacheEntry(cache, key)
         }
-        cache.remove(key)
+        saveCache(cache)
+        return freed
+    }
+
+    /** Deletes one cache entry by its exact key/id. Returns freed bytes. */
+    private fun cacheDeleteById(id: String): Long {
+        if (id.isEmpty()) return 0L
+        val cache = loadCache()
+        val freed = deleteCacheEntry(cache, id)
         saveCache(cache)
         return freed
     }

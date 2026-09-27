@@ -22,6 +22,11 @@ class RemoteSource {
   /// Use HTTPS/TLS (WebDAV only).
   bool secure;
 
+  /// Keep every downloaded version instead of only the latest one. When on,
+  /// an outdated cached APK is archived rather than replaced, so older builds
+  /// remain available to install offline.
+  bool keepAllVersions;
+
   RemoteSource({
     this.id = '',
     this.name = '',
@@ -34,6 +39,7 @@ class RemoteSource {
     this.anonymous = true,
     this.domain = '',
     this.secure = false,
+    this.keepAllVersions = false,
   });
 
   factory RemoteSource.fromMap(Map<String, dynamic> map) {
@@ -51,6 +57,7 @@ class RemoteSource {
       anonymous: map['anonymous'] as bool? ?? true,
       domain: map['domain'] as String? ?? '',
       secure: secure,
+      keepAllVersions: map['keepAllVersions'] as bool? ?? false,
     );
   }
 
@@ -66,6 +73,7 @@ class RemoteSource {
         'anonymous': anonymous,
         'domain': domain,
         'secure': secure,
+        'keepAllVersions': keepAllVersions,
       };
 
   bool get isSmb => protocol == 'smb' || protocol == 'samba';
@@ -128,6 +136,7 @@ class RemoteSource {
     bool? anonymous,
     String? domain,
     bool? secure,
+    bool? keepAllVersions,
   }) =>
       RemoteSource(
         id: id ?? this.id,
@@ -141,5 +150,6 @@ class RemoteSource {
         anonymous: anonymous ?? this.anonymous,
         domain: domain ?? this.domain,
         secure: secure ?? this.secure,
+        keepAllVersions: keepAllVersions ?? this.keepAllVersions,
       );
 }

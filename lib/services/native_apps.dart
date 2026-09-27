@@ -118,6 +118,7 @@ class NativeApps {
     required int size,
     required int modified,
     bool force = false,
+    bool keepAllVersions = false,
     void Function(int received, int total)? onProgress,
   }) async {
     _ensureProgressHandler();
@@ -133,6 +134,7 @@ class NativeApps {
         'size': size,
         'modified': modified,
         'force': force,
+        'keepAllVersions': keepAllVersions,
         'downloadId': id,
       });
       if (path == null || path.isEmpty) {
@@ -170,10 +172,12 @@ class NativeApps {
 
   /// Drops cached APKs whose remote file changed or disappeared. Returns freed bytes.
   static Future<int> cachePrune(
-      String sourceId, List<Map<String, dynamic>> entries) async {
+      String sourceId, List<Map<String, dynamic>> entries,
+      {bool keepAllVersions = false}) async {
     final freed = await _channel.invokeMethod<num>('cachePrune', {
       'sourceId': sourceId,
       'entries': entries,
+      'keepAllVersions': keepAllVersions,
     });
     return freed?.toInt() ?? 0;
   }
@@ -184,6 +188,12 @@ class NativeApps {
       'sourceId': sourceId,
       'remotePath': remotePath,
     });
+    return freed?.toInt() ?? 0;
+  }
+
+  /// Deletes one cache entry by its unique id. Returns freed bytes.
+  static Future<int> cacheDeleteById(String id) async {
+    final freed = await _channel.invokeMethod<num>('cacheDeleteById', {'id': id});
     return freed?.toInt() ?? 0;
   }
 

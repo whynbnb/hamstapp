@@ -149,6 +149,26 @@ void main() {
           'totalBytes': 30,
         };
       }
+      if (call.method == 'cacheIndexAll') {
+        return {
+          'entries': [
+            {
+              'id': 's1::/v0.apk#h:0',
+              'historical': true,
+              'sourceId': 's1',
+              'path': '/v0.apk',
+              'name': 'v0.apk',
+              'packageName': 'com.a',
+              'appName': 'Alpha',
+              'versionName': '0.9',
+              'versionCode': 9,
+              'size': 5,
+              'localPath': '/c/v0.apk',
+            },
+          ],
+          'totalBytes': 5,
+        };
+      }
       return null;
     });
 
@@ -179,6 +199,8 @@ void main() {
     expect(find.textContaining('历史版本'), findsOneWidget);
     expect(find.text('v2.0 (2)'), findsOneWidget);
     expect(find.text('v1.0 (1)'), findsOneWidget);
+    expect(find.text('v0.9 (9)'), findsOneWidget);
+    expect(find.textContaining('历史缓存'), findsOneWidget);
     expect(find.text('包名'), findsOneWidget);
   });
 

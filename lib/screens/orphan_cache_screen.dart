@@ -79,10 +79,13 @@ class _OrphanCacheScreenState extends State<OrphanCacheScreen> {
   }
 
   Future<void> _delete(Map<String, dynamic> e) async {
-    final freed = await NativeApps.cacheDelete(
-      (e['sourceId'] as String?) ?? 'default',
-      (e['path'] as String?) ?? '',
-    );
+    final id = (e['id'] as String?) ?? '';
+    final freed = id.isNotEmpty
+        ? await RemoteClient.deleteCacheById(id)
+        : await NativeApps.cacheDelete(
+            (e['sourceId'] as String?) ?? 'default',
+            (e['path'] as String?) ?? '',
+          );
     await _load();
     if (!mounted) return;
     _snack(
@@ -93,10 +96,13 @@ class _OrphanCacheScreenState extends State<OrphanCacheScreen> {
   Future<void> _deleteGroup(List<Map<String, dynamic>> group) async {
     var freed = 0;
     for (final e in group) {
-      freed += await NativeApps.cacheDelete(
-        (e['sourceId'] as String?) ?? 'default',
-        (e['path'] as String?) ?? '',
-      );
+      final id = (e['id'] as String?) ?? '';
+      freed += id.isNotEmpty
+          ? await RemoteClient.deleteCacheById(id)
+          : await NativeApps.cacheDelete(
+              (e['sourceId'] as String?) ?? 'default',
+              (e['path'] as String?) ?? '',
+            );
     }
     await _load();
     if (!mounted) return;

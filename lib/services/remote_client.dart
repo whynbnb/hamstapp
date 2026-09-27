@@ -51,6 +51,7 @@ class RemoteClient {
       size: (entry['size'] as num?)?.toInt() ?? 0,
       modified: (entry['modified'] as num?)?.toInt() ?? 0,
       force: force,
+      keepAllVersions: source.keepAllVersions,
       onProgress: onProgress,
     );
   }
@@ -79,6 +80,8 @@ class RemoteClient {
   }
 
   /// Drops cached APKs whose remote file changed (size or mtime) or disappeared.
+  /// With [RemoteSource.keepAllVersions] the outdated copies are kept as history
+  /// instead of being deleted.
   static Future<int> pruneCache(
       RemoteSource source, List<Map<String, dynamic>> files) {
     return NativeApps.cachePrune(
@@ -90,6 +93,7 @@ class RemoteClient {
                 'modified': f['modified'],
               })
           .toList(growable: false),
+      keepAllVersions: source.keepAllVersions,
     );
   }
 
@@ -98,6 +102,12 @@ class RemoteClient {
   static Future<int> deleteCache(RemoteSource source, String remotePath) {
     if (remotePath.isEmpty) return Future.value(0);
     return NativeApps.cacheDelete(source.id, remotePath);
+  }
+
+  /// Deletes one cache entry (current or historical) by its unique id.
+  static Future<int> deleteCacheById(String id) {
+    if (id.isEmpty) return Future.value(0);
+    return NativeApps.cacheDeleteById(id);
   }
 
   /// Deletes the whole download cache. Returns freed bytes.

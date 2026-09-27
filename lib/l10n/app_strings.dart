@@ -467,6 +467,12 @@ const Map<String, String> _en = <String, String>{
   '无法调起系统安装器': 'Could not open the system installer',
   '已获取 APK 信息': 'APK info loaded',
   '已缓存': 'Cached',
+  '缓存版本': 'Cache retention',
+  '仅保留最新版': 'Latest only',
+  '全部保留': 'Keep all',
+  '「仅保留最新版」用新版覆盖缓存；「全部保留」保留历史版本以便离线重装。':
+      '"Latest only" replaces the cached copy; "Keep all" archives older versions for offline rollback.',
+  '历史缓存': 'Archived',
   // remote APK detail
   '文件信息': 'File info',
   '文件名': 'File name',
