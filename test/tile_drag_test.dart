@@ -474,6 +474,83 @@ void main() {
     expect(state.metaFor('com.a').categoryIds, isNot(contains('c1')));
   });
 
+  testWidgets('category picker keeps the search after toggling an app', (
+    tester,
+  ) async {
+    final cat = AppCategory(id: 'c1', name: '工具', emoji: '🛠');
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'Alpha'), _ai('com.b', 'Beta')]
+      ..categories = [cat];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showCategoryPicker(context, state, cat),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.enterText(find.byType(TextField), 'Alpha');
+    await tester.pump();
+    expect(find.text('Beta'), findsNothing);
+
+    // Toggling membership must not clear the query / reset the results.
+    await tester.tap(find.widgetWithText(ListTile, 'Alpha'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Beta'), findsNothing);
+    expect(state.metaFor('com.a').categoryIds, contains('c1'));
+  });
+
+  testWidgets('category picker search can be cleared in one tap', (
+    tester,
+  ) async {
+    final cat = AppCategory(id: 'c1', name: '工具', emoji: '🛠');
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'Alpha'), _ai('com.b', 'Beta')]
+      ..categories = [cat];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => ElevatedButton(
+                onPressed: () => showCategoryPicker(context, state, cat),
+                child: const Text('open'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('open'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    await tester.enterText(find.byType(TextField), 'Alpha');
+    await tester.pump();
+    expect(find.text('Beta'), findsNothing);
+
+    await tester.tap(find.byIcon(Icons.clear));
+    await tester.pump();
+    expect(find.text('Beta'), findsOneWidget);
+  });
+
   testWidgets('category editor accepts a custom emoji', (tester) async {
     final state = AppState(_MemStorage())..initialized = true;
 

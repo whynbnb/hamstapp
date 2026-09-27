@@ -8,6 +8,7 @@ import '../utils/actions.dart';
 import '../utils/search.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/category_editor.dart';
+import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 
 class CategoriesTab extends StatelessWidget {
@@ -274,131 +275,134 @@ void showCategoryPicker(
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    builder: (ctx) {
-      var query = '';
-      return StatefulBuilder(
-        builder: (ctx, setLocal) {
-          final apps = AppSearch.rank(state.apps, query, limit: 300);
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.8,
-            builder: (ctx, scrollController) {
-              final memberCount = state.apps
-                  .where(
-                    (a) => state
-                        .metaFor(a.packageName)
-                        .categoryIds
-                        .contains(category.id),
-                  )
-                  .length;
-              return Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            ctx.strings.t(
-                              '添加到「{emoji} {name}」',
-                              {
-                                'emoji': category.emoji,
-                                'name': category.name,
-                              },
-                            ),
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            ctx.strings.t(
-                              '已添加 {count} 个应用 · 点击行切换',
-                              {'count': memberCount},
-                            ),
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: TextField(
-                      autofocus: true,
-                      onChanged: (v) => setLocal(() => query = v),
-                      decoration: InputDecoration(
-                        hintText: ctx.strings.t('搜索应用'),
-                        prefixIcon: const Icon(Icons.search),
-                        filled: true,
-                        isDense: true,
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      controller: scrollController,
-                      itemCount: apps.length,
-                      itemBuilder: (context, i) {
-                        final app = apps[i];
-                        final inCat = state
-                            .metaFor(app.packageName)
-                            .categoryIds
-                            .contains(category.id);
-                        return ListTile(
-                          leading: AppIcon(
-                            packageName: app.packageName,
-                            label: app.appName,
-                          ),
-                          title: Text(app.appName),
-                          subtitle: Text(
-                            app.packageName,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          trailing: inCat
-                              ? const Icon(
-                                  Icons.check_circle,
-                                  color: Colors.green,
-                                )
-                              : const Icon(
-                                  Icons.add_circle_outline,
-                                  color: Colors.grey,
-                                ),
-                          onTap: () {
-                            final ids = List<String>.from(
-                              state.metaFor(app.packageName).categoryIds,
-                            );
-                            if (inCat) {
-                              ids.remove(category.id);
-                            } else {
-                              ids.add(category.id);
-                            }
-                            state.updateMeta(app.packageName, categoryIds: ids);
-                            setLocal(() {});
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      );
-    },
+    builder: (_) => _CategoryPickerSheet(state: state, category: category),
   );
+}
+
+class _CategoryPickerSheet extends StatefulWidget {
+  const _CategoryPickerSheet({required this.state, required this.category});
+
+  final AppState state;
+  final AppCategory category;
+
+  @override
+  State<_CategoryPickerSheet> createState() => _CategoryPickerSheetState();
+}
+
+class _CategoryPickerSheetState extends State<_CategoryPickerSheet> {
+  final TextEditingController _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
+    final category = widget.category;
+    final apps = AppSearch.rank(state.apps, _query, limit: 300);
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.8,
+      builder: (ctx, scrollController) {
+        final memberCount = state.apps
+            .where(
+              (a) =>
+                  state.metaFor(a.packageName).categoryIds.contains(category.id),
+            )
+            .length;
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      ctx.strings.t(
+                        '添加到「{emoji} {name}」',
+                        {'emoji': category.emoji, 'name': category.name},
+                      ),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      ctx.strings.t(
+                        '已添加 {count} 个应用 · 点击行切换',
+                        {'count': memberCount},
+                      ),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(12),
+              child: SearchField(
+                controller: _search,
+                hintText: ctx.strings.t('搜索应用'),
+                autofocus: true,
+                onChanged: (v) => setState(() => _query = v),
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                controller: scrollController,
+                itemCount: apps.length,
+                itemBuilder: (context, i) {
+                  final app = apps[i];
+                  final inCat = state
+                      .metaFor(app.packageName)
+                      .categoryIds
+                      .contains(category.id);
+                  return ListTile(
+                    leading: AppIcon(
+                      packageName: app.packageName,
+                      label: app.appName,
+                    ),
+                    title: Text(app.appName),
+                    subtitle: Text(
+                      app.packageName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: inCat
+                        ? const Icon(Icons.check_circle, color: Colors.green)
+                        : const Icon(Icons.add_circle_outline, color: Colors.grey),
+                    onTap: () {
+                      final ids = List<String>.from(
+                        state.metaFor(app.packageName).categoryIds,
+                      );
+                      if (inCat) {
+                        ids.remove(category.id);
+                      } else {
+                        ids.add(category.id);
+                      }
+                      state.updateMeta(app.packageName, categoryIds: ids);
+                      setState(() {});
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }
 
 /// Bottom sheet to pin/unpin apps on the currently visible tile page.
@@ -409,160 +413,167 @@ void showPinSheet(BuildContext context, AppState state) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    builder: (ctx) {
-      var query = '';
-      return StatefulBuilder(
-        builder: (ctx, setLocal) {
-          final apps = AppSearch.rank(state.apps, query, limit: 150);
-          final pages = state.tilePages;
-          final pageIndex = pages.isEmpty
-              ? -1
-              : state.currentTilePageIndex.clamp(0, pages.length - 1);
-          final pageName = pageIndex < 0
-              ? ctx.strings.t('（无磁贴页）')
-              : pages[pageIndex].name;
-
-          void snack(String text) {
-            final messenger = ScaffoldMessenger.of(context);
-            messenger.hideCurrentSnackBar();
-            messenger.showSnackBar(
-              SnackBar(
-                content: Text(text),
-                duration: const Duration(milliseconds: 900),
-              ),
-            );
-          }
-
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.8,
-            builder: (ctx, scrollController) => Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          ctx.strings.t('固定到磁贴'),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          ctx.strings.t(
-                            '当前页：{page} · 点击固定/取消，长按再添加一个',
-                            {'page': pageName},
-                          ),
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: TextField(
-                    autofocus: true,
-                    onChanged: (v) => setLocal(() => query = v),
-                    decoration: InputDecoration(
-                      hintText: ctx.strings.t('搜索应用'),
-                      prefixIcon: const Icon(Icons.search),
-                      filled: true,
-                      isDense: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: scrollController,
-                    itemCount: apps.length,
-                    itemBuilder: (context, i) {
-                      final app = apps[i];
-                      final count = state.pinCountOnCurrentPage(
-                        app.packageName,
-                      );
-                      final pinned = count > 0;
-                      return ListTile(
-                        leading: AppIcon(
-                          packageName: app.packageName,
-                          label: app.appName,
-                        ),
-                        title: Text(app.appName),
-                        subtitle: Text(
-                          app.packageName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: pinned
-                            ? Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(
-                                    Icons.push_pin,
-                                    color: Colors.orange,
-                                    size: 18,
-                                  ),
-                                  if (count > 1) ...[
-                                    const SizedBox(width: 4),
-                                    Text('×$count'),
-                                  ],
-                                ],
-                              )
-                            : const Icon(
-                                Icons.add_circle_outline,
-                                color: Colors.grey,
-                              ),
-                        onTap: () {
-                          if (pinned) {
-                            state.removeOneTileOnCurrentPage(app.packageName);
-                            setLocal(() {});
-                            snack(ctx.strings.t('已取消固定'));
-                          } else {
-                            state.addTile(
-                              app.packageName,
-                              pageId: state.currentTilePageId,
-                            );
-                            setLocal(() {});
-                            snack(
-                              ctx.strings.t('已固定到「{page}」', {
-                                'page': pageName,
-                              }),
-                            );
-                          }
-                        },
-                        onLongPress: () {
-                          state.addTile(
-                            app.packageName,
-                            pageId: state.currentTilePageId,
-                          );
-                          setLocal(() {});
-                          snack(
-                            ctx.strings.t('已再添加一个到「{page}」', {
-                              'page': pageName,
-                            }),
-                          );
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    },
+    builder: (_) => _PinSheet(state: state),
   );
+}
+
+class _PinSheet extends StatefulWidget {
+  const _PinSheet({required this.state});
+
+  final AppState state;
+
+  @override
+  State<_PinSheet> createState() => _PinSheetState();
+}
+
+class _PinSheetState extends State<_PinSheet> {
+  final TextEditingController _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  void _snack(String text) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(text),
+          duration: const Duration(milliseconds: 900),
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
+    final apps = AppSearch.rank(state.apps, _query, limit: 150);
+    final pages = state.tilePages;
+    final pageIndex = pages.isEmpty
+        ? -1
+        : state.currentTilePageIndex.clamp(0, pages.length - 1);
+    final pageName = pageIndex < 0
+        ? context.strings.t('（无磁贴页）')
+        : pages[pageIndex].name;
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.8,
+      builder: (ctx, scrollController) => Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    ctx.strings.t('固定到磁贴'),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    ctx.strings.t(
+                      '当前页：{page} · 点击固定/取消，长按再添加一个',
+                      {'page': pageName},
+                    ),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SearchField(
+              controller: _search,
+              hintText: ctx.strings.t('搜索应用'),
+              autofocus: true,
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              controller: scrollController,
+              itemCount: apps.length,
+              itemBuilder: (context, i) {
+                final app = apps[i];
+                final count = state.pinCountOnCurrentPage(app.packageName);
+                final pinned = count > 0;
+                return ListTile(
+                  leading: AppIcon(
+                    packageName: app.packageName,
+                    label: app.appName,
+                  ),
+                  title: Text(app.appName),
+                  subtitle: Text(
+                    app.packageName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: pinned
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.push_pin,
+                              color: Colors.orange,
+                              size: 18,
+                            ),
+                            if (count > 1) ...[
+                              const SizedBox(width: 4),
+                              Text('×$count'),
+                            ],
+                          ],
+                        )
+                      : const Icon(
+                          Icons.add_circle_outline,
+                          color: Colors.grey,
+                        ),
+                  onTap: () {
+                    if (pinned) {
+                      state.removeOneTileOnCurrentPage(app.packageName);
+                      setState(() {});
+                      _snack(ctx.strings.t('已取消固定'));
+                    } else {
+                      state.addTile(
+                        app.packageName,
+                        pageId: state.currentTilePageId,
+                      );
+                      setState(() {});
+                      _snack(
+                        ctx.strings.t('已固定到「{page}」', {'page': pageName}),
+                      );
+                    }
+                  },
+                  onLongPress: () {
+                    state.addTile(
+                      app.packageName,
+                      pageId: state.currentTilePageId,
+                    );
+                    setState(() {});
+                    _snack(
+                      ctx.strings.t('已再添加一个到「{page}」', {
+                        'page': pageName,
+                      }),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

@@ -15,6 +15,7 @@ import '../utils/tile_layout.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/category_editor.dart';
 import '../widgets/floating_nav.dart';
+import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 import 'categories_tab.dart';
 
@@ -1586,83 +1587,94 @@ void showFavoriteSheet(BuildContext context, AppState state) {
   showModalBottomSheet(
     context: context,
     isScrollControlled: true,
-    builder: (ctx) {
-      var query = '';
-      return StatefulBuilder(
-        builder: (ctx, setLocal) {
-          final apps = AppSearch.rank(state.apps, query, limit: 150);
-          return DraggableScrollableSheet(
-            expand: false,
-            initialChildSize: 0.8,
-            builder: (ctx, scrollController) => Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      context.strings.t('添加收藏'),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: TextField(
-                    autofocus: true,
-                    onChanged: (v) => setLocal(() => query = v),
-                    decoration: InputDecoration(
-                      hintText: context.strings.t('搜索应用'),
-                      prefixIcon: const Icon(Icons.search),
-                      filled: true,
-                      isDense: true,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
-                      ),
-                    ),
-                  ),
-                ),
-                Expanded(
-                  child: ListView.builder(
-                    controller: scrollController,
-                    itemCount: apps.length,
-                    itemBuilder: (context, i) {
-                      final app = apps[i];
-                      final fav = state.metaFor(app.packageName).favorite;
-                      return ListTile(
-                        leading: AppIcon(
-                          packageName: app.packageName,
-                          label: app.appName,
-                        ),
-                        title: Text(app.appName),
-                        subtitle: Text(
-                          app.packageName,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        trailing: Icon(
-                          fav ? Icons.star_rounded : Icons.star_border_rounded,
-                          color: fav ? Colors.orange : Colors.grey,
-                        ),
-                        onTap: () {
-                          state.updateMeta(app.packageName, favorite: !fav);
-                          setLocal(() {});
-                        },
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          );
-        },
-      );
-    },
+    builder: (_) => _FavoriteSheet(state: state),
   );
+}
+
+class _FavoriteSheet extends StatefulWidget {
+  const _FavoriteSheet({required this.state});
+
+  final AppState state;
+
+  @override
+  State<_FavoriteSheet> createState() => _FavoriteSheetState();
+}
+
+class _FavoriteSheetState extends State<_FavoriteSheet> {
+  final TextEditingController _search = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final state = widget.state;
+    final apps = AppSearch.rank(state.apps, _query, limit: 150);
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.8,
+      builder: (ctx, scrollController) => Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                ctx.strings.t('添加收藏'),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SearchField(
+              controller: _search,
+              hintText: ctx.strings.t('搜索应用'),
+              autofocus: true,
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              controller: scrollController,
+              itemCount: apps.length,
+              itemBuilder: (context, i) {
+                final app = apps[i];
+                final fav = state.metaFor(app.packageName).favorite;
+                return ListTile(
+                  leading: AppIcon(
+                    packageName: app.packageName,
+                    label: app.appName,
+                  ),
+                  title: Text(app.appName),
+                  subtitle: Text(
+                    app.packageName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: Icon(
+                    fav ? Icons.star_rounded : Icons.star_border_rounded,
+                    color: fav ? Colors.orange : Colors.grey,
+                  ),
+                  onTap: () {
+                    state.updateMeta(app.packageName, favorite: !fav);
+                    setState(() {});
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _FavoritesTab extends StatelessWidget {
