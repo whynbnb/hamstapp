@@ -162,6 +162,12 @@ class NativeApps {
     return (r ?? const {}).cast<String, dynamic>();
   }
 
+  /// Cache index across all sources; each entry carries its `sourceId`.
+  static Future<Map<String, dynamic>> cacheIndexAll() async {
+    final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('cacheIndexAll');
+    return (r ?? const {}).cast<String, dynamic>();
+  }
+
   /// Drops cached APKs whose remote file changed or disappeared. Returns freed bytes.
   static Future<int> cachePrune(
       String sourceId, List<Map<String, dynamic>> entries) async {
@@ -190,6 +196,20 @@ class NativeApps {
   /// Hands a downloaded APK to the system package installer.
   static Future<bool> installApk(String path) async {
     final ok = await _channel.invokeMethod<bool>('installApk', {'path': path});
+    return ok ?? false;
+  }
+
+  /// Whether this app is allowed to install unknown packages (API 26+).
+  static Future<bool> canInstallPackages() async {
+    final ok = await _channel.invokeMethod<bool>('canInstallPackages');
+    return ok ?? true;
+  }
+
+  /// Opens the system "install unknown apps" screen for this app.
+  static Future<bool> openInstallPermissionSettings() async {
+    final ok = await _channel.invokeMethod<bool>(
+      'openInstallPermissionSettings',
+    );
     return ok ?? false;
   }
 

@@ -183,6 +183,11 @@ class PackageScannerPlugin(
                     mainHandler.post { result.success(payload) }
                 }
             }
+            "cacheIndexAll" -> executor.execute {
+                val payload = runCatching { cacheIndexAllPayload() }
+                    .getOrElse { emptyMap<String, Any?>() }
+                mainHandler.post { result.success(payload) }
+            }
             "cachePrune" -> {
                 val sourceId = call.argument<String>("sourceId") ?: "default"
                 val entries = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
@@ -207,6 +212,12 @@ class PackageScannerPlugin(
             "installApk" -> {
                 val path = call.argument<String>("path")
                 mainHandler.post { result.success(path != null && installApk(path)) }
+            }
+            "canInstallPackages" -> {
+                mainHandler.post { result.success(canInstallPackages()) }
+            }
+            "openInstallPermissionSettings" -> {
+                mainHandler.post { result.success(openInstallPermissionSettings()) }
             }
             "shareApk" -> {
                 val path = call.argument<String>("path")
@@ -902,29 +913,49 @@ class PackageScannerPlugin(
             val key = keys.next()
             if (!key.startsWith(prefix)) continue
             val obj = cache.optJSONObject(key) ?: continue
-            val file = File(cacheDir(), obj.optString("file"))
-            if (!file.exists()) continue
-            total += file.length()
-            val iconFile = File(cacheDir(), obj.optString("icon"))
-            entries.add(
-                mapOf(
-                    "path" to obj.optString("path"),
-                    "rel" to obj.optString("rel"),
-                    "name" to obj.optString("name"),
-                    "localPath" to file.absolutePath,
-                    "iconPath" to if (iconFile.exists()) iconFile.absolutePath else "",
-                    "size" to file.length(),
-                    "modified" to obj.optLong("modified", 0L),
-                    "packageName" to obj.optString("packageName"),
-                    "appName" to obj.optString("appName"),
-                    "versionName" to obj.optString("versionName"),
-                    "versionCode" to obj.optLong("versionCode", 0L),
-                    "minSdk" to obj.optInt("minSdk", 0),
-                    "targetSdk" to obj.optInt("targetSdk", 0)
-                )
-            )
+            val entry = cacheEntryMap(key, obj) ?: continue
+            total += (entry["size"] as? Long) ?: 0L
+            entries.add(entry)
         }
         return mapOf("entries" to entries, "totalBytes" to total)
+    }
+
+    /** Every cached APK across all sources, each tagged with its `sourceId`. */
+    private fun cacheIndexAllPayload(): Map<String, Any?> {
+        val cache = loadCache()
+        val entries = ArrayList<Map<String, Any?>>()
+        var total = 0L
+        val keys = cache.keys()
+        while (keys.hasNext()) {
+            val key = keys.next()
+            val obj = cache.optJSONObject(key) ?: continue
+            val entry = cacheEntryMap(key, obj) ?: continue
+            total += (entry["size"] as? Long) ?: 0L
+            entries.add(entry)
+        }
+        return mapOf("entries" to entries, "totalBytes" to total)
+    }
+
+    private fun cacheEntryMap(key: String, obj: JSONObject): Map<String, Any?>? {
+        val file = File(cacheDir(), obj.optString("file"))
+        if (!file.exists()) return null
+        val iconFile = File(cacheDir(), obj.optString("icon"))
+        return mapOf(
+            "sourceId" to key.substringBefore("::"),
+            "path" to obj.optString("path"),
+            "rel" to obj.optString("rel"),
+            "name" to obj.optString("name"),
+            "localPath" to file.absolutePath,
+            "iconPath" to if (iconFile.exists()) iconFile.absolutePath else "",
+            "size" to file.length(),
+            "modified" to obj.optLong("modified", 0L),
+            "packageName" to obj.optString("packageName"),
+            "appName" to obj.optString("appName"),
+            "versionName" to obj.optString("versionName"),
+            "versionCode" to obj.optLong("versionCode", 0L),
+            "minSdk" to obj.optInt("minSdk", 0),
+            "targetSdk" to obj.optInt("targetSdk", 0)
+        )
     }
 
     /**
@@ -1016,6 +1047,30 @@ class PackageScannerPlugin(
         } catch (t: Throwable) {
             false
         }
+    }
+
+    /** Whether the app is allowed to install unknown packages (API 26+). */
+    private fun canInstallPackages(): Boolean = if (
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+    ) {
+        try {
+            context.packageManager.canRequestPackageInstalls()
+        } catch (_: Throwable) {
+            false
+        }
+    } else {
+        true
+    }
+
+    /** Sends the user to the "install unknown apps" screen for this app. */
+    private fun openInstallPermissionSettings(): Boolean = try {
+        val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+            .setData(Uri.parse("package:${context.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        context.startActivity(intent)
+        true
+    } catch (_: Throwable) {
+        false
     }
 
     /**

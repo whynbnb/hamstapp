@@ -7,11 +7,13 @@ import 'package:provider/provider.dart';
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
 import '../models/remote_source.dart';
-import '../services/native_apps.dart';
 import '../services/remote_client.dart';
 import '../state/app_state.dart';
 import '../utils/format.dart';
+import '../utils/install_helper.dart';
 import '../widgets/app_icon.dart';
+import 'orphan_cache_screen.dart';
+import 'remote_apk_detail_screen.dart';
 import 'remote_source_screen.dart';
 
 /// Remote APK sync: one tab per configured source (FTP / Samba / WebDAV),
@@ -140,20 +142,35 @@ class _SyncScreenState extends State<SyncScreen> with TickerProviderStateMixin {
             icon: const Icon(Icons.add),
             onPressed: () => _openEditor(null),
           ),
-          if (sources.isNotEmpty)
-            PopupMenuButton<String>(
-              onSelected: (v) {
-                final active = state.remoteSource;
-                switch (v) {
-                  case 'edit':
-                    _openEditor(active);
-                  case 'delete':
-                    _confirmDelete(state, active);
-                  case 'clear':
-                    _confirmClearCache();
-                }
-              },
-              itemBuilder: (_) => [
+          PopupMenuButton<String>(
+            onSelected: (v) {
+              final active = state.remoteSource;
+              switch (v) {
+                case 'orphans':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const OrphanCacheScreen(),
+                    ),
+                  );
+                case 'edit':
+                  _openEditor(active);
+                case 'delete':
+                  _confirmDelete(state, active);
+                case 'clear':
+                  _confirmClearCache();
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'orphans',
+                child: ListTile(
+                  leading: const Icon(Icons.inventory_2_outlined),
+                  title: Text(context.strings.t('孤包列表')),
+                ),
+              ),
+              if (sources.isNotEmpty) ...[
+                const PopupMenuDivider(),
                 PopupMenuItem(
                   value: 'edit',
                   child: ListTile(
@@ -176,7 +193,8 @@ class _SyncScreenState extends State<SyncScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ],
-            ),
+            ],
+          ),
         ],
         bottom: sources.isEmpty
             ? null
@@ -367,12 +385,34 @@ class _SyncSourceTabState extends State<_SyncSourceTab>
     final s = context.strings;
     try {
       final local = await _downloadFile(f);
-      final ok = await NativeApps.installApk(local);
-      if (!ok) throw StateError(s.t('无法调起系统安装器'));
-      _snack(s.t('已交给系统安装器：{path}', {'path': f['name']}));
+      final outcome = await installLocalApk(local);
+      switch (outcome) {
+        case InstallOutcome.handedOff:
+          _snack(s.t('已交给系统安装器：{path}', {'path': f['name']}));
+        case InstallOutcome.permissionNeeded:
+          _snack(s.t('请先允许「安装未知应用」，然后重试'));
+        case InstallOutcome.failed:
+          throw StateError(s.t('无法调起系统安装器'));
+      }
     } catch (e) {
       _snack(s.t('安装失败：{error}', {'error': e}));
     }
+  }
+
+  /// Opens the detail page, then refreshes the cache view (the detail page can
+  /// download, delete or replace cached copies).
+  Future<void> _openDetail(Map<String, dynamic> f) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RemoteApkDetailScreen(
+          source: widget.source,
+          entry: f,
+          siblings: _files,
+        ),
+      ),
+    );
+    await _refreshCache();
   }
 
   /// Downloads and parses an APK (without installing) so its full metadata
@@ -551,7 +591,7 @@ class _SyncSourceTabState extends State<_SyncSourceTab>
                     _itemMenu(f, cached: meta != null),
                   ],
                 ),
-          onTap: installing ? null : () => _install(f),
+          onTap: installing ? null : () => _openDetail(f),
           onLongPress: installing ? null : () => _fetchInfo(f),
         ),
         Padding(
@@ -761,7 +801,7 @@ class _SourceHeader extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            context.strings.t('点击安装；长按或 ⋮ 可获取信息、忽略缓存重新获取或删除单项缓存'),
+            context.strings.t('点击查看详情；长按或 ⋮ 可获取信息、忽略缓存重新获取或删除单项缓存'),
             style: TextStyle(
               fontSize: 11,
               color: theme.colorScheme.onSurfaceVariant,

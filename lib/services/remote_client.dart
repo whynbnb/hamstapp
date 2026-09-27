@@ -69,6 +69,15 @@ class RemoteClient {
     return out;
   }
 
+  /// Every cached APK across all sources (each entry has a `sourceId`).
+  static Future<List<Map<String, dynamic>>> cacheIndexAll() async {
+    final r = await NativeApps.cacheIndexAll();
+    final entries = (r['entries'] as List?) ?? const [];
+    return entries
+        .map((e) => (e as Map).cast<String, dynamic>())
+        .toList(growable: false);
+  }
+
   /// Drops cached APKs whose remote file changed (size or mtime) or disappeared.
   static Future<int> pruneCache(
       RemoteSource source, List<Map<String, dynamic>> files) {

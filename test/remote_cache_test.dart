@@ -36,6 +36,28 @@ void main() {
           return 7;
         case 'cacheDelete':
           return 1234;
+        case 'cacheIndexAll':
+          return {
+            'entries': [
+              {
+                'sourceId': 'src1',
+                'path': '/apks/a.apk',
+                'packageName': 'com.a',
+                'versionCode': 2,
+                'size': 10,
+                'localPath': '/cache/a.apk',
+              },
+              {
+                'sourceId': 'src2',
+                'path': '/apks/b.apk',
+                'packageName': 'com.b',
+                'versionCode': 1,
+                'size': 20,
+                'localPath': '/cache/b.apk',
+              },
+            ],
+            'totalBytes': 30,
+          };
         default:
           return null;
       }
@@ -96,5 +118,13 @@ void main() {
     final freed = await RemoteClient.deleteCache(source, '');
     expect(freed, 0);
     expect(calls, isEmpty);
+  });
+
+  test('cacheIndexAll parses every cached entry with its source', () async {
+    final list = await RemoteClient.cacheIndexAll();
+    expect(list, hasLength(2));
+    expect(list.first['sourceId'], 'src1');
+    expect(list.first['packageName'], 'com.a');
+    expect(list[1]['packageName'], 'com.b');
   });
 }
