@@ -748,7 +748,10 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    await tester.tap(find.byIcon(Icons.ios_share));
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.tap(find.text('导出 APK（分享）'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 50));
 

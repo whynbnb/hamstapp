@@ -133,6 +133,19 @@ class _ApkAnalyzerScreenState extends State<ApkAnalyzerScreen> {
     if (!ok && mounted) _snack(context.strings.t('导出失败，可能无法读取该应用的 APK'));
   }
 
+  /// True when the screen was opened for one specific file (an installed app
+  /// or a cached APK): it then only inspects that file and offers no way to
+  /// open another one.
+  bool get _fixed => (widget.initialPath?.isNotEmpty ?? false);
+
+  Future<void> _retry() async {
+    if (_fixed) {
+      await _analyze(widget.initialPath!);
+    } else {
+      await _pick();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = context.strings;
@@ -155,13 +168,14 @@ class _ApkAnalyzerScreenState extends State<ApkAnalyzerScreen> {
       body: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
-          _DropZone(
-            dragging: _dragging,
-            hasResult: a != null,
-            onPick: _pick,
-          ),
+          if (!_fixed)
+            _DropZone(
+              dragging: _dragging,
+              hasResult: a != null,
+              onPick: _pick,
+            ),
           if (_loading) ...[
-            const SizedBox(height: 32),
+            SizedBox(height: _fixed ? 48 : 32),
             const Center(child: CircularProgressIndicator()),
             const SizedBox(height: 12),
             Center(child: Text(s.t('正在分析…'))),
@@ -170,7 +184,7 @@ class _ApkAnalyzerScreenState extends State<ApkAnalyzerScreen> {
             const SizedBox(height: 16),
             _ErrorCard(
               message: s.t('分析失败：{error}', {'error': _error}),
-              onRetry: a == null ? _pick : null,
+              onRetry: a == null ? _retry : null,
             ),
           ],
           if (a != null && !_loading) ...[

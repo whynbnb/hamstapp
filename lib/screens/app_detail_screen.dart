@@ -112,29 +112,6 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         title: Text(name, overflow: TextOverflow.ellipsis),
         actions: [
           if (app != null)
-            _exporting
-                ? const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: Center(
-                      child: SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    ),
-                  )
-                : IconButton(
-                    tooltip: context.strings.t('导出 APK（分享）'),
-                    icon: const Icon(Icons.ios_share),
-                    onPressed: () => _exportApk(app),
-                  ),
-          if (app != null)
-            IconButton(
-              tooltip: context.strings.t('应用信息'),
-              icon: const Icon(Icons.info_outline),
-              onPressed: () => openAppInfo(context, widget.packageName),
-            ),
-          if (app != null)
             IconButton(
               tooltip: context.strings.t('分析已安装的 APK'),
               icon: const Icon(Icons.manage_search),
@@ -152,12 +129,59 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                 );
               },
             ),
-          if (app != null && !app.isSystem)
-            IconButton(
-              tooltip: context.strings.t('卸载'),
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () => uninstallApp(context, widget.packageName, name),
-            ),
+          if (app != null)
+            _exporting
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: Center(
+                      child: SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  )
+                : PopupMenuButton<String>(
+                    tooltip: context.strings.t('更多'),
+                    onSelected: (v) {
+                      switch (v) {
+                        case 'export':
+                          _exportApk(app);
+                        case 'info':
+                          openAppInfo(context, widget.packageName);
+                        case 'uninstall':
+                          uninstallApp(
+                            context,
+                            widget.packageName,
+                            name,
+                          );
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      PopupMenuItem(
+                        value: 'export',
+                        child: ListTile(
+                          leading: const Icon(Icons.ios_share),
+                          title: Text(ctx.strings.t('导出 APK（分享）')),
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'info',
+                        child: ListTile(
+                          leading: const Icon(Icons.info_outline),
+                          title: Text(ctx.strings.t('应用信息')),
+                        ),
+                      ),
+                      if (!app.isSystem)
+                        PopupMenuItem(
+                          value: 'uninstall',
+                          child: ListTile(
+                            leading: const Icon(Icons.delete_outline),
+                            title: Text(ctx.strings.t('卸载')),
+                          ),
+                        ),
+                    ],
+                  ),
         ],
       ),
       body: ListView(

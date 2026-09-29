@@ -156,6 +156,9 @@ void main() {
     expect(find.textContaining('com.example.app'), findsWidgets);
     expect(find.textContaining('签名一致'), findsWidgets);
     expect(find.text('文件'), findsOneWidget);
+    // Fixed-file mode: no way to open another file.
+    expect(find.text('将 APK 拖到这里，或点击选择'), findsNothing);
+    expect(find.text('选择另一个 APK'), findsNothing);
   });
 
   testWidgets('a dropped file is analyzed', (tester) async {
