@@ -290,6 +290,29 @@ const Map<String, String> _en = <String, String>{
   '近 7 天': 'Last 7 days',
   '近 30 天': 'Last 30 days',
 
+  // ---- usage trends
+  '使用趋势': 'Usage trends',
+  '最常用 / 被冷落 / 从未启动': 'Most used / neglected / never launched',
+  '{n} 天': '{n} days',
+  '最常用': 'Most used',
+  '被冷落': 'Neglected',
+  '曾经常用，近 {days} 天未打开': 'Used before, not opened in {days} days',
+  '从未启动': 'Never launched',
+  '已安装，但从未从囤囤启动过': 'Installed but never launched from Hamstapp',
+  '近 {days} 天启动 {total} 次 · 覆盖 {active} 个应用 · 被冷落 {neglected} 个 · 从未启动 {never} 个':
+      '{total} launches across {active} apps in {days} days · {neglected} neglected · {never} never launched',
+  '这段时间还没有启动记录': 'No launches in this period',
+  '没有长期搁置的应用': 'No long-idle apps',
+  '仅显示最常用的前 {n} 个': 'Showing the top {n} by past usage',
+  '所有应用都至少启动过一次': 'Every app has been launched at least once',
+  '上次 {ago}': 'Last {ago}',
+  '{n} 次': '{n}x',
+  '曾启动 {count} 次 · 上次 {ago}': 'Launched {count} times before · last {ago}',
+  '查看详情': 'View details',
+  '还没有启动记录': 'No launch history yet',
+  '从囤囤里启动应用后，这里会统计最常用、被冷落和从未启动的应用。':
+      'Apps you launch from Hamstapp are tracked here as most used, neglected and never launched.',
+
   // ---- apps screen
   '全部': 'All',
   '用户': 'User',

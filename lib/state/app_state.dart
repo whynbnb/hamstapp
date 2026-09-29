@@ -21,6 +21,7 @@ import '../utils/recommender.dart';
 import '../utils/search.dart';
 import '../utils/system_ui.dart';
 import '../utils/tile_layout.dart';
+import '../utils/usage_stats.dart';
 
 /// Which apps are in scope by type. Kept separate from [AppFilter] so it does
 /// not take part in the annotation filter radio group.
@@ -1956,6 +1957,64 @@ class AppState extends ChangeNotifier {
     await _persistLaunchLog();
     await _persistMeta();
     notifyListeners();
+  }
+
+  // ---- usage trends
+
+  Set<String> get _installedPackages =>
+      <String>{for (final a in apps) a.packageName};
+
+  int _sinceMillis(int days) => DateTime.now()
+      .subtract(Duration(days: days))
+      .millisecondsSinceEpoch;
+
+  /// Apps launched the most in the last [days] days.
+  List<UsageEntry> mostUsedApps({required int days, int limit = 20}) =>
+      UsageStats.mostUsed(
+        launchLog,
+        installed: _installedPackages,
+        sinceMillis: _sinceMillis(days),
+        limit: limit,
+      );
+
+  /// Apps that were opened routinely before the last [days] days but not since.
+  List<NeglectedEntry> neglectedApps({required int days, int limit = 30}) =>
+      UsageStats.neglected(
+        launchLog,
+        installed: _installedPackages,
+        sinceMillis: _sinceMillis(days),
+        limit: limit,
+      );
+
+  int launchesInDays(int days) => UsageStats.launchesInRange(
+        launchLog,
+        installed: _installedPackages,
+        sinceMillis: _sinceMillis(days),
+      );
+
+  int activeAppsInDays(int days) => UsageStats.activeAppsInRange(
+        launchLog,
+        installed: _installedPackages,
+        sinceMillis: _sinceMillis(days),
+      );
+
+  int neglectedCountInDays(int days) => UsageStats.neglectedCount(
+        launchLog,
+        installed: _installedPackages,
+        sinceMillis: _sinceMillis(days),
+      );
+
+  /// Non-system apps that have never been launched from this app, oldest
+  /// installed first (the likeliest cleanup candidates).
+  List<AppInfo> neverLaunchedApps({bool includeSystem = false}) {
+    final candidates = <String>{
+      for (final a in apps)
+        if (includeSystem || !a.isSystem) a.packageName,
+    };
+    final never = UsageStats.neverLaunched(launchLog, candidates: candidates);
+    final list = apps.where((a) => never.contains(a.packageName)).toList()
+      ..sort((a, b) => a.firstInstallTime.compareTo(b.firstInstallTime));
+    return list;
   }
 
   /// Id of the currently visible tile page, or null when none exist.

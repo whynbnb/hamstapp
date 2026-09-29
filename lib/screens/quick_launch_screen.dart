@@ -19,6 +19,7 @@ import '../widgets/floating_nav.dart';
 import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 import 'categories_tab.dart';
+import 'usage_stats_screen.dart';
 
 class QuickLaunchScreen extends StatefulWidget {
   const QuickLaunchScreen({super.key});
@@ -293,6 +294,20 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
                         ),
                     ],
                   ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.insights),
+                  title: Text(s.t('使用趋势')),
+                  subtitle: Text(s.t('最常用 / 被冷落 / 从未启动')),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const UsageStatsScreen(),
+                      ),
+                    );
+                  },
                 ),
                 const Divider(height: 1),
                 SwitchListTile(
