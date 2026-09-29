@@ -1911,6 +1911,9 @@ class _RecommendationSection extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final shown =
         items.length > _maxItems ? items.sublist(0, _maxItems) : items;
+    // Fill the border evenly: one equal-width column per item, capping at four
+    // per row so up to eight items form a balanced two-row grid.
+    final columns = shown.length < 4 ? shown.length : 4;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
       child: Column(
@@ -1933,20 +1936,26 @@ class _RecommendationSection extends StatelessWidget {
           const SizedBox(height: 8),
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: scheme.outlineVariant.withValues(alpha: 0.6),
               ),
             ),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 10,
-              children: [
-                for (final rec in shown)
-                  _RecommendationItem(state: state, rec: rec),
-              ],
+            child: GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: EdgeInsets.zero,
+              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: columns,
+                crossAxisSpacing: 4,
+                mainAxisSpacing: 8,
+                mainAxisExtent: 76,
+              ),
+              itemCount: shown.length,
+              itemBuilder: (context, i) =>
+                  _RecommendationItem(state: state, rec: shown[i]),
             ),
           ),
         ],
@@ -1964,34 +1973,28 @@ class _RecommendationItem extends StatelessWidget {
   Widget build(BuildContext context) {
     final name =
         state.appByPackage(rec.packageName)?.appName ?? rec.packageName;
-    return SizedBox(
-      width: 60,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: () => launchApp(context, rec.packageName),
-        onLongPress: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => AppDetailScreen(packageName: rec.packageName),
-          ),
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => launchApp(context, rec.packageName),
+      onLongPress: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AppDetailScreen(packageName: rec.packageName),
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              AppIcon(packageName: rec.packageName, label: name, size: 44),
-              const SizedBox(height: 6),
-              Text(
-                name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          AppIcon(packageName: rec.packageName, label: name, size: 44),
+          const SizedBox(height: 6),
+          Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 12),
           ),
-        ),
+        ],
       ),
     );
   }

@@ -292,5 +292,42 @@ void main() {
 
       expect(find.text('推荐'), findsNothing);
     });
+
+    testWidgets('fills the grid with at most eight suggestions', (
+      tester,
+    ) async {
+      final now = DateTime.now();
+      final minute = now.hour * 60 + now.minute;
+      final log = <LaunchEvent>[
+        for (var i = 0; i < 10; i++)
+          for (var d = 1; d <= 3; d++)
+            LaunchEvent(
+              packageName: 'com.app$i',
+              at: DateTime(now.year, now.month, now.day - d)
+                  .add(Duration(minutes: minute))
+                  .millisecondsSinceEpoch,
+            ),
+      ];
+      final state = AppState(_MemStorage())
+        ..initialized = true
+        ..apps = [for (var i = 0; i < 10; i++) _ai('com.app$i', 'App$i')]
+        ..launchLog = log
+        ..tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)]
+        ..currentTilePageIndex = 0
+        ..settings = {'remember_position': true, 'last_launch_tab': 3};
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: const MaterialApp(home: QuickLaunchScreen()),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+
+      expect(find.text('App0'), findsOneWidget);
+      expect(find.text('App7'), findsOneWidget);
+      expect(find.text('App8'), findsNothing);
+      expect(find.text('App9'), findsNothing);
+    });
   });
 }
