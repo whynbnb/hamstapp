@@ -120,6 +120,7 @@ const Map<String, String> _en = <String, String>{
   '恢复标注数据': 'Restore annotations',
   '刷新': 'Refresh',
   '刷新应用列表': 'Refresh app list',
+  '刷新应用列表\n长按查看统计信息': 'Refresh app list\nLong-press for stats',
   '重试': 'Retry',
   '打开': 'Open',
   '安装': 'Install',

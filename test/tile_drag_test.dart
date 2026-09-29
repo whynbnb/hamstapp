@@ -631,8 +631,36 @@ void main() {
     expect(state.scope, AppScope.all);
   });
 
-  testWidgets('long category list stays on one scrollable row', (
+  testWidgets('apps tab shows stats in a bottom bar and merges info into refresh', (
     tester,
+  ) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'Alpha')];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: AppsScreen()),
+      ),
+    );
+    await tester.pump();
+
+    // Info is no longer a standalone action.
+    expect(find.byIcon(Icons.info_outline), findsNothing);
+    // The stats are always shown at the bottom.
+    expect(find.byIcon(Icons.insights), findsOneWidget);
+
+    // Long-pressing refresh surfaces the same stats as a snackbar.
+    final refresh = find.byIcon(Icons.refresh);
+    expect(refresh, findsOneWidget);
+    await tester.longPress(refresh);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SnackBar), findsOneWidget);
+  });
+
+  testWidgets('long category list stays on one scrollable row', (    tester,
   ) async {
     final state = AppState(_MemStorage())
       ..initialized = true

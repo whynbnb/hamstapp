@@ -38,21 +38,9 @@ class AppsScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const SyncScreen()),
             ),
           ),
-          IconButton(
-            tooltip: state.appsStatsText,
-            icon: const Icon(Icons.info_outline),
-            onPressed: () {
-              ScaffoldMessenger.of(context)
-                ..hideCurrentSnackBar()
-                ..showSnackBar(
-                  SnackBar(
-                    content: Text(state.appsStatsText),
-                    behavior: SnackBarBehavior.floating,
-                    duration: const Duration(seconds: 4),
-                  ),
-                );
-            },
-          ),
+          // The stats used to live behind a separate info button. It is now
+          // shown automatically in the bottom bar, so refresh doubles as the
+          // tap action and long-press still surfaces it as a snackbar.
           state.scanning
               ? const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
@@ -64,10 +52,17 @@ class AppsScreen extends StatelessWidget {
                     ),
                   ),
                 )
-              : IconButton(
-                  tooltip: context.strings.t('刷新应用列表'),
-                  icon: const Icon(Icons.refresh),
-                  onPressed: state.scan,
+              : Tooltip(
+                  message: context.strings.t('刷新应用列表\n长按查看统计信息'),
+                  child: InkResponse(
+                    onTap: state.scan,
+                    onLongPress: () => _showStats(context, state),
+                    radius: 24,
+                    child: const Padding(
+                      padding: EdgeInsets.all(12),
+                      child: Icon(Icons.refresh),
+                    ),
+                  ),
                 ),
         ],
       ),
@@ -108,7 +103,62 @@ class AppsScreen extends StatelessWidget {
                     ),
             ),
           ),
+          _StatsBar(state: state),
         ],
+      ),
+    );
+  }
+}
+
+/// Shows the scan/app counters without leaving the screen.
+void _showStats(BuildContext context, AppState state) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(state.appsStatsText),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 4),
+      ),
+    );
+}
+
+/// Always-on, auto-updating summary strip pinned to the bottom of the apps tab.
+class _StatsBar extends StatelessWidget {
+  const _StatsBar({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.insights,
+                size: 14,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  state.appsStatsText,
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.35,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
