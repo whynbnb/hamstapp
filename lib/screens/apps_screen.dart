@@ -10,8 +10,42 @@ import '../widgets/uninstall_reason.dart';
 import 'app_detail_screen.dart';
 import 'sync_screen.dart';
 
-class AppsScreen extends StatelessWidget {
+class AppsScreen extends StatefulWidget {
   const AppsScreen({super.key});
+
+  @override
+  State<AppsScreen> createState() => _AppsScreenState();
+}
+
+class _AppsScreenState extends State<AppsScreen> {
+  late final AppState _state;
+  bool _wasScanning = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _state = context.read<AppState>();
+    _wasScanning = _state.scanning;
+    // Surface the summary automatically when a scan finishes. Same transient
+    // snackbar as long-pressing refresh, so nothing stays on screen.
+    _state.addListener(_onState);
+  }
+
+  @override
+  void dispose() {
+    _state.removeListener(_onState);
+    super.dispose();
+  }
+
+  void _onState() {
+    final scanning = _state.scanning;
+    if (_wasScanning && !scanning) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _showStats(context, _state);
+      });
+    }
+    _wasScanning = scanning;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -38,9 +72,9 @@ class AppsScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const SyncScreen()),
             ),
           ),
-          // The stats used to live behind a separate info button. It is now
-          // shown automatically in the bottom bar, so refresh doubles as the
-          // tap action and long-press still surfaces it as a snackbar.
+          // The stats used to live behind a separate info button. Now tapping
+          // refresh refreshes and long-pressing shows the summary; a finished
+          // scan shows the same summary on its own.
           state.scanning
               ? const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 16),
@@ -103,7 +137,6 @@ class AppsScreen extends StatelessWidget {
                     ),
             ),
           ),
-          _StatsBar(state: state),
         ],
       ),
     );
@@ -121,47 +154,6 @@ void _showStats(BuildContext context, AppState state) {
         duration: const Duration(seconds: 4),
       ),
     );
-}
-
-/// Always-on, auto-updating summary strip pinned to the bottom of the apps tab.
-class _StatsBar extends StatelessWidget {
-  const _StatsBar({required this.state});
-  final AppState state;
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Material(
-      color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                Icons.insights,
-                size: 14,
-                color: scheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  state.appsStatsText,
-                  style: TextStyle(
-                    fontSize: 12,
-                    height: 1.35,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }
 
 class _UninstalledList extends StatelessWidget {

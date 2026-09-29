@@ -631,7 +631,7 @@ void main() {
     expect(state.scope, AppScope.all);
   });
 
-  testWidgets('apps tab shows stats in a bottom bar and merges info into refresh', (
+  testWidgets('apps tab merges info into refresh and shows stats on scan', (
     tester,
   ) async {
     final state = AppState(_MemStorage())
@@ -646,15 +646,23 @@ void main() {
     );
     await tester.pump();
 
-    // Info is no longer a standalone action.
+    // Info is no longer a standalone action and nothing is pinned on screen.
     expect(find.byIcon(Icons.info_outline), findsNothing);
-    // The stats are always shown at the bottom.
-    expect(find.byIcon(Icons.insights), findsOneWidget);
+    expect(find.byIcon(Icons.refresh), findsOneWidget);
 
-    // Long-pressing refresh surfaces the same stats as a snackbar.
-    final refresh = find.byIcon(Icons.refresh);
-    expect(refresh, findsOneWidget);
-    await tester.longPress(refresh);
+    // A finished scan surfaces the summary automatically as a transient
+    // snackbar (no persistent bar).
+    state.scanning = true;
+    state.refresh();
+    await tester.pump();
+    state.scanning = false;
+    state.refresh();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+    expect(find.byType(SnackBar), findsOneWidget);
+
+    // Long-pressing refresh shows the same summary.
+    await tester.longPress(find.byIcon(Icons.refresh));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.byType(SnackBar), findsOneWidget);
