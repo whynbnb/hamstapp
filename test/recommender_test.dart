@@ -95,12 +95,25 @@ void main() {
 
     test('ignores apps without enough history', () {
       final events = <LaunchEvent>[];
-      _add(events, 'com.once', days.sublist(0, 2), 8, 0);
+      _add(events, 'com.once', <DateTime>[DateTime(2026, 1, 14)], 8, 0);
       final recs = Recommender.recommend(
         events,
         nowMillis: now8.millisecondsSinceEpoch,
       );
       expect(recs, isEmpty);
+    });
+
+    test('same-day repeated launches can already be recommended', () {
+      final events = <LaunchEvent>[
+        _ev('com.a', DateTime(2026, 1, 15, 7, 55)),
+        _ev('com.a', DateTime(2026, 1, 15, 7, 58)),
+        _ev('com.a', DateTime(2026, 1, 15, 7, 59)),
+      ];
+      final recs = Recommender.recommend(
+        events,
+        nowMillis: now8.millisecondsSinceEpoch,
+      );
+      expect(recs.map((r) => r.packageName), contains('com.a'));
     });
 
     test('prefers recent habits over stale ones', () {

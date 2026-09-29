@@ -308,6 +308,16 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
                     s.t('根据常用时间段，在「最近」顶部推荐此刻可能想用的应用'),
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Text(
+                    s.t('已记录 {n} 次启动 · 当前 {m} 个推荐', {
+                      'n': state.launchLog.length,
+                      'm': state.recommendedApps().length,
+                    }),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.delete_outline),
                   title: Text(s.t('清除启动记录')),

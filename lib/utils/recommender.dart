@@ -53,13 +53,14 @@ class Recommender {
   static const double maxSigmas = 3;
 
   /// Minimum number of recorded launches before an app can be suggested.
-  static const int minEvents = 3;
+  static const int minEvents = 2;
 
-  /// Minimum distinct days with a launch near the query time.
-  static const int minDays = 2;
+  /// Minimum distinct days with a launch near the query time. One is enough so
+  /// a routine can show up the same day it is first observed.
+  static const int minDays = 1;
 
   /// "Now" must be at least this much stronger than the app's daily average.
-  static const double minProminence = 1.5;
+  static const double minProminence = 1.3;
 
   /// How strongly a launch whose weekday/weekend type differs from "now" is
   /// down-weighted.
