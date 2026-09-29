@@ -190,8 +190,12 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
       leading: AppIcon(packageName: e.packageName, label: name),
       title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(context.strings.t('上次 {ago}', {'ago': Fmt.relative(e.lastAt)})),
-      trailing: _CountPill(
-        text: context.strings.t('{n} 次', {'n': e.count}),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _CountPill(text: context.strings.t('{n} 次', {'n': e.count})),
+          _usageMenu(name, e.packageName),
+        ],
       ),
       onTap: () => launchApp(context, e.packageName),
       onLongPress: () => _openDetail(e.packageName),
@@ -210,14 +214,59 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
           'ago': Fmt.relative(e.lastAt),
         }),
       ),
-      trailing: IconButton(
-        tooltip: context.strings.t('查看详情'),
-        icon: const Icon(Icons.chevron_right),
-        onPressed: () => _openDetail(e.packageName),
-      ),
+      trailing: _usageMenu(name, e.packageName),
       onTap: () => launchApp(context, e.packageName),
       onLongPress: () => _openDetail(e.packageName),
     );
+  }
+
+  Widget _usageMenu(String name, String packageName) {
+    final s = context.strings;
+    return PopupMenuButton<String>(
+      tooltip: s.t('更多'),
+      onSelected: (v) {
+        if (v == 'detail') {
+          _openDetail(packageName);
+        } else if (v == 'clear') {
+          _clearUsage(name, packageName);
+        }
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem(value: 'detail', child: Text(s.t('查看详情'))),
+        PopupMenuItem(value: 'clear', child: Text(s.t('清除使用记录'))),
+      ],
+    );
+  }
+
+  Future<void> _clearUsage(String name, String packageName) async {
+    final s = context.strings;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('清除「{name}」的使用记录？', {'name': name})),
+        content: Text(
+          s.t('将删除该应用的启动次数与时间记录，不影响它的分类、原因和备注。'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.t('确定')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await context.read<AppState>().clearLaunchHistoryFor(packageName);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(s.t('已清除「{name}」的使用记录', {'name': name}))),
+      );
   }
 
   Widget _neverRow(AppState state, AppInfo app) {

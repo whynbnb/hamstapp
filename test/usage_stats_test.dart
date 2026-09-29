@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:hamstapp/l10n/app_strings.dart';
 import 'package:hamstapp/models/app_info.dart';
 import 'package:hamstapp/models/launch_event.dart';
+import 'package:hamstapp/screens/app_detail_screen.dart';
 import 'package:hamstapp/screens/usage_stats_screen.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
@@ -201,6 +202,30 @@ void main() {
       expect(state.neverLaunchedApps().length, 1);
       expect(state.neverLaunchedApps(includeSystem: true).length, 2);
     });
+
+    test('clearLaunchHistoryFor forgets a single app only', () async {
+      final state = AppState(_MemStorage());
+      final t = DateTime.now().subtract(const Duration(hours: 1));
+      await state.markLaunched('com.a', at: t);
+      await state.markLaunched('com.a', at: t);
+      await state.markLaunched('com.b', at: t);
+      expect(state.launchLogCountFor('com.a'), 2);
+      expect(state.metaFor('com.a').launchCount, 2);
+
+      await state.clearLaunchHistoryFor('com.a');
+      expect(state.launchLogCountFor('com.a'), 0);
+      expect(state.metaFor('com.a').launchCount, 0);
+      expect(state.metaFor('com.a').lastLaunchedAt, 0);
+      // The other app is untouched.
+      expect(state.launchLogCountFor('com.b'), 1);
+      expect(state.metaFor('com.b').launchCount, 1);
+    });
+
+    test('clearLaunchHistoryFor on an unknown app creates no meta', () async {
+      final state = AppState(_MemStorage());
+      await state.clearLaunchHistoryFor('com.unknown');
+      expect(state.meta.containsKey('com.unknown'), isFalse);
+    });
   });
 
   group('UsageStatsScreen', () {
@@ -253,6 +278,39 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
 
       expect(find.textContaining('还没有启动记录'), findsOneWidget);
+    });
+  });
+
+  group('App detail usage', () {
+    testWidgets('can clear one app usage via a confirm dialog', (tester) async {
+      tester.view.physicalSize = const Size(1080, 4000);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final state = AppState(_MemStorage());
+      final t = DateTime.now().subtract(const Duration(hours: 1));
+      await state.markLaunched('com.a', at: t);
+      await state.markLaunched('com.a', at: t);
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: const MaterialApp(home: AppDetailScreen(packageName: 'com.a')),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.textContaining('从囤囤启动 2 次'), findsOneWidget);
+      await tester.tap(find.text('清除'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('确定'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(state.metaFor('com.a').launchCount, 0);
+      expect(find.textContaining('还没有从囤囤启动过'), findsOneWidget);
     });
   });
 }

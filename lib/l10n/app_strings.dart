@@ -309,6 +309,14 @@ const Map<String, String> _en = <String, String>{
   '{n} 次': '{n}x',
   '曾启动 {count} 次 · 上次 {ago}': 'Launched {count} times before · last {ago}',
   '查看详情': 'View details',
+  '使用记录': 'Usage',
+  '清除使用记录': 'Clear usage',
+  '从囤囤启动 {count} 次': 'Launched {count} times from Hamstapp',
+  '还没有从囤囤启动过': 'Never launched from Hamstapp',
+  '清除「{name}」的使用记录？': 'Clear usage for "{name}"?',
+  '将删除该应用的启动次数与时间记录，不影响它的分类、原因和备注。':
+      "Deletes this app's launch count and times. Its category, reason and note are kept.",
+  '已清除「{name}」的使用记录': 'Cleared usage for "{name}"',
   '还没有启动记录': 'No launch history yet',
   '从囤囤里启动应用后，这里会统计最常用、被冷落和从未启动的应用。':
       'Apps you launch from Hamstapp are tracked here as most used, neglected and never launched.',

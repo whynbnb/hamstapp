@@ -1959,6 +1959,28 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// How many timestamped launches were recorded for [packageName].
+  int launchLogCountFor(String packageName) =>
+      launchLog.where((e) => e.packageName == packageName).length;
+
+  /// Forgets one app's usage: drops its launch timestamps, count and last-used
+  /// time, so it leaves 最近 / 使用趋势 as if it had never been launched.
+  Future<void> clearLaunchHistoryFor(String packageName) async {
+    final before = launchLog.length;
+    launchLog.removeWhere((e) => e.packageName == packageName);
+    if (launchLog.length == before) {
+      // Nothing logged, but still reset the aggregate count if present.
+      final m = meta[packageName];
+      if (m == null || (m.launchCount == 0 && m.lastLaunchedAt == 0)) return;
+    }
+    final m = metaFor(packageName);
+    m.launchCount = 0;
+    m.lastLaunchedAt = 0;
+    await _persistLaunchLog();
+    await _persistMeta();
+    notifyListeners();
+  }
+
   // ---- usage trends
 
   Set<String> get _installedPackages =>

@@ -315,6 +315,31 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
           const SizedBox(height: 24),
           if (app != null) _InfoTable(app: app),
           const SizedBox(height: 24),
+          _SectionTitle(context.strings.t('使用记录')),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.history),
+            title: Text(
+              meta.launchCount > 0
+                  ? context.strings.t('从囤囤启动 {count} 次', {
+                      'count': meta.launchCount,
+                    })
+                  : context.strings.t('还没有从囤囤启动过'),
+            ),
+            subtitle: meta.lastLaunchedAt > 0
+                ? Text(context.strings.t('上次 {ago}', {
+                    'ago': Fmt.relative(meta.lastLaunchedAt),
+                  }))
+                : null,
+            trailing: (meta.launchCount > 0 || meta.lastLaunchedAt > 0)
+                ? TextButton.icon(
+                    onPressed: () => _clearUsage(state, name),
+                    icon: const Icon(Icons.delete_outline, size: 18),
+                    label: Text(context.strings.t('清除')),
+                  )
+                : null,
+          ),
+          const SizedBox(height: 24),
           OutlinedButton.icon(
             onPressed: () async {
               await state.clearMeta(widget.packageName);
@@ -336,8 +361,34 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     );
   }
 
-  Future<void> _createCategory(BuildContext context, AppState state) async {
-    final controller = TextEditingController();
+  Future<void> _clearUsage(AppState state, String name) async {
+    final s = context.strings;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('清除「{name}」的使用记录？', {'name': name})),
+        content: Text(
+          s.t('将删除该应用的启动次数与时间记录，不影响它的分类、原因和备注。'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.t('确定')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    await state.clearLaunchHistoryFor(widget.packageName);
+    if (!mounted) return;
+    _snack(s.t('已清除「{name}」的使用记录', {'name': name}));
+  }
+
+  Future<void> _createCategory(BuildContext context, AppState state) async {    final controller = TextEditingController();
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
