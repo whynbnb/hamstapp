@@ -6,6 +6,8 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.pm.Signature
+import android.content.pm.SigningInfo
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
@@ -32,17 +34,22 @@ import org.apache.commons.net.ftp.FTPClient
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.security.SecureRandom
+import java.security.cert.CertificateFactory
 import java.security.cert.X509Certificate
+import java.util.Locale
 import java.util.Properties
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
+import java.util.zip.ZipFile
 import javax.net.ssl.HttpsURLConnection
 import javax.net.ssl.SSLContext
 import javax.net.ssl.TrustManager
@@ -173,6 +180,23 @@ class PackageScannerPlugin(
                 executor.execute {
                     val info = runCatching { apkInfoMap(path) }.getOrNull()
                     mainHandler.post { result.success(info) }
+                }
+            }
+            "analyzeApk" -> {
+                val path = call.argument<String>("path")
+                if (path.isNullOrEmpty()) {
+                    result.error("BAD_ARGS", "path is required", null)
+                    return
+                }
+                executor.execute {
+                    try {
+                        val info = analyzeApk(path)
+                        mainHandler.post { result.success(info) }
+                    } catch (t: Throwable) {
+                        mainHandler.post {
+                            result.error("ANALYZE_FAILED", describe(t), null)
+                        }
+                    }
                 }
             }
             "cacheIndex" -> {
@@ -950,7 +974,292 @@ class PackageScannerPlugin(
         )
     }
 
+    // ------------------------------------------------------------ apk analysis
+
+    /**
+     * Deep, self-contained analysis of an APK *file* (no install required).
+     *
+     * Combines three independent sources so the result is trustworthy:
+     *  1. the parsed AndroidManifest (via PackageManager.getPackageArchiveInfo),
+     *  2. the signing certificates (v1/v2/v3, cert details + fingerprints),
+     *  3. the raw zip structure (DEX files, native ABIs, resources.arsc, ...),
+     * plus whole-file hashes and a comparison against the installed app.
+     */
+    private fun analyzeApk(path: String): Map<String, Any?> {
+        val file = File(path)
+        if (!file.exists() || !file.isFile) {
+            throw IllegalArgumentException("文件不存在")
+        }
+        val size = file.length()
+        val fileSha256 = fileDigest(file, "SHA-256")
+        val fileMd5 = fileDigest(file, "MD5")
+
+        val pm = context.packageManager
+        var flags = PackageManager.GET_META_DATA or
+            PackageManager.GET_ACTIVITIES or
+            PackageManager.GET_SERVICES or
+            PackageManager.GET_RECEIVERS or
+            PackageManager.GET_PROVIDERS or
+            PackageManager.GET_PERMISSIONS or
+            PackageManager.GET_SIGNATURES
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            flags = flags or PackageManager.GET_SIGNING_CERTIFICATES
+        }
+        val info: PackageInfo = if (Build.VERSION.SDK_INT >= 33) {
+            pm.getPackageArchiveInfo(
+                path,
+                PackageManager.PackageInfoFlags.of(flags.toLong())
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getPackageArchiveInfo(path, flags)
+        } ?: throw IllegalArgumentException("无法解析 APK（可能不是有效的安装包）")
+        val app = info.applicationInfo
+        app?.sourceDir = path
+        app?.publicSourceDir = path
+
+        val label = runCatching { app?.loadLabel(pm)?.toString() }.getOrNull() ?: ""
+        val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            info.longVersionCode
+        } else {
+            @Suppress("DEPRECATION")
+            info.versionCode.toLong()
+        }
+        val icon = runCatching {
+            val drawable = app?.loadIcon(pm) ?: return@runCatching null
+            val bmp = drawableToBitmap(drawable, 192)
+            val stream = ByteArrayOutputStream()
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, stream)
+            bmp.recycle()
+            stream.toByteArray()
+        }.getOrNull()
+
+        val permissions = (info.requestedPermissions ?: emptyArray<String>()).toList()
+        val features = (info.reqFeatures ?: emptyArray())
+            .mapNotNull { it.name }
+        val activityCount = info.activities?.size ?: 0
+        val serviceCount = info.services?.size ?: 0
+        val receiverCount = info.receivers?.size ?: 0
+        val providerCount = info.providers?.size ?: 0
+
+        val appFlags = app?.flags ?: 0
+        val debuggable = (appFlags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
+        val allowBackup = (appFlags and ApplicationInfo.FLAG_ALLOW_BACKUP) != 0
+        val testOnly = (appFlags and ApplicationInfo.FLAG_TEST_ONLY) != 0
+        val cleartext = (appFlags and ApplicationInfo.FLAG_USES_CLEARTEXT_TRAFFIC) != 0
+        val extractNative =
+            (appFlags and ApplicationInfo.FLAG_EXTRACT_NATIVE_LIBS) != 0
+
+        val signers = ArrayList<Map<String, Any?>>()
+        var hasMultipleSigners = false
+        var hasPastSigningCerts = false
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val si: SigningInfo? = info.signingInfo
+            if (si != null) {
+                hasMultipleSigners = si.hasMultipleSigners()
+                hasPastSigningCerts = si.hasPastSigningCertificates()
+                val sigs = if (hasMultipleSigners) {
+                    si.apkContentsSigners
+                } else {
+                    si.signingCertificateHistory
+                }
+                sigs?.forEach { signers.add(certInfo(it)) }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            info.signatures?.forEach { signers.add(certInfo(it)) }
+        }
+
+        var entryCount = 0
+        var uncompressed = 0L
+        var compressed = 0L
+        var dexCount = 0
+        var dexBytes = 0L
+        var nativeLibCount = 0
+        val abis = sortedSetOf<String>()
+        var hasArsc = false
+        var hasManifest = false
+        var hasV1Signature = false
+        runCatching {
+            ZipFile(file).use { zip ->
+                val entries = zip.entries()
+                while (entries.hasMoreElements()) {
+                    val entry = entries.nextElement()
+                    entryCount++
+                    uncompressed += entry.size.coerceAtLeast(0L)
+                    compressed += entry.compressedSize.coerceAtLeast(0L)
+                    if (entry.isDirectory) continue
+                    val name = entry.name
+                    val lower = name.lowercase(Locale.US)
+                    when {
+                        DEX_NAME.matches(lower) -> {
+                            dexCount++
+                            dexBytes += entry.size.coerceAtLeast(0L)
+                        }
+                        name.startsWith("lib/") -> {
+                            val abi = name.substringAfter("lib/").substringBefore('/')
+                            if (abi.isNotEmpty()) {
+                                abis.add(abi)
+                                nativeLibCount++
+                            }
+                        }
+                        lower == "resources.arsc" -> hasArsc = true
+                        name == "AndroidManifest.xml" -> hasManifest = true
+                        lower.startsWith("meta-inf/") &&
+                            (lower.endsWith(".rsa") ||
+                                lower.endsWith(".dsa") ||
+                                lower.endsWith(".ec")) -> hasV1Signature = true
+                    }
+                }
+            }
+        }
+
+        // Compare with the currently installed app of the same package.
+        var installed = false
+        var installedVersionCode = -1L
+        var installedVersionName = ""
+        var sameSigner = false
+        runCatching {
+            val ip: PackageInfo = when {
+                Build.VERSION.SDK_INT >= 33 -> pm.getPackageInfo(
+                    info.packageName,
+                    PackageManager.PackageInfoFlags.of(
+                        PackageManager.GET_SIGNING_CERTIFICATES.toLong()
+                    )
+                )
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ->
+                    pm.getPackageInfo(
+                        info.packageName,
+                        PackageManager.GET_SIGNING_CERTIFICATES
+                    )
+                else -> {
+                    @Suppress("DEPRECATION")
+                    pm.getPackageInfo(info.packageName, PackageManager.GET_SIGNATURES)
+                }
+            }
+            installed = true
+            installedVersionCode =
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    ip.longVersionCode
+                } else {
+                    @Suppress("DEPRECATION")
+                    ip.versionCode.toLong()
+                }
+            installedVersionName = ip.versionName ?: ""
+            val installedSigs = ArrayList<String>()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val isi = ip.signingInfo
+                val arr = if (isi != null && isi.hasMultipleSigners()) {
+                    isi.apkContentsSigners
+                } else {
+                    isi?.signingCertificateHistory
+                }
+                arr?.forEach {
+                    installedSigs.add(certInfo(it)["sha256"] as? String ?: "")
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                ip.signatures?.forEach {
+                    installedSigs.add(certInfo(it)["sha256"] as? String ?: "")
+                }
+            }
+            val apkSigs = signers.mapNotNull { it["sha256"] as? String }
+            sameSigner =
+                installedSigs.isNotEmpty() && apkSigs.containsAll(installedSigs)
+        }
+
+        return mapOf(
+            "path" to path,
+            "fileName" to file.name,
+            "size" to size,
+            "modified" to file.lastModified(),
+            "sha256" to fileSha256,
+            "md5" to fileMd5,
+            "packageName" to info.packageName,
+            "appName" to label,
+            "versionName" to (info.versionName ?: ""),
+            "versionCode" to versionCode,
+            "minSdk" to (app?.minSdkVersion ?: 0),
+            "targetSdk" to (app?.targetSdkVersion ?: 0),
+            "debuggable" to debuggable,
+            "allowBackup" to allowBackup,
+            "testOnly" to testOnly,
+            "usesCleartextTraffic" to cleartext,
+            "extractNativeLibs" to extractNative,
+            "permissions" to permissions,
+            "features" to features,
+            "activityCount" to activityCount,
+            "serviceCount" to serviceCount,
+            "receiverCount" to receiverCount,
+            "providerCount" to providerCount,
+            "abis" to abis.toList(),
+            "nativeLibCount" to nativeLibCount,
+            "dexCount" to dexCount,
+            "dexBytes" to dexBytes,
+            "apkEntryCount" to entryCount,
+            "apkUncompressedBytes" to uncompressed,
+            "apkCompressedBytes" to compressed,
+            "hasResourcesArsc" to hasArsc,
+            "hasManifest" to hasManifest,
+            "hasV1Signature" to hasV1Signature,
+            "hasMultipleSigners" to hasMultipleSigners,
+            "hasPastSigningCertificates" to hasPastSigningCerts,
+            "signers" to signers,
+            "installed" to installed,
+            "installedVersionCode" to installedVersionCode,
+            "installedVersionName" to installedVersionName,
+            "sameSignerAsInstalled" to sameSigner,
+            "icon" to icon
+        )
+    }
+
+    /** Parses one signing certificate into display + trust fields. */
+    private fun certInfo(signature: Signature): Map<String, Any?> {
+        val der = signature.toByteArray()
+        val out = HashMap<String, Any?>()
+        out["sha256"] = hex(MessageDigest.getInstance("SHA-256").digest(der), true)
+        out["sha1"] = hex(MessageDigest.getInstance("SHA-1").digest(der), true)
+        runCatching {
+            val cert = CertificateFactory.getInstance("X.509")
+                .generateCertificate(ByteArrayInputStream(der)) as X509Certificate
+            out["subject"] = cert.subjectX500Principal.name
+            out["issuer"] = cert.issuerX500Principal.name
+            out["serialNumber"] = cert.serialNumber.toString(16).uppercase(Locale.US)
+            out["signatureAlgorithm"] = cert.sigAlgName
+            out["notBefore"] = cert.notBefore.time
+            out["notAfter"] = cert.notAfter.time
+            out["selfSigned"] = cert.subjectX500Principal == cert.issuerX500Principal
+        }
+        return out
+    }
+
+    private fun fileDigest(file: File, algorithm: String): String {
+        val md = MessageDigest.getInstance(algorithm)
+        file.inputStream().use { input ->
+            val buffer = ByteArray(1 shl 16)
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                md.update(buffer, 0, read)
+            }
+        }
+        return hex(md.digest(), false)
+    }
+
+    private fun hex(data: ByteArray, colon: Boolean): String {
+        val sb = StringBuilder(data.size * if (colon) 3 else 2)
+        for ((i, b) in data.withIndex()) {
+            if (colon && i > 0) sb.append(':')
+            sb.append(String.format(Locale.US, "%02X", b.toInt() and 0xFF))
+        }
+        return sb.toString()
+    }
+
     // ------------------------------------------------------------ cache index
+
+    private companion object {
+        val DEX_NAME = Regex("classes\\d*\\.dex")
+    }
 
     /** `{entries: [...], totalBytes: n}` for one source. */
     private fun cacheIndexPayload(sourceId: String): Map<String, Any?> {

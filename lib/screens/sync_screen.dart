@@ -13,6 +13,7 @@ import '../utils/format.dart';
 import '../utils/install_helper.dart';
 import '../widgets/app_icon.dart';
 import 'orphan_cache_screen.dart';
+import 'apk_analyzer_screen.dart';
 import 'remote_apk_detail_screen.dart';
 import 'remote_source_screen.dart';
 
@@ -146,6 +147,13 @@ class _SyncScreenState extends State<SyncScreen> with TickerProviderStateMixin {
             onSelected: (v) {
               final active = state.remoteSource;
               switch (v) {
+                case 'analyze':
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const ApkAnalyzerScreen(),
+                    ),
+                  );
                 case 'orphans':
                   Navigator.push(
                     context,
@@ -162,6 +170,14 @@ class _SyncScreenState extends State<SyncScreen> with TickerProviderStateMixin {
               }
             },
             itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'analyze',
+                child: ListTile(
+                  leading: const Icon(Icons.manage_search),
+                  title: Text(context.strings.t('APK 分析')),
+                ),
+              ),
+              const PopupMenuDivider(),
               PopupMenuItem(
                 value: 'orphans',
                 child: ListTile(

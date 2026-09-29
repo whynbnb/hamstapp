@@ -8,6 +8,7 @@ import '../widgets/chip_scroller.dart';
 import '../widgets/floating_nav.dart';
 import '../widgets/uninstall_reason.dart';
 import 'app_detail_screen.dart';
+import 'apk_analyzer_screen.dart';
 import 'sync_screen.dart';
 
 class AppsScreen extends StatefulWidget {
@@ -64,6 +65,14 @@ class _AppsScreenState extends State<AppsScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            tooltip: context.strings.t('APK 分析'),
+            icon: const Icon(Icons.manage_search),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const ApkAnalyzerScreen()),
+            ),
+          ),
           IconButton(
             tooltip: context.strings.t('同步远程 APK'),
             icon: const Icon(Icons.cloud_sync_outlined),

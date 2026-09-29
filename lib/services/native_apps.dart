@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/services.dart';
 
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
+import '../models/apk_analysis.dart';
 
 /// Thin wrapper over the native `hamstapp/apps` MethodChannel.
 class NativeApps {
@@ -11,20 +14,45 @@ class NativeApps {
 
   static final Map<String, void Function(int received, int total)>
       _downloadProgress = {};
-  static bool _progressHandlerSet = false;
+  static bool _handlerSet = false;
 
-  static void _ensureProgressHandler() {
-    if (_progressHandlerSet) return;
-    _progressHandlerSet = true;
+  static final StreamController<String> _dropped =
+      StreamController<String>.broadcast();
+  static final StreamController<bool> _dragging =
+      StreamController<bool>.broadcast();
+
+  /// Paths of APK files dragged onto the window (copied into the app cache).
+  static Stream<String> get droppedApks => _dropped.stream;
+
+  /// Whether an external file drag is currently hovering over the window.
+  static Stream<bool> get apkDragging => _dragging.stream;
+
+  /// Registers the shared method-call handler. Safe to call multiple times.
+  static void startListening() => _ensureHandler();
+
+  static void _ensureHandler() {
+    if (_handlerSet) return;
+    _handlerSet = true;
     _channel.setMethodCallHandler((call) async {
-      if (call.method == 'downloadProgress') {
-        final m = (call.arguments as Map).cast<dynamic, dynamic>();
-        final id = m['id'] as String?;
-        final cb = id == null ? null : _downloadProgress[id];
-        if (cb != null) {
-          cb((m['received'] as num?)?.toInt() ?? 0,
-              (m['total'] as num?)?.toInt() ?? -1);
-        }
+      switch (call.method) {
+        case 'downloadProgress':
+          final m = (call.arguments as Map).cast<dynamic, dynamic>();
+          final id = m['id'] as String?;
+          final cb = id == null ? null : _downloadProgress[id];
+          if (cb != null) {
+            cb((m['received'] as num?)?.toInt() ?? 0,
+                (m['total'] as num?)?.toInt() ?? -1);
+          }
+        case 'apkDropped':
+          final m = (call.arguments as Map?)?.cast<dynamic, dynamic>();
+          final path = m?['path'] as String?;
+          if (path != null && path.isNotEmpty && !_dropped.isClosed) {
+            _dropped.add(path);
+          }
+        case 'apkDragEntered':
+          if (!_dragging.isClosed) _dragging.add(true);
+        case 'apkDragEnded':
+          if (!_dragging.isClosed) _dragging.add(false);
       }
       return null;
     });
@@ -121,7 +149,7 @@ class NativeApps {
     bool keepAllVersions = false,
     void Function(int received, int total)? onProgress,
   }) async {
-    _ensureProgressHandler();
+    _ensureHandler();
     final id = 'dl_${DateTime.now().microsecondsSinceEpoch}';
     if (onProgress != null) _downloadProgress[id] = onProgress;
     try {
@@ -153,6 +181,19 @@ class NativeApps {
       {'path': path},
     );
     return r?.cast<String, dynamic>();
+  }
+
+  /// Deep analysis of an APK file on disk. Throws [PlatformException] when the
+  /// file is missing or not a valid APK.
+  static Future<ApkAnalysis> analyzeApk(String path) async {
+    final r = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+      'analyzeApk',
+      {'path': path},
+    );
+    if (r == null) {
+      throw StateError(AppStrings.current.t('分析失败：无法读取该文件'));
+    }
+    return ApkAnalysis.fromMap(r.cast<String, dynamic>());
   }
 
   /// Cache index for one source: `{entries: [...], totalBytes: n}`.

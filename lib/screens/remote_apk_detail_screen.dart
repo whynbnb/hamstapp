@@ -12,6 +12,7 @@ import '../state/app_state.dart';
 import '../utils/format.dart';
 import '../utils/install_helper.dart';
 import '../widgets/app_icon.dart';
+import 'apk_analyzer_screen.dart';
 
 /// Detail page for one remote APK: full metadata, actions and the other
 /// versions of the same package available on the same source.
@@ -190,6 +191,21 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(_titleOf(entry), overflow: TextOverflow.ellipsis),
+        actions: [
+          if (((meta?['localPath'] as String?) ?? '').isNotEmpty)
+            IconButton(
+              tooltip: s.t('APK 分析'),
+              icon: const Icon(Icons.manage_search),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => ApkAnalyzerScreen(
+                    initialPath: meta!['localPath'] as String,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
