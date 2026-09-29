@@ -188,6 +188,16 @@ const Map<String, String> _en = <String, String>{
   '重置': 'Reset',
   '排序 / 时间筛选': 'Sort / time filter',
   '最近 · 排序与筛选': 'Recent · sort & filter',
+  '推荐': 'Recommended',
+  '根据常用时间': 'By routine',
+  '常在 {time}': 'Usually {time}',
+  '智能推荐': 'Smart suggestions',
+  '根据常用时间段，在「最近」顶部推荐此刻可能想用的应用':
+      'Suggest apps you likely need right now, based on the time of day',
+  '清除启动记录': 'Clear launch history',
+  '删除全部启动时间与次数': 'Delete all launch times and counts',
+  '将删除全部启动时间记录与启动次数，且无法恢复。确定吗？':
+      'This deletes all launch time records and launch counts and cannot be undone. Continue?',
   '主题模式': 'Theme mode',
   '主题色': 'Theme color',
   '磁贴样式': 'Tile style',

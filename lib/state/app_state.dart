@@ -9,6 +9,7 @@ import '../models/app_info.dart';
 import '../models/app_meta.dart';
 import '../models/backup_list.dart';
 import '../models/category.dart';
+import '../models/launch_event.dart';
 import '../models/remote_source.dart';
 import '../models/snapshot.dart';
 import '../models/tile.dart';
@@ -16,6 +17,7 @@ import '../models/tile_page.dart';
 import '../services/native_apps.dart';
 import '../services/storage.dart';
 import '../utils/format.dart';
+import '../utils/recommender.dart';
 import '../utils/search.dart';
 import '../utils/system_ui.dart';
 import '../utils/tile_layout.dart';
@@ -113,6 +115,10 @@ class AppState extends ChangeNotifier {
   List<Tile> tiles = <Tile>[];
   Map<String, dynamic> settings = <String, dynamic>{};
 
+  /// Timestamped launches used for time-of-day recommendations. Bounded by
+  /// [_kLaunchLogCap] / [_kLaunchLogMaxAge].
+  List<LaunchEvent> launchLog = <LaunchEvent>[];
+
   /// Apps detected as uninstalled during the most recent scan and that the
   /// user has not been asked about yet this session.
   List<AppMeta> pendingUninstalls = <AppMeta>[];
@@ -190,6 +196,8 @@ class AppState extends ChangeNotifier {
     settings = await _loadSettings();
     _applyLanguage();
     _applyLanguage();
+    launchLog = await _loadLaunchLog();
+    _pruneLaunchLog();
     tilePages = await _loadTilePages();
     if (tilePages.isEmpty) {
       tilePages.add(
@@ -332,6 +340,20 @@ class AppState extends ChangeNotifier {
 
   Future<List<BackupList>> _loadBackupLists() async =>
       _parseBackupLists(await storage.readJson(_kBackupLists));
+
+  Future<List<LaunchEvent>> _loadLaunchLog() async =>
+      _parseLaunchLog(await storage.readJson(_kLaunchLog));
+
+  List<LaunchEvent> _parseLaunchLog(dynamic raw) {
+    if (raw is! List) return <LaunchEvent>[];
+    final list = <LaunchEvent>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final ev = LaunchEvent.fromMap(e.cast<String, dynamic>());
+      if (ev.packageName.isNotEmpty && ev.at > 0) list.add(ev);
+    }
+    return list;
+  }
 
   // ---------------------------------------------------------------- scanning
 
@@ -1216,6 +1238,18 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- recommendations
+
+  /// Whether the 最近 tab shows a "推荐" section. Defaults to true.
+  bool get recommendationsEnabled =>
+      settings['recent_recommendations'] as bool? ?? true;
+
+  Future<void> setRecommendationsEnabled(bool value) async {
+    settings['recent_recommendations'] = value;
+    await _persistSettings();
+    notifyListeners();
+  }
+
   // ---- position memory
 
   /// Whether the last visited position (nav destination, launch sub-tab and
@@ -1585,6 +1619,7 @@ class AppState extends ChangeNotifier {
         'tile_pages': tilePages.map((p) => p.toMap()).toList(),
         'apps': apps.map((a) => a.toMap()).toList(),
         'settings': settings,
+        'launch_log': launchLog.map((e) => e.toMap()).toList(),
       },
     };
   }
@@ -1627,6 +1662,7 @@ class AppState extends ChangeNotifier {
     var newPages = _parseTilePages(d['tile_pages']);
     final newApps = _parseApps(d['apps']);
     final newSettings = _parseSettings(d['settings']);
+    final newLaunchLog = _parseLaunchLog(d['launch_log']);
 
     if (newPages.isEmpty) {
       newPages = [
@@ -1655,6 +1691,8 @@ class AppState extends ChangeNotifier {
     tilePages = newPages;
     apps = newApps;
     settings = newSettings;
+    launchLog = newLaunchLog;
+    _pruneLaunchLog();
     // Don't carry the exporter's position memory into this device.
     settings.remove('last_home_index');
     settings.remove('last_launch_tab');
@@ -1684,6 +1722,7 @@ class AppState extends ChangeNotifier {
     ];
     apps = <AppInfo>[];
     settings = <String, dynamic>{};
+    launchLog = <LaunchEvent>[];
     pendingUninstalls = <AppMeta>[];
     currentTilePageIndex = 0;
     tileEditMode = false;
@@ -1704,6 +1743,7 @@ class AppState extends ChangeNotifier {
     await _persistTilePages();
     await _persistSettings();
     await storage.writeJson(_kAppsCache, apps.map((a) => a.toMap()).toList());
+    await _persistLaunchLog();
   }
 
   /// Transient, board-wide edit mode. While on, tiles can be moved/resized and
@@ -1855,10 +1895,65 @@ class AppState extends ChangeNotifier {
     return list;
   }
 
-  Future<void> markLaunched(String packageName) async {
+  Future<void> markLaunched(String packageName, {DateTime? at}) async {
     final m = metaFor(packageName);
-    m.lastLaunchedAt = DateTime.now().millisecondsSinceEpoch;
+    final when = at ?? DateTime.now();
+    m.lastLaunchedAt = when.millisecondsSinceEpoch;
     m.launchCount += 1;
+    _recordLaunch(packageName, when.millisecondsSinceEpoch);
+    await _persistMeta();
+    await _persistLaunchLog();
+    notifyListeners();
+  }
+
+  void _recordLaunch(String packageName, int at) {
+    launchLog.add(LaunchEvent(packageName: packageName, at: at));
+    _pruneLaunchLog();
+  }
+
+  void _pruneLaunchLog() {
+    final cutoff = DateTime.now()
+        .subtract(_kLaunchLogMaxAge)
+        .millisecondsSinceEpoch;
+    launchLog.removeWhere((e) => e.at < cutoff);
+    if (launchLog.length > _kLaunchLogCap) {
+      launchLog.removeRange(0, launchLog.length - _kLaunchLogCap);
+    }
+  }
+
+  Future<void> _persistLaunchLog() => storage.writeJson(
+        _kLaunchLog,
+        launchLog.map((e) => e.toMap()).toList(),
+      );
+
+  /// Apps suggested for right now, based on when they are usually launched.
+  /// Returns nothing when the feature is off or there is not enough history.
+  List<Recommendation> recommendedApps({DateTime? now, int limit = 6}) {
+    if (!recommendationsEnabled || apps.isEmpty || launchLog.isEmpty) {
+      return const <Recommendation>[];
+    }
+    final installed = <String>{for (final a in apps) a.packageName};
+    final events = launchLog
+        .where((e) => installed.contains(e.packageName))
+        .toList(growable: false);
+    if (events.isEmpty) return const <Recommendation>[];
+    final at = now ?? DateTime.now();
+    return Recommender.recommend(
+      events,
+      nowMillis: at.millisecondsSinceEpoch,
+      limit: limit,
+    );
+  }
+
+  /// Wipes every launch timestamp and count, so the 最近 list and suggestions
+  /// start over.
+  Future<void> clearLaunchHistory() async {
+    launchLog = <LaunchEvent>[];
+    for (final m in meta.values) {
+      m.lastLaunchedAt = 0;
+      m.launchCount = 0;
+    }
+    await _persistLaunchLog();
     await _persistMeta();
     notifyListeners();
   }
@@ -1913,4 +2008,9 @@ class AppState extends ChangeNotifier {
   static const _kTilePages = 'tile_pages';
   static const _kTiles = 'tiles';
   static const _kSettings = 'settings';
+  static const _kLaunchLog = 'launch_log';
+
+  /// Keep the event log small but deep enough for time-of-day analysis.
+  static const int _kLaunchLogCap = 2000;
+  static const Duration _kLaunchLogMaxAge = Duration(days: 180);
 }

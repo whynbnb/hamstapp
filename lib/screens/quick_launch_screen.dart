@@ -10,6 +10,7 @@ import '../models/tile_page.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/format.dart';
+import '../utils/recommender.dart';
 import '../utils/search.dart';
 import '../utils/tile_layout.dart';
 import '../widgets/app_icon.dart';
@@ -226,69 +227,120 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   Future<void> _showRecentFilterSheet(BuildContext context) async {
     final ranges = _recentRanges();
     final s = context.strings;
+    final state = context.read<AppState>();
     await showModalBottomSheet<void>(
       context: context,
       builder: (ctx) => SafeArea(
         child: StatefulBuilder(
-          builder: (ctx, setLocal) => Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                child: Text(
-                  s.t('最近 · 排序与筛选'),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+          builder: (ctx, setLocal) => SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                  child: Text(
+                    s.t('最近 · 排序与筛选'),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ),
-              ),
-              ListTile(
-                leading: const Icon(Icons.schedule),
-                title: Text(s.t('按时间排序')),
-                trailing: _recentSort == RecentSort.recent
-                    ? const Icon(Icons.check)
-                    : null,
-                onTap: () {
-                  setState(() => _recentSort = RecentSort.recent);
-                  setLocal(() {});
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.bar_chart),
-                title: Text(s.t('按频次排序')),
-                trailing: _recentSort == RecentSort.frequent
-                    ? const Icon(Icons.check)
-                    : null,
-                onTap: () {
-                  setState(() => _recentSort = RecentSort.frequent);
-                  setLocal(() {});
-                },
-              ),
-              const Divider(height: 1),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: Text(
-                  s.t('时间段'),
-                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ListTile(
+                  leading: const Icon(Icons.schedule),
+                  title: Text(s.t('按时间排序')),
+                  trailing: _recentSort == RecentSort.recent
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () {
+                    setState(() => _recentSort = RecentSort.recent);
+                    setLocal(() {});
+                  },
                 ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
-                child: Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final r in ranges)
-                      ChoiceChip(
-                        label: Text(r.$1),
-                        selected: _recentSince == r.$2,
-                        onSelected: (_) {
-                          setState(() => _recentSince = r.$2);
-                          setLocal(() {});
-                        },
+                ListTile(
+                  leading: const Icon(Icons.bar_chart),
+                  title: Text(s.t('按频次排序')),
+                  trailing: _recentSort == RecentSort.frequent
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () {
+                    setState(() => _recentSort = RecentSort.frequent);
+                    setLocal(() {});
+                  },
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Text(
+                    s.t('时间段'),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Wrap(
+                    spacing: 8,
+                    children: [
+                      for (final r in ranges)
+                        ChoiceChip(
+                          label: Text(r.$1),
+                          selected: _recentSince == r.$2,
+                          onSelected: (_) {
+                            setState(() => _recentSince = r.$2);
+                            setLocal(() {});
+                          },
+                        ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                SwitchListTile(
+                  secondary: const Icon(Icons.auto_awesome),
+                  value: state.recommendationsEnabled,
+                  onChanged: (v) async {
+                    await state.setRecommendationsEnabled(v);
+                    setLocal(() {});
+                    if (mounted) setState(() {});
+                  },
+                  title: Text(s.t('智能推荐')),
+                  subtitle: Text(
+                    s.t('根据常用时间段，在「最近」顶部推荐此刻可能想用的应用'),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: Text(s.t('清除启动记录')),
+                  subtitle: Text(s.t('删除全部启动时间与次数')),
+                  onTap: () async {
+                    final ok = await showDialog<bool>(
+                      context: ctx,
+                      builder: (dctx) => AlertDialog(
+                        title: Text(s.t('清除启动记录')),
+                        content: Text(
+                          s.t('将删除全部启动时间记录与启动次数，且无法恢复。确定吗？'),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dctx, false),
+                            child: Text(s.t('取消')),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(dctx, true),
+                            child: Text(s.t('确定')),
+                          ),
+                        ],
                       ),
-                  ],
+                    );
+                    if (ok != true) return;
+                    await state.clearLaunchHistory();
+                    setLocal(() {});
+                    if (mounted) setState(() {});
+                  },
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+              ],
+            ),
           ),
         ),
       ),
@@ -1754,7 +1806,9 @@ class _RecentTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final apps = state.recentAppsBy(sort, sinceMillis: sinceMillis);
-    if (apps.isEmpty) {
+    final recs = state.recommendedApps();
+
+    if (apps.isEmpty && recs.isEmpty) {
       return _hint(
         context,
         icon: Icons.history,
@@ -1763,30 +1817,184 @@ class _RecentTab extends StatelessWidget {
             : context.strings.t('还没有启动记录\n从囤囤里启动应用后会出现在这里'),
       );
     }
-    return ListView.builder(
-      itemCount: apps.length,
-      itemBuilder: (context, i) {
-        final app = apps[i];
-        final meta = state.metaFor(app.packageName);
-        return ListTile(
-          leading: AppIcon(packageName: app.packageName, label: app.appName),
-          title: Text(app.appName),
-          subtitle: Text(
-            context.strings.t('启动 {count} 次 · 上次 {ago}', {
-              'count': meta.launchCount,
-              'ago': Fmt.relative(meta.lastLaunchedAt),
-            }),
+
+    return CustomScrollView(
+      slivers: [
+        if (recs.isNotEmpty)
+          SliverToBoxAdapter(
+            child: _RecommendationSection(state: state, items: recs),
           ),
-          trailing: const Icon(Icons.rocket_launch_outlined, size: 20),
-          onTap: () => launchApp(context, app.packageName),
-          onLongPress: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AppDetailScreen(packageName: app.packageName),
+        if (apps.isNotEmpty) ...[
+          SliverToBoxAdapter(child: _SectionLabel(text: context.strings.t('最近'))),
+          SliverList.builder(
+            itemCount: apps.length,
+            itemBuilder: (context, i) => _recentTile(context, apps[i]),
+          ),
+        ] else
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: _hint(
+              context,
+              icon: Icons.history,
+              text: sinceMillis > 0
+                  ? context.strings.t('该时间段内没有启动记录\n可在右上角调整时间段')
+                  : context.strings.t('还没有启动记录\n从囤囤里启动应用后会出现在这里'),
             ),
           ),
-        );
-      },
+      ],
+    );
+  }
+
+  Widget _recentTile(BuildContext context, AppInfo app) {
+    final meta = state.metaFor(app.packageName);
+    return ListTile(
+      leading: AppIcon(packageName: app.packageName, label: app.appName),
+      title: Text(app.appName),
+      subtitle: Text(
+        context.strings.t('启动 {count} 次 · 上次 {ago}', {
+          'count': meta.launchCount,
+          'ago': Fmt.relative(meta.lastLaunchedAt),
+        }),
+      ),
+      trailing: const Icon(Icons.rocket_launch_outlined, size: 20),
+      onTap: () => launchApp(context, app.packageName),
+      onLongPress: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AppDetailScreen(packageName: app.packageName),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionLabel extends StatelessWidget {
+  const _SectionLabel({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 4),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: Theme.of(context).colorScheme.primary,
+        ),
+      ),
+    );
+  }
+}
+
+class _RecommendationSection extends StatelessWidget {
+  const _RecommendationSection({required this.state, required this.items});
+  final AppState state;
+  final List<Recommendation> items;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.strings;
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
+          child: Row(
+            children: [
+              Icon(Icons.auto_awesome, size: 15, color: scheme.primary),
+              const SizedBox(width: 6),
+              Text(
+                s.t('推荐'),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                s.t('根据常用时间'),
+                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              ),
+            ],
+          ),
+        ),
+        SizedBox(
+          height: 108,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            itemCount: items.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 10),
+            itemBuilder: (context, i) {
+              final rec = items[i];
+              final name =
+                  state.appByPackage(rec.packageName)?.appName ??
+                      rec.packageName;
+              return InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () => launchApp(context, rec.packageName),
+                onLongPress: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        AppDetailScreen(packageName: rec.packageName),
+                  ),
+                ),
+                child: Container(
+                  width: 92,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: scheme.outlineVariant.withValues(alpha: 0.5),
+                    ),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      AppIcon(
+                        packageName: rec.packageName,
+                        label: name,
+                        size: 44,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        s.t('常在 {time}', {
+                          'time': Fmt.timeOfDay(rec.typicalMinute),
+                        }),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
