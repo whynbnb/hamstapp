@@ -13,6 +13,7 @@ import '../utils/format.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_tile.dart';
 import '../widgets/chip_scroller.dart';
+import 'apk_analyzer_screen.dart';
 
 class AppDetailScreen extends StatefulWidget {
   const AppDetailScreen({
@@ -132,6 +133,24 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               tooltip: context.strings.t('应用信息'),
               icon: const Icon(Icons.info_outline),
               onPressed: () => openAppInfo(context, widget.packageName),
+            ),
+          if (app != null)
+            IconButton(
+              tooltip: context.strings.t('分析已安装的 APK'),
+              icon: const Icon(Icons.manage_search),
+              onPressed: () {
+                final path = app.apkPath;
+                if (path.isEmpty) {
+                  _snack(context.strings.t('找不到该应用的 APK 文件'));
+                  return;
+                }
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => ApkAnalyzerScreen(initialPath: path),
+                  ),
+                );
+              },
             ),
           if (app != null && !app.isSystem)
             IconButton(

@@ -685,6 +685,7 @@ const Map<String, String> _en = <String, String>{
 
   // ---- apk analyzer
   'APK 分析': 'APK analysis',
+  '分析已安装的 APK': 'Analyze the installed APK',
   '分享': 'Share',
   '正在分析…': 'Analyzing…',
   '分析失败：{error}': 'Analysis failed: {error}',
