@@ -189,8 +189,6 @@ const Map<String, String> _en = <String, String>{
   '排序 / 时间筛选': 'Sort / time filter',
   '最近 · 排序与筛选': 'Recent · sort & filter',
   '推荐': 'Recommended',
-  '根据常用时间': 'By routine',
-  '常在 {time}': 'Usually {time}',
   '智能推荐': 'Smart suggestions',
   '根据常用时间段，在「最近」顶部推荐此刻可能想用的应用':
       'Suggest apps you likely need right now, based on the time of day',

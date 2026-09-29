@@ -14,14 +14,6 @@ class Fmt {
       ? AppStrings.current.t('未知')
       : _day.format(DateTime.fromMillisecondsSinceEpoch(millis));
 
-  /// Formats a minute of day (0..1439) as `HH:mm`.
-  static String timeOfDay(int minuteOfDay) {
-    final m = ((minuteOfDay % 1440) + 1440) % 1440;
-    final h = (m ~/ 60).toString().padLeft(2, '0');
-    final mm = (m % 60).toString().padLeft(2, '0');
-    return '$h:$mm';
-  }
-
   static String size(int bytes) {
     if (bytes <= 0) return AppStrings.current.t('未知');
     const units = ['B', 'KB', 'MB', 'GB'];

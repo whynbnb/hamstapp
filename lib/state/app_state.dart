@@ -1928,7 +1928,7 @@ class AppState extends ChangeNotifier {
 
   /// Apps suggested for right now, based on when they are usually launched.
   /// Returns nothing when the feature is off or there is not enough history.
-  List<Recommendation> recommendedApps({DateTime? now, int limit = 6}) {
+  List<Recommendation> recommendedApps({DateTime? now, int limit = 8}) {
     if (!recommendationsEnabled || apps.isEmpty || launchLog.isEmpty) {
       return const <Recommendation>[];
     }

@@ -133,6 +133,18 @@ void main() {
       expect(recs.first.packageName, 'com.recent');
     });
 
+    test('caps the number of suggestions', () {
+      final events = <LaunchEvent>[];
+      for (var i = 0; i < 12; i++) {
+        _add(events, 'com.app$i', days, 8, 0);
+      }
+      final recs = Recommender.recommend(
+        events,
+        nowMillis: now8.millisecondsSinceEpoch,
+      );
+      expect(recs.length, 8);
+    });
+
     test('separates workday routines from weekend ones', () {
       final events = <LaunchEvent>[];
       _add(events, 'com.work', <DateTime>[
@@ -266,7 +278,6 @@ void main() {
 
       expect(find.text('推荐'), findsOneWidget);
       expect(find.textContaining('Bike'), findsWidgets);
-      expect(find.textContaining('常在'), findsWidgets);
     });
 
     testWidgets('hides the section when disabled', (tester) async {

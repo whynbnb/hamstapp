@@ -70,7 +70,7 @@ class Recommender {
   static List<Recommendation> recommend(
     List<LaunchEvent> events, {
     required int nowMillis,
-    int limit = 6,
+    int limit = 8,
     double sigma = sigmaMinutes,
     double halfLife = halfLifeDays,
     int minEvents = minEvents,

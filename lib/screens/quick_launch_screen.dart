@@ -1903,16 +1903,20 @@ class _RecommendationSection extends StatelessWidget {
   final AppState state;
   final List<Recommendation> items;
 
+  static const int _maxItems = 8;
+
   @override
   Widget build(BuildContext context) {
     final s = context.strings;
     final scheme = Theme.of(context).colorScheme;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-          child: Row(
+    final shown =
+        items.length > _maxItems ? items.sublist(0, _maxItems) : items;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
             children: [
               Icon(Icons.auto_awesome, size: 15, color: scheme.primary),
               const SizedBox(width: 6),
@@ -1924,87 +1928,71 @@ class _RecommendationSection extends StatelessWidget {
                   color: scheme.primary,
                 ),
               ),
-              const Spacer(),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: scheme.outlineVariant.withValues(alpha: 0.6),
+              ),
+            ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 10,
+              children: [
+                for (final rec in shown)
+                  _RecommendationItem(state: state, rec: rec),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecommendationItem extends StatelessWidget {
+  const _RecommendationItem({required this.state, required this.rec});
+  final AppState state;
+  final Recommendation rec;
+
+  @override
+  Widget build(BuildContext context) {
+    final name =
+        state.appByPackage(rec.packageName)?.appName ?? rec.packageName;
+    return SizedBox(
+      width: 60,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => launchApp(context, rec.packageName),
+        onLongPress: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => AppDetailScreen(packageName: rec.packageName),
+          ),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AppIcon(packageName: rec.packageName, label: name, size: 44),
+              const SizedBox(height: 6),
               Text(
-                s.t('根据常用时间'),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12),
               ),
             ],
           ),
         ),
-        SizedBox(
-          height: 108,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: items.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 10),
-            itemBuilder: (context, i) {
-              final rec = items[i];
-              final name =
-                  state.appByPackage(rec.packageName)?.appName ??
-                      rec.packageName;
-              return InkWell(
-                borderRadius: BorderRadius.circular(16),
-                onTap: () => launchApp(context, rec.packageName),
-                onLongPress: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) =>
-                        AppDetailScreen(packageName: rec.packageName),
-                  ),
-                ),
-                child: Container(
-                  width: 92,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 10,
-                  ),
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                      color: scheme.outlineVariant.withValues(alpha: 0.5),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      AppIcon(
-                        packageName: rec.packageName,
-                        label: name,
-                        size: 44,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        s.t('常在 {time}', {
-                          'time': Fmt.timeOfDay(rec.typicalMinute),
-                        }),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: Colors.grey.shade600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
