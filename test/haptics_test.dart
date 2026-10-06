@@ -155,4 +155,62 @@ void main() {
 
     expect(vibrates, greaterThan(0));
   });
+
+  testWidgets('a fast fling across several tile pages vibrates only once', (
+    tester,
+  ) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'A')]
+      ..tilePages = [
+        TilePage(id: 'p1', name: 'P1', createdAt: 0),
+        TilePage(id: 'p2', name: 'P2', createdAt: 0),
+        TilePage(id: 'p3', name: 'P3', createdAt: 0),
+        TilePage(id: 'p4', name: 'P4', createdAt: 0),
+      ]
+      ..currentTilePageIndex = 0;
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    vibrates = 0;
+    // Fling hard enough to glide across several pages before it settles: the
+    // whole action (drag + its fling) must buzz exactly once.
+    await tester.fling(
+      find.byType(PageView).last,
+      const Offset(-2000, 0),
+      8000,
+    );
+    await tester.pumpAndSettle();
+
+    expect(vibrates, 1);
+    expect(state.currentTilePageIndex, 3);
+  });
+
+  testWidgets('a fast fling across several launch sub-tabs vibrates once', (
+    tester,
+  ) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'A')];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    vibrates = 0;
+    await tester.fling(find.byType(TabBarView), const Offset(-2000, 0), 8000);
+    await tester.pumpAndSettle();
+
+    expect(vibrates, 1);
+  });
 }

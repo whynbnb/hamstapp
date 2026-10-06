@@ -10,6 +10,7 @@ import '../models/tile_page.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/format.dart';
+import '../utils/pager_haptics.dart';
 import '../utils/recommender.dart';
 import '../utils/search.dart';
 import '../utils/tile_layout.dart';
@@ -33,10 +34,9 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   late final TabController _tabs;
   int _lastTab = 0;
 
-  /// Last tab we played a tick for, so a swipe does not double-fire when the
-  /// controller finally settles on the same index.
-  int _lastHapticTab = 0;
-  bool _draggingTabs = false;
+  /// Coalesces sub-tab haptics so one swipe or tap ticks exactly once, however
+  /// many tabs the gesture glides across.
+  late final PagerHaptics _haptics;
 
   RecentSort _recentSort = RecentSort.recent;
   int _recentSince = 0;
@@ -46,7 +46,11 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     super.initState();
     final start = context.read<AppState>().lastLaunchTab.clamp(0, 3);
     _lastTab = start;
-    _lastHapticTab = start;
+    _haptics = PagerHaptics(
+      () => context.read<AppState>().haptic(HapticTrigger.launchTabs),
+    )
+      ..align(start)
+      ..setPageCount(4);
     _tabs = TabController(length: 4, vsync: this, initialIndex: start)
       ..addListener(_onTabChanged);
   }
@@ -55,35 +59,20 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     if (_tabs.index == _lastTab) return;
     _lastTab = _tabs.index;
     context.read<AppState>().setLastLaunchTab(_tabs.index);
-    // Tapping a tab updates the index immediately; swiping settles here after
-    // the animation, by which point the drag-release handler already fired.
-    if (!_draggingTabs && _tabs.index != _lastHapticTab) {
-      _lastHapticTab = _tabs.index;
-      context.read<AppState>().haptic(HapticTrigger.launchTabs);
-    }
+    // Tapping a tab updates the index immediately; a swipe settles here after
+    // the drag already ticked, in which case this is a no-op.
+    _haptics.indexChanged(_tabs.index);
     setState(() {});
   }
 
-  /// Fires the haptic the moment a swipe predicts a different tab (crossing
-  /// the midpoint), not after the page settles. `ScrollEndNotification` only
-  /// arrives once the snap animation is done, which felt late.
+  /// Boils a sub-tab swipe down to at most one tick, fired the moment the
+  /// gesture commits to a different tab (crossing the midpoint) rather than
+  /// waiting for the snap animation to finish.
   bool _onTabsScroll(ScrollNotification n) {
     // depth 0 = this TabBarView's own pager; deeper notifications come from
     // scroll views inside a tab (e.g. the tile board) and must be ignored.
     if (n.depth != 0 || n.metrics.axis != Axis.horizontal) return false;
-    if (n is ScrollStartNotification) {
-      _draggingTabs = n.dragDetails != null;
-    } else if (n is ScrollUpdateNotification && _draggingTabs) {
-      final vp = n.metrics.viewportDimension;
-      if (vp <= 0) return false;
-      final nearest = (n.metrics.pixels / vp).round().clamp(0, 3);
-      if (nearest != _lastHapticTab) {
-        _lastHapticTab = nearest;
-        context.read<AppState>().haptic(HapticTrigger.launchTabs);
-      }
-    } else if (n is ScrollEndNotification) {
-      _draggingTabs = false;
-    }
+    _haptics.handleScroll(n);
     return false;
   }
 
@@ -404,8 +393,10 @@ class _TilesTab extends StatefulWidget {
 class _TilesTabState extends State<_TilesTab> {
   late final PageController _controller;
   int _index = 0;
-  int _lastHapticPage = 0;
-  bool _draggingPages = false;
+
+  /// Coalesces tile-page haptics so one swipe or tap ticks exactly once,
+  /// however many pages the gesture glides across.
+  late final PagerHaptics _haptics;
 
   int _clamp(int i) {
     final n = widget.state.tilePages.length;
@@ -422,7 +413,11 @@ class _TilesTabState extends State<_TilesTab> {
     // this tab was rebuilt, e.g. after switching the top-level tab).
     _index = _clamp(widget.state.currentTilePageIndex);
     widget.state.currentTilePageIndex = _index;
-    _lastHapticPage = _index;
+    _haptics = PagerHaptics(
+      () => widget.state.haptic(HapticTrigger.tilePages),
+    )
+      ..align(_index)
+      ..setPageCount(widget.state.tilePages.length);
     _controller = PageController(initialPage: _index);
   }
 
@@ -444,6 +439,9 @@ class _TilesTabState extends State<_TilesTab> {
     final target = _clamp(widget.state.currentTilePageIndex);
     if (target == _index) return;
     _index = target;
+    // A structural jump (page added/deleted/reordered elsewhere) should not
+    // buzz; sync the tracker silently before the controller follows.
+    _haptics.align(target);
     _jumpTo(target);
   }
 
@@ -459,32 +457,20 @@ class _TilesTabState extends State<_TilesTab> {
     final stateChanged = widget.state.currentTilePageIndex != i;
     final localChanged = _index != i;
     if (!stateChanged && !localChanged) return;
-    // No haptic here: onPageChanged also fires for every intermediate page
-    // while chip taps animate across the pager, which caused a buzz per page.
-    // Swipes tick from _onPagesScroll; taps/adds tick at their call sites.
+    // onPageChanged fires for every intermediate page while a swipe or chip
+    // animation glides across the pager; PagerHaptics guarantees this still
+    // yields exactly one tick for the whole action.
+    _haptics.indexChanged(i);
     if (localChanged) setState(() => _index = i);
     if (stateChanged) widget.state.setCurrentTilePage(i);
   }
 
-  /// Ticks the moment a page swipe predicts a different page (crossing the
-  /// midpoint), rather than waiting for the snap animation to finish.
+  /// Boils a page swipe down to at most one tick, fired the moment the gesture
+  /// commits to a different page (crossing the midpoint), rather than waiting
+  /// for the snap animation to finish.
   bool _onPagesScroll(ScrollNotification n) {
     if (n.depth != 0 || n.metrics.axis != Axis.horizontal) return false;
-    if (n is ScrollStartNotification) {
-      _draggingPages = n.dragDetails != null;
-    } else if (n is ScrollUpdateNotification && _draggingPages) {
-      final vp = n.metrics.viewportDimension;
-      if (vp <= 0) return false;
-      final pages = widget.state.tilePages.length;
-      final nearest =
-          pages == 0 ? 0 : (n.metrics.pixels / vp).round().clamp(0, pages - 1);
-      if (nearest != _lastHapticPage) {
-        _lastHapticPage = nearest;
-        widget.state.haptic(HapticTrigger.tilePages);
-      }
-    } else if (n is ScrollEndNotification) {
-      _draggingPages = false;
-    }
+    _haptics.handleScroll(n);
     return false;
   }
 
@@ -492,6 +478,8 @@ class _TilesTabState extends State<_TilesTab> {
   Widget build(BuildContext context) {
     final state = widget.state;
     final pages = state.tilePages;
+    // Keep the drag-prediction clamp in step when pages are added/removed.
+    _haptics.setPageCount(pages.length);
     if (pages.isEmpty) {
       return _hint(
         context,
@@ -525,10 +513,7 @@ class _TilesTabState extends State<_TilesTab> {
           onSelect: (i) {
             // One tick for the tap, regardless of how many pages the animation
             // glides across.
-            if (_clamp(i) != _index) {
-              state.haptic(HapticTrigger.tilePages);
-              _lastHapticPage = _clamp(i);
-            }
+            _haptics.tickNow(_clamp(i));
             _setIndex(i);
             if (_controller.hasClients &&
                 (_controller.page?.round() ?? 0) != i) {
@@ -544,8 +529,7 @@ class _TilesTabState extends State<_TilesTab> {
             if (page == null || !mounted) return;
             final idx = state.tilePages.indexWhere((p) => p.id == page.id);
             if (idx < 0) return;
-            state.haptic(HapticTrigger.tilePages);
-            _lastHapticPage = idx;
+            _haptics.tickNow(idx);
             _setIndex(idx);
             _jumpTo(idx);
           },
