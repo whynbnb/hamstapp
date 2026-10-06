@@ -33,7 +33,15 @@ class QuickLaunchScreen extends StatefulWidget {
 class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabs;
+  late final PageController _tabPager;
   int _lastTab = 0;
+
+  /// The four launch sections (磁贴/分类/收藏/最近). The pager loops, so pages
+  /// are addressed by a large "virtual" index reduced modulo [_tabCount].
+  static const int _tabCount = 4;
+  static const int _tabBase = 4000; // a multiple of _tabCount, well above zero
+
+  int _tabVirtual(int logical) => _tabBase + logical;
 
   /// Coalesces sub-tab haptics so one swipe or tap ticks exactly once, however
   /// many tabs the gesture glides across.
@@ -45,25 +53,61 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   @override
   void initState() {
     super.initState();
-    final start = context.read<AppState>().lastLaunchTab.clamp(0, 3);
+    final start = context.read<AppState>().lastLaunchTab.clamp(
+      0,
+      _tabCount - 1,
+    );
     _lastTab = start;
     _haptics = PagerHaptics(
       () => context.read<AppState>().haptic(HapticTrigger.launchTabs),
     )
       ..align(start)
-      ..setPageCount(4);
-    _tabs = TabController(length: 4, vsync: this, initialIndex: start)
+      ..setPageCount(_tabCount)
+      ..setPageMapper((raw) => ((raw % _tabCount) + _tabCount) % _tabCount);
+    _tabs = TabController(length: _tabCount, vsync: this, initialIndex: start)
       ..addListener(_onTabChanged);
+    _tabPager = PageController(initialPage: _tabVirtual(start));
   }
 
   void _onTabChanged() {
-    if (_tabs.index == _lastTab) return;
-    _lastTab = _tabs.index;
-    context.read<AppState>().setLastLaunchTab(_tabs.index);
+    final i = _tabs.index;
+    if (i == _lastTab) return;
+    _lastTab = i;
+    context.read<AppState>().setLastLaunchTab(i);
     // Tapping a tab updates the index immediately; a swipe settles here after
     // the drag already ticked, in which case this is a no-op.
-    _haptics.indexChanged(_tabs.index);
+    _haptics.indexChanged(i);
+    // Tapping the bar moves the index but not the pager, so drive the pager to
+    // follow. When the pager itself changed the index it is already aligned and
+    // this is skipped.
+    if (_tabPager.hasClients && _tabPagerLogical != i) _animateLaunchPager(i);
     setState(() {});
+  }
+
+  int get _tabPagerLogical {
+    final page = (_tabPager.page ?? _tabVirtual(_lastTab)).round();
+    return ((page % _tabCount) + _tabCount) % _tabCount;
+  }
+
+  /// Move the launch pager to [logical], taking the shorter way around the loop.
+  void _animateLaunchPager(int logical) {
+    final current = (_tabPager.page ?? _tabVirtual(logical)).round();
+    var diff =
+        (logical - ((current % _tabCount) + _tabCount) % _tabCount) % _tabCount;
+    if (diff > _tabCount ~/ 2) diff -= _tabCount;
+    final target = current + diff;
+    if (current == target) return;
+    _tabPager.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
+    );
+  }
+
+  /// The launch pager landed on virtual page [virtual] (swipe or animation).
+  void _onLaunchPageChanged(int virtual) {
+    final logical = ((virtual % _tabCount) + _tabCount) % _tabCount;
+    if (_tabs.index != logical) _tabs.index = logical;
   }
 
   /// Switch the launch sub-tab by [delta] (+1 = next, -1 = previous).
@@ -71,21 +115,22 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   /// Used by the long-press-and-drag gesture on the tile board's blank area:
   /// a normal horizontal swipe there is consumed by the board's own page pager,
   /// so this is the only way to reach e.g. 分类 without touching the tab bar.
+  /// Loops around: previous on 磁贴 lands on 最近 and next on 最近 lands on 磁贴.
   void _switchLaunchTab(int delta) {
-    final target = (_tabs.index + delta).clamp(0, 3);
+    final target = (_tabs.index + delta + _tabCount) % _tabCount;
     if (target == _tabs.index) return;
     // Use the standard sub-tab tick so the gesture feels the same as tapping or
     // swiping between 磁贴/分类/收藏/最近.
     _haptics.tickNow(target);
-    _tabs.animateTo(target);
+    _tabs.index = target; // _onTabChanged animates the pager to follow
   }
 
   /// Boils a sub-tab swipe down to at most one tick, fired the moment the
   /// gesture commits to a different tab (crossing the midpoint) rather than
   /// waiting for the snap animation to finish.
   bool _onTabsScroll(ScrollNotification n) {
-    // depth 0 = this TabBarView's own pager; deeper notifications come from
-    // scroll views inside a tab (e.g. the tile board) and must be ignored.
+    // depth 0 = this pager's own scroll; deeper notifications come from scroll
+    // views inside a tab (e.g. the tile board) and must be ignored.
     if (n.depth != 0 || n.metrics.axis != Axis.horizontal) return false;
     _haptics.handleScroll(n);
     return false;
@@ -94,6 +139,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   @override
   void dispose() {
     _tabs.dispose();
+    _tabPager.dispose();
     super.dispose();
   }
 
@@ -139,25 +185,33 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
       ),
       body: NotificationListener<ScrollNotification>(
         onNotification: _onTabsScroll,
-        child: TabBarView(
-          controller: _tabs,
+        child: PageView.builder(
+          controller: _tabPager,
           physics: editing
               ? const NeverScrollableScrollPhysics()
               : const PageScrollPhysics(),
-          children: [
-            _TilesTab(
-              state: state,
-              onSwitchTab: _switchLaunchTab,
-              onArm: () => context.read<AppState>().hapticLight(),
-            ),
-            CategoriesTab(state: state),
-            _FavoritesTab(state: state),
-            _RecentTab(
-              state: state,
-              sort: _recentSort,
-              sinceMillis: _recentSince,
-            ),
-          ],
+          itemCount: null,
+          onPageChanged: _onLaunchPageChanged,
+          itemBuilder: (context, virtual) {
+            switch (((virtual % _tabCount) + _tabCount) % _tabCount) {
+              case 0:
+                return _TilesTab(
+                  state: state,
+                  onSwitchTab: _switchLaunchTab,
+                  onArm: () => context.read<AppState>().hapticLight(),
+                );
+              case 1:
+                return CategoriesTab(state: state);
+              case 2:
+                return _FavoritesTab(state: state);
+              default:
+                return _RecentTab(
+                  state: state,
+                  sort: _recentSort,
+                  sinceMillis: _recentSince,
+                );
+            }
+          },
         ),
       ),
     );
@@ -434,6 +488,12 @@ class _TilesTabState extends State<_TilesTab> {
   late final PageController _controller;
   int _index = 0;
 
+  /// Number of real tile pages and the virtual base for the looping pager:
+  /// virtual page = _base + logical, logical = virtual % _n, so the pager can
+  /// be swiped in either direction without hitting a hard stop.
+  int _n = 0;
+  int _base = 0;
+
   /// Coalesces tile-page haptics so one swipe or tap ticks exactly once,
   /// however many pages the gesture glides across.
   late final PagerHaptics _haptics;
@@ -451,6 +511,13 @@ class _TilesTabState extends State<_TilesTab> {
     return i < 0 ? 0 : (i >= n ? n - 1 : i);
   }
 
+  int _virtualOf(int logical) => _base + logical;
+
+  int _logicalOf(int virtual) {
+    if (_n <= 0) return 0;
+    return ((virtual % _n) + _n) % _n;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -458,14 +525,17 @@ class _TilesTabState extends State<_TilesTab> {
     // this the freshly created PageController would start at page 0 while the
     // bottom bar highlighted a different page (the two got out of sync when
     // this tab was rebuilt, e.g. after switching the top-level tab).
+    _n = widget.state.tilePages.length;
+    _base = _n * 1000;
     _index = _clamp(widget.state.currentTilePageIndex);
     widget.state.currentTilePageIndex = _index;
     _haptics = PagerHaptics(
       () => widget.state.haptic(HapticTrigger.tilePages),
     )
       ..align(_index)
-      ..setPageCount(widget.state.tilePages.length);
-    _controller = PageController(initialPage: _index);
+      ..setPageCount(_n <= 0 ? 1 : _n)
+      ..setPageMapper(_logicalOf);
+    _controller = PageController(initialPage: _virtualOf(_index));
   }
 
   @override
@@ -483,19 +553,34 @@ class _TilesTabState extends State<_TilesTab> {
   }
 
   void _syncToState() {
+    final n = widget.state.tilePages.length;
     final target = _clamp(widget.state.currentTilePageIndex);
+    if (n != _n) {
+      // Pages were added/removed/reordered elsewhere: re-anchor the virtual
+      // base so the modulo mapping stays valid and the same logical page stays
+      // on screen, without buzzing.
+      _n = n;
+      _base = n * 1000;
+      _index = target;
+      _haptics.setPageCount(n <= 0 ? 1 : n);
+      _haptics.align(target);
+      _jumpToVirtual(_virtualOf(target));
+      return;
+    }
     if (target == _index) return;
     _index = target;
-    // A structural jump (page added/deleted/reordered elsewhere) should not
-    // buzz; sync the tracker silently before the controller follows.
+    // A structural jump (page deleted/reordered elsewhere) should not buzz;
+    // sync the tracker silently before the controller follows.
     _haptics.align(target);
-    _jumpTo(target);
+    _jumpToVirtual(_virtualOf(target));
   }
 
-  void _jumpTo(int i) {
+  void _jumpToVirtual(int target) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || !_controller.hasClients) return;
-      if ((_controller.page?.round() ?? 0) != i) _controller.jumpToPage(i);
+      if ((_controller.page?.round() ?? 0) != target) {
+        _controller.jumpToPage(target);
+      }
     });
   }
 
@@ -586,10 +671,10 @@ class _TilesTabState extends State<_TilesTab> {
                 physics: state.tileEditMode
                     ? const NeverScrollableScrollPhysics()
                     : const PageScrollPhysics(),
-                itemCount: pages.length,
-                onPageChanged: _setIndex,
-                itemBuilder: (context, i) =>
-                    _TileBoard(state: state, page: pages[i]),
+                itemCount: null,
+                onPageChanged: (v) => _setIndex(_logicalOf(v)),
+                itemBuilder: (context, v) =>
+                    _TileBoard(state: state, page: pages[_logicalOf(v)]),
               ),
             ),
           ),
@@ -603,10 +688,11 @@ class _TilesTabState extends State<_TilesTab> {
             // glides across.
             _haptics.tickNow(_clamp(i));
             _setIndex(i);
+            final target = _virtualOf(_clamp(i));
             if (_controller.hasClients &&
-                (_controller.page?.round() ?? 0) != i) {
+                (_controller.page?.round() ?? 0) != target) {
               _controller.animateToPage(
-                i,
+                target,
                 duration: const Duration(milliseconds: 240),
                 curve: Curves.easeOut,
               );
@@ -619,7 +705,8 @@ class _TilesTabState extends State<_TilesTab> {
             if (idx < 0) return;
             _haptics.tickNow(idx);
             _setIndex(idx);
-            _jumpTo(idx);
+            // The page count grew, so _syncToState re-anchors the virtual base
+            // and jumps to the new page on the next build.
           },
           onChanged: _syncToState,
         ),

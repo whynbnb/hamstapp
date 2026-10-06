@@ -875,7 +875,9 @@ void main() {
     expect(state.lastLaunchTab, 1); // 磁贴 -> 分类
   });
 
-  testWidgets('sliding right on the first sub-tab stays put', (tester) async {
+  testWidgets('sliding right on the first sub-tab wraps to the last', (
+    tester,
+  ) async {
     final state = await pumpLaunch(tester, tiles: const []);
 
     final gesture = await tester.startGesture(
@@ -887,7 +889,7 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(state.lastLaunchTab, 0); // 磁贴 is already the first, nothing to do
+    expect(state.lastLaunchTab, 3); // 磁贴 loops back to 最近
   });
 
   testWidgets('long-pressing a tile does nothing and does not switch tabs', (

@@ -49,7 +49,19 @@ class PagerHaptics {
     _pageCount = count < 1 ? 1 : count;
   }
 
-  int _clamp(int index) {
+  /// Optional wrap mapper for a looping pager. When set, a raw scroll-derived
+  /// page number is converted to the real page index (e.g. modulo the page
+  /// count) instead of being clamped, so drag/flick predictions stay correct
+  /// when the pager loops past either end.
+  int Function(int raw)? _map;
+
+  void setPageMapper(int Function(int raw)? mapper) {
+    _map = mapper;
+  }
+
+  int _normalize(int index) {
+    final map = _map;
+    if (map != null) return map(index);
     if (index < 0) return 0;
     final last = _pageCount - 1;
     return index > last ? last : index;
@@ -90,7 +102,7 @@ class PagerHaptics {
   /// The drag currently predicts [nearest] as the target page. Ticks once, the
   /// first time the prediction differs from the current page.
   void dragTo(int nearest) {
-    final target = _clamp(nearest);
+    final target = _normalize(nearest);
     if (_ticked || target == _current) return;
     _ticked = true;
     onTick();
@@ -128,7 +140,9 @@ class PagerHaptics {
             // Mirror PageScrollPhysics: a flick nudges the page by half before
             // rounding, so this predicts the page it will actually settle on.
             final page = n.metrics.pixels / vp;
-            final target = _clamp((page + (delta < 0 ? -0.5 : 0.5)).round());
+            final target = _normalize(
+              (page + (delta < 0 ? -0.5 : 0.5)).round(),
+            );
             if (target != _current) {
               _ticked = true;
               onTick();

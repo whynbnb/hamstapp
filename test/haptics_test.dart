@@ -71,7 +71,7 @@ void main() {
     expect(vibrates, 0);
 
     // Drag the pager from the first sub-tab to the next one.
-    await tester.drag(find.byType(TabBarView), const Offset(-500, 0));
+    await tester.drag(find.byType(PageView).first, const Offset(-500, 0));
     await tester.pump();
 
     expect(
@@ -208,7 +208,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     vibrates = 0;
-    await tester.fling(find.byType(TabBarView), const Offset(-2000, 0), 8000);
+    await tester.fling(find.byType(PageView).first, const Offset(-2000, 0), 8000);
     await tester.pumpAndSettle();
 
     expect(vibrates, 1);
@@ -230,7 +230,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 50));
 
     vibrates = 0;
-    await tester.fling(find.byType(TabBarView), const Offset(-400, 0), 2000);
+    await tester.fling(find.byType(PageView).first, const Offset(-400, 0), 2000);
     // A few frames in, while the settling animation is still running, the tick
     // must already have fired (over-half of the swipe should not wait for the
     // animation to finish).
@@ -241,5 +241,55 @@ void main() {
 
     await tester.pumpAndSettle();
     expect(vibrates, 1); // and never a second time
+  });
+
+  testWidgets('swiping right on the first launch sub-tab wraps to the last', (
+    tester,
+  ) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'A')];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // 磁贴 is the first section; swiping right (previous) loops to 最近.
+    await tester.drag(find.byType(PageView).first, const Offset(600, 0));
+    await tester.pumpAndSettle();
+
+    expect(state.lastLaunchTab, 3);
+  });
+
+  testWidgets('swiping right on the first tile page wraps to the last', (
+    tester,
+  ) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'A')]
+      ..tilePages = [
+        TilePage(id: 'p1', name: 'P1', createdAt: 0),
+        TilePage(id: 'p2', name: 'P2', createdAt: 0),
+        TilePage(id: 'p3', name: 'P3', createdAt: 0),
+      ]
+      ..currentTilePageIndex = 0;
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // The inner board pager is the last PageView; drag it right from P1.
+    await tester.drag(find.byType(PageView).last, const Offset(600, 0));
+    await tester.pumpAndSettle();
+
+    expect(state.currentTilePageIndex, 2); // P1 loops back to P3
   });
 }
