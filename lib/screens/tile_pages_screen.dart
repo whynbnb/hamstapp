@@ -16,7 +16,7 @@ Future<bool> confirmDeleteTilePage(
     builder: (ctx) => AlertDialog(
       title: Text(s.t('删除页面')),
       content: Text(
-        s.t('将删除「{name}」，页面上的磁贴会移回第一页。确定删除吗？', {
+        s.t('将删除「{name}」，页面上的磁贴也会一并删除。确定删除吗？', {
           'name': page.name,
         }),
       ),

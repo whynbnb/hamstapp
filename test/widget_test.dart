@@ -236,6 +236,15 @@ void main() {
     expect(p.row, 0);
   });
 
+  test('resolveMove stays near the drop point, not the row start', () {
+    // Occupied at (4,0); drop a 2x2 there. The tile should land as close as
+    // possible (2,0), not jump to the left edge (0,0).
+    final others = [const TileSpec(id: 'o', col: 4, row: 0, w: 2, h: 2)];
+    final p = resolveMove(others, 'n', 4, 0, 2, 2);
+    expect(p.col, 2);
+    expect(p.row, 0);
+  });
+
   test('tile columns adapt to screen width', () {
     expect(tileColumnsForWidth(360), 6); // phone: unchanged
     expect(tileColumnsForWidth(411), 6);
@@ -268,6 +277,23 @@ void main() {
     // ...while a narrow board clamps it into the visible range.
     await state.moveTile(t.id, 10, 0, cols: 6);
     expect(state.tileById(t.id)!.col, 4);
+  });
+
+  test('moving a tile leaves the other tiles in place', () async {
+    final state = AppState(_MemStorage());
+    state.tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)];
+    state.apps = [_ai('com.a', 'A'), _ai('com.b', 'B')];
+    final a = await state.addTile('com.a');
+    final b = await state.addTile('com.b');
+
+    // New tiles get a concrete cell, not an auto (-1) one.
+    expect(b.col, greaterThanOrEqualTo(0));
+    expect(b.row, greaterThanOrEqualTo(0));
+    final bBefore = (b.col, b.row);
+
+    await state.moveTile(a.id, 4, 3);
+    expect(state.tileById(a.id)!.col, 4);
+    expect((state.tileById(b.id)!.col, state.tileById(b.id)!.row), bBefore);
   });
 
   test('unorganized filter also excludes favorites and tiled apps', () async {
@@ -648,6 +674,26 @@ void main() {
     expect(state.tilePages.map((p) => p.id).toList(), ['p2', 'p3', 'p1']);
     expect(state.currentTilePageId, 'p2'); // still viewing P2
     expect(state.currentTilePageIndex, 0);
+  });
+
+  test('deleting a page deletes its tiles instead of merging them', () async {
+    final state = AppState(_MemStorage());
+    state.tilePages = [
+      TilePage(id: 'p1', name: 'P1', createdAt: 0),
+      TilePage(id: 'p2', name: 'P2', createdAt: 0),
+    ];
+    state.apps = [_ai('com.a', 'A'), _ai('com.b', 'B')];
+    final a = await state.addTile('com.a', pageId: 'p1');
+    final b = await state.addTile('com.b', pageId: 'p2');
+    expect(state.tiles.length, 2);
+
+    await state.deleteTilePage('p2');
+
+    // P2's tile is gone; P1's tile is untouched and nothing was merged into P1.
+    expect(state.tileById(a.id), isNotNull);
+    expect(state.tileById(b.id), isNull);
+    expect(state.tiles.length, 1);
+    expect(state.metaFor('com.b').pinned, isFalse);
   });
 
   test('search matches pinyin initials and full pinyin', () {

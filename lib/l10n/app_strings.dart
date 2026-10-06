@@ -464,6 +464,9 @@ const Map<String, String> _en = <String, String>{
   '第 {index} / {total} 页': 'Page {index} / {total}',
   '尚未固定到任何磁贴页': 'Not pinned to any tile page',
   '页面上的磁贴会移回第一个页面': 'Tiles on this page move back to the first page',
+  '页面上的磁贴也会一并删除': 'Tiles on this page are deleted too',
+  '将删除「{name}」，页面上的磁贴也会一并删除。确定删除吗？':
+      'Delete "{name}"? Its tiles will be deleted too.',
   '固定到当前页「{page}」': 'Pin to current page "{page}"',
   '当前页：{page} · 点击固定/取消，长按再添加一个':
       'Current page: {page} · tap to pin/unpin, long-press to add another',

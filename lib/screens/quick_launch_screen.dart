@@ -1381,7 +1381,7 @@ void _pageMenu(
             ListTile(
               leading: const Icon(Icons.delete_outline),
               title: Text(s.t('删除页面')),
-              subtitle: Text(s.t('页面上的磁贴会移回第一个页面')),
+              subtitle: Text(s.t('页面上的磁贴也会一并删除')),
               onTap: () async {
                 Navigator.pop(ctx);
                 // Deleting a page needs a second confirmation.

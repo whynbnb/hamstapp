@@ -1007,4 +1007,41 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.tiles, isEmpty);
   });
+
+  testWidgets('deleting a tile leaves the other tiles in place', (tester) async {
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      (call) async => null,
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'A'), _ai('com.b', 'B')]
+      ..tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)];
+    final a = await state.addTile('com.a');
+    final b = await state.addTile('com.b');
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final before = tester.getTopLeft(find.byKey(ValueKey(b.id)));
+    await state.removeTile(a.id);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // The removed tile is gone and the other one did not move to fill the gap.
+    expect(find.byKey(ValueKey(a.id)), findsNothing);
+    expect(tester.getTopLeft(find.byKey(ValueKey(b.id))), before);
+  });
 }

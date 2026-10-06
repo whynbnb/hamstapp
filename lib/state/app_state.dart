@@ -254,6 +254,9 @@ class AppState extends ChangeNotifier {
       }
     }
     if (metaChanged) await _persistMeta();
+    // One-time migration: tiles created before explicit cells get concrete
+    // positions so the board stops re-packing them on later edits.
+    await _migrateTilePositions();
     apps = _parseApps(await storage.readJson(_kAppsCache));
     initialized = true;
     notifyListeners();
@@ -974,10 +977,15 @@ class AppState extends ChangeNotifier {
         currentTilePageId ??
         (tilePages.isEmpty ? '' : tilePages.first.id);
     final size = tileDefaultSize;
+    // Give the new tile a concrete cell so it never gets auto-packed (and
+    // re-flowed) later by additions or deletions elsewhere on the page.
+    final (col, row) = _firstFreeSpot(target, size, size);
     final tile = Tile(
       id: _newId(),
       packageName: packageName,
       pageId: target,
+      col: col,
+      row: row,
       w: size,
       h: size,
     );
@@ -987,6 +995,55 @@ class AppState extends ChangeNotifier {
     await _persistMeta();
     notifyListeners();
     return tile;
+  }
+
+  /// Sentinel spec id used to ask the layout engine where a new tile would go.
+  static const String _kNewTileSpecId = '\u0000new-tile';
+
+  /// Concrete (col,row) for a [w]x[h] tile on [pageId]: the first free cell
+  /// when packing this page's current tiles.
+  (int, int) _firstFreeSpot(String pageId, int w, int h) {
+    final specs = <TileSpec>[
+      for (final t in tiles)
+        if (_normalizedPageId(t) == pageId)
+          TileSpec(id: t.id, w: t.w, h: t.h, col: t.col, row: t.row),
+      TileSpec(id: _kNewTileSpecId, w: w, h: h),
+    ];
+    final layout = resolveTileLayout(specs, cols: kTileCols);
+    final p = layout.placements[_kNewTileSpecId];
+    return p == null ? (0, 0) : (p.col, p.row);
+  }
+
+  /// Give every tile an explicit cell so the board no longer re-packs tiles
+  /// with an "auto" position when another tile is added, moved or deleted.
+  Future<void> _migrateTilePositions() async {
+    var changed = false;
+    for (final page in tilePages) {
+      final pageTiles =
+          tiles.where((t) => _normalizedPageId(t) == page.id).toList()
+            ..sort((a, b) {
+              final ar = a.row < 0 ? 1 << 20 : a.row;
+              final br = b.row < 0 ? 1 << 20 : b.row;
+              if (ar != br) return ar.compareTo(br);
+              final ac = a.col < 0 ? 1 << 20 : a.col;
+              final bc = b.col < 0 ? 1 << 20 : b.col;
+              if (ac != bc) return ac.compareTo(bc);
+              return a.id.compareTo(b.id);
+            });
+      final specs = pageTiles
+          .map((t) => TileSpec(id: t.id, w: t.w, h: t.h, col: t.col, row: t.row))
+          .toList();
+      final layout = resolveTileLayout(specs, cols: kTileCols);
+      for (final t in pageTiles) {
+        if (t.col >= 0 && t.row >= 0) continue;
+        final p = layout.placements[t.id];
+        if (p == null) continue;
+        t.col = p.col;
+        t.row = p.row;
+        changed = true;
+      }
+    }
+    if (changed) await _persistTiles();
   }
 
   Future<void> removeTile(String tileId) async {
@@ -1071,9 +1128,15 @@ class AppState extends ChangeNotifier {
     final removed = tilePages.indexWhere((p) => p.id == id);
     if (removed < 0) return;
     tilePages.removeAt(removed);
-    final firstId = tilePages.first.id;
-    for (final t in tiles) {
-      if (t.pageId == id) t.pageId = firstId;
+    // Deleting a page deletes the tiles that live on it; nothing is merged
+    // into the first page.
+    final affected = <String>{
+      for (final t in tiles)
+        if (t.pageId == id) t.packageName,
+    };
+    tiles.removeWhere((t) => t.pageId == id);
+    for (final pkg in affected) {
+      _syncPinned(pkg);
     }
     // Keep the same logical page in view: if an earlier page disappeared the
     // current index shifts down by one; otherwise clamp to the new range.
@@ -1087,6 +1150,7 @@ class AppState extends ChangeNotifier {
     _rememberTilePage();
     await _persistTilePages();
     await _persistTiles();
+    await _persistMeta();
     notifyListeners();
   }
 

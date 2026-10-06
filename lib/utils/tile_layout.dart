@@ -165,11 +165,24 @@ TilePlacement resolveMove(
   final rr = wantRow < 0 ? 0 : wantRow;
   if (fits(cc, rr)) return TilePlacement(id, cc, rr, w, h);
 
-  // scan forwards from the requested row for the first free spot
-  for (var r = rr; r < rr + 200; r++) {
+  // The requested spot is taken: place the tile in the nearest free cell
+  // (Manhattan distance), scanning row-major so ties resolve to the top-most
+  // then left-most option. This keeps the tile right next to where it was
+  // dropped instead of jumping to the left edge of the row.
+  var bestCol = 0;
+  var bestRow = 0;
+  var bestDist = 1 << 30;
+  final maxRow = base.rows + h; // always includes a fully free row below
+  for (var r = 0; r <= maxRow; r++) {
     for (var c = 0; c + w <= cols; c++) {
-      if (fits(c, r)) return TilePlacement(id, c, r, w, h);
+      if (!fits(c, r)) continue;
+      final d = (c - cc).abs() + (r - rr).abs();
+      if (d < bestDist) {
+        bestDist = d;
+        bestCol = c;
+        bestRow = r;
+      }
     }
   }
-  return TilePlacement(id, 0, 0, w, h);
+  return TilePlacement(id, bestCol, bestRow, w, h);
 }
