@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -261,5 +263,70 @@ void main() {
 
     expect(find.byType(RemoteApkDetailScreen), findsOneWidget);
     expect(downloads, 0, reason: 'row tap must not start an install/download');
+  });
+
+  testWidgets('detail page shows the ring on the card and the bar on top', (
+    tester,
+  ) async {
+    // Tall surface so the version card (which hosts the ring) is mounted.
+    tester.view.physicalSize = const Size(1080, 3200);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+
+    // Keep the download pending so the busy UI stays on screen.
+    final pending = Completer<String>();
+    mock((call) async {
+      switch (call.method) {
+        case 'cacheIndex':
+          return {'entries': [], 'totalBytes': 0};
+        case 'cacheIndexAll':
+          return {'entries': [], 'totalBytes': 0};
+        case 'remoteDownload':
+          return pending.future;
+      }
+      return null;
+    });
+
+    final entry = {
+      'name': 'app.apk',
+      'path': '/app.apk',
+      'size': 20,
+      'modified': 1,
+    };
+    final state = AppState(_MemStorage())..initialized = true;
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(
+          home: RemoteApkDetailScreen(
+            source: _source(),
+            entry: entry,
+            siblings: [entry],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.tap(find.text('安装'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 10));
+
+    // Exactly two indicators: a ring on the version card being downloaded, and
+    // the main progress bar up in the actions area (never inside a card).
+    final ring = find.byType(CircularProgressIndicator);
+    final bar = find.byType(LinearProgressIndicator);
+    expect(ring, findsOneWidget);
+    expect(bar, findsOneWidget);
+    expect(find.ancestor(of: ring, matching: find.byType(Card)), findsOneWidget);
+    expect(find.ancestor(of: bar, matching: find.byType(Card)), findsNothing);
+
+    pending.complete('/cache/app.apk');
+    await tester.pumpAndSettle();
   });
 }

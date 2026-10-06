@@ -185,8 +185,9 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
               .where((e) => ((e['packageName'] as String?) ?? '') == pkg)
               .toList();
     final cachedForEntry = meta != null;
-    final key = _keyOf(entry);
-    final busy = _busy.contains(key);
+    // The first download currently in flight drives the main progress bar in
+    // the actions area; each version card shows its own ring.
+    final activeKey = _busy.isEmpty ? null : _busy.first;
 
     return Scaffold(
       appBar: AppBar(
@@ -212,12 +213,13 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
         children: [
           _header(state, entry, meta, pkg, installed),
           const SizedBox(height: 16),
-          if (busy)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: LinearProgressIndicator(),
-            ),
-          _actions(entry, installed, cached: cachedForEntry),
+          _actions(
+            entry,
+            installed,
+            cached: cachedForEntry,
+            running: activeKey != null,
+            progress: activeKey == null ? null : _progress[activeKey],
+          ),
           const SizedBox(height: 22),
           _sectionTitle(s.t('文件信息')),
           _infoCard([
@@ -353,11 +355,12 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
     Map<String, dynamic> entry,
     AppInfo? installed, {
     required bool cached,
+    required bool running,
+    required double? progress,
   }) {
     final s = context.strings;
     final key = _keyOf(entry);
     final busy = _busy.contains(key);
-    final progress = _progress[key];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -390,7 +393,9 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
             ),
           ],
         ),
-        if (busy && progress != null)
+        // The main progress bar lives here, next to the action buttons; the
+        // per-version ring over on the downloaded card says *which* file it is.
+        if (running)
           Padding(
             padding: const EdgeInsets.only(top: 10),
             child: LinearProgressIndicator(value: progress, minHeight: 3),
@@ -410,7 +415,8 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
     final cached = meta != null;
     final key = _keyOf(f);
     final busy = _busy.contains(key);
-    final progress = _progress[key];
+    // The ring marks *which* version is downloading; the main progress bar is
+    // shown once, in the actions area at the top.
     final version = (meta?['versionName'] as String?)?.trim() ?? '';
     final code = (meta?['versionCode'] as num?)?.toInt() ?? 0;
     final title = version.isEmpty
@@ -455,11 +461,6 @@ class _RemoteApkDetailScreenState extends State<RemoteApkDetailScreen> {
                   )
                 : _versionMenu(f, cached: cached),
           ),
-          if (busy && progress != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: LinearProgressIndicator(value: progress, minHeight: 3),
-            ),
         ],
       ),
     );
