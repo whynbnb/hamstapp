@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import 'category.dart';
 
 /// A single app recorded inside a snapshot.
@@ -27,6 +30,11 @@ class SnapshotEntry {
   /// When the app was uninstalled; 0 means it was installed at snapshot time.
   final int uninstalledAt;
 
+  /// PNG bytes of the app icon captured with the snapshot, so uninstalled apps
+  /// can still be shown with their icon. Null for snapshots taken before icons
+  /// were recorded (old data stays compatible).
+  final Uint8List? icon;
+
   const SnapshotEntry({
     required this.packageName,
     required this.appName,
@@ -43,6 +51,7 @@ class SnapshotEntry {
     this.pinned = false,
     this.uninstallReason = '',
     this.uninstalledAt = 0,
+    this.icon,
   });
 
   bool get isInstalled => uninstalledAt == 0;
@@ -63,7 +72,17 @@ class SnapshotEntry {
         pinned: map['pinned'] as bool? ?? false,
         uninstallReason: map['uninstallReason'] as String? ?? '',
         uninstalledAt: map['uninstalledAt'] as int? ?? 0,
+        icon: _decodeIcon(map['icon']),
       );
+
+  static Uint8List? _decodeIcon(Object? raw) {
+    if (raw is! String || raw.isEmpty) return null;
+    try {
+      return base64Decode(raw);
+    } catch (_) {
+      return null;
+    }
+  }
 
   Map<String, dynamic> toMap() => {
         'packageName': packageName,
@@ -81,6 +100,7 @@ class SnapshotEntry {
         'pinned': pinned,
         'uninstallReason': uninstallReason,
         'uninstalledAt': uninstalledAt,
+        if (icon != null) 'icon': base64Encode(icon!),
       };
 }
 

@@ -119,6 +119,13 @@ const Map<String, String> _en = <String, String>{
   '恢复': 'Restore',
   '恢复标注数据': 'Restore annotations',
   '刷新': 'Refresh',
+  '刷新图标缓存': 'Refresh icon cache',
+  '重新读取所有应用的图标，修复缺失或过期的图标':
+      'Re-read every app icon to fix missing or outdated ones',
+  '将清空缓存并重新读取 {n} 个应用的图标。':
+      'This clears the cache and re-reads icons for {n} apps.',
+  '正在刷新图标…': 'Refreshing icons…',
+  '已刷新 {n} 个应用图标': 'Refreshed icons for {n} apps',
   '刷新应用列表': 'Refresh app list',
   '刷新应用列表\n长按查看统计信息': 'Refresh app list\nLong-press for stats',
   '重试': 'Retry',

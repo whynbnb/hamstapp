@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:hamstapp/l10n/app_strings.dart';
@@ -11,6 +12,7 @@ import 'package:hamstapp/models/snapshot.dart';
 import 'package:hamstapp/models/snapshot_diff.dart';
 import 'package:hamstapp/models/tile.dart';
 import 'package:hamstapp/models/tile_page.dart';
+import 'package:hamstapp/services/icon_cache.dart';
 import 'package:hamstapp/services/remote_client.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
@@ -57,6 +59,8 @@ SnapshotEntry _e(String pkg, String ver, int code) => SnapshotEntry(
 );
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   test('snapshot diff detects added, removed and updated apps', () {
     final older = Snapshot(
       id: 'a',
@@ -160,6 +164,164 @@ void main() {
     expect(restored.installedCount, 1);
     expect(restored.uninstalledCount, 1);
     expect(restored.categories.single.name, '工具');
+  });
+
+  test('snapshot entries carry icons and stay compatible with old data', () {
+    final icon = Uint8List.fromList([1, 2, 3, 4]);
+    final snapshot = Snapshot(
+      id: 's1',
+      name: 'with icon',
+      createdAt: 0,
+      entries: [
+        SnapshotEntry(
+          packageName: 'com.a',
+          appName: 'A',
+          versionName: '1',
+          versionCode: 1,
+          lastUpdateTime: 0,
+          firstInstallTime: 0,
+          isSystem: false,
+          sizeBytes: 0,
+          icon: icon,
+        ),
+      ],
+    );
+
+    // A real JSON round-trip (the icon is stored base64-encoded).
+    final restored = Snapshot.fromMap(
+      (jsonDecode(jsonEncode(snapshot.toMap())) as Map).cast<String, dynamic>(),
+    );
+    expect(restored.entries.single.icon, icon);
+
+    // A snapshot saved before icons existed still loads, with a null icon.
+    final legacy = Snapshot.fromMap({
+      'id': 's2',
+      'name': 'legacy',
+      'createdAt': 0,
+      'entries': [
+        {
+          'packageName': 'com.b',
+          'appName': 'B',
+          'versionName': '',
+          'versionCode': 0,
+          'lastUpdateTime': 0,
+          'firstInstallTime': 0,
+          'isSystem': false,
+          'sizeBytes': 0,
+        },
+      ],
+    });
+    expect(legacy.entries.single.icon, isNull);
+  });
+
+  test('icon cache persists and reloads across restarts', () async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    addTearDown(() => IconCache.instance.replaceAll(<String, Uint8List>{}));
+
+    final storage = _MemStorage();
+    final first = AppState(storage);
+    final bytes = Uint8List.fromList([9, 8, 7]);
+    first.rememberIcon('com.a', bytes);
+    // Let the coalesced write run.
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    final second = AppState(storage);
+    await second.init();
+    expect(second.iconFor('com.a'), bytes);
+  });
+
+  test('createSnapshot records cached app icons (and export carries them)', () async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    addTearDown(() => IconCache.instance.replaceAll(<String, Uint8List>{}));
+
+    final state = AppState(_MemStorage());
+    state.tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)];
+    state.apps = [_ai('com.a', 'A')];
+    final bytes = Uint8List.fromList([4, 5, 6]);
+    state.rememberIcon('com.a', bytes);
+
+    final snap = await state.createSnapshot('s');
+    expect(snap.entries.single.icon, bytes);
+    final pkg = state.exportPackage();
+    expect(pkg['data']['icons'], isNotEmpty);
+
+    // Import into a fresh state after wiping the cache: the bundle restores it.
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    final imported = AppState(_MemStorage());
+    await imported.importPackage(pkg);
+    expect(imported.iconFor('com.a'), bytes);
+  });
+
+  test('refreshIconCache re-reads icons for installed apps', () async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    const channel = MethodChannel('hamstapp/apps');
+    final bytes = Uint8List.fromList([7, 7, 7]);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getAppIcon') return bytes;
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      IconCache.instance.replaceAll(<String, Uint8List>{});
+    });
+
+    final state = AppState(_MemStorage())
+      ..apps = [_ai('com.a', 'A'), _ai('com.b', 'B')];
+    final n = await state.refreshIconCache();
+    expect(n, 2);
+    expect(state.iconFor('com.a'), isNotNull);
+    expect(state.iconFor('com.b'), isNotNull);
+  });
+
+  test('scanning the app list also refreshes the icon cache', () async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    const channel = MethodChannel('hamstapp/apps');
+    final bytes = Uint8List.fromList([7, 7, 7]);
+    var iconCalls = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getInstalledApps') {
+        return [
+          {
+            'packageName': 'com.a',
+            'appName': 'A',
+            'versionName': '1',
+            'versionCode': 1,
+            'firstInstallTime': 0,
+            'lastUpdateTime': 0,
+            'isSystem': false,
+            'enabled': true,
+            'apkPath': '',
+            'sizeBytes': 0,
+            'targetSdk': 33,
+            'minSdk': 21,
+            'uid': 0,
+          },
+        ];
+      }
+      if (call.method == 'getAppIcon') {
+        iconCalls++;
+        return bytes;
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      IconCache.instance.replaceAll(<String, Uint8List>{});
+    });
+
+    final state = AppState(_MemStorage());
+    await state.scan();
+    // The icon refresh runs alongside the scan; let it finish.
+    await Future<void>.delayed(Duration.zero);
+    await Future<void>.delayed(Duration.zero);
+
+    expect(iconCalls, 1);
+    expect(state.iconFor('com.a'), isNotNull);
   });
 
   test('uninstalled snapshot entries are not treated as removed again', () {

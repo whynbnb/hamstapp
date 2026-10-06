@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'snapshot.dart';
 
 enum DiffType { added, removed, updated, unchanged }
@@ -11,6 +13,10 @@ class DiffItem {
   final bool isSystem;
   final int sizeBytes;
 
+  /// Icon captured with the snapshot (null for older snapshots), so removed
+  /// apps still show their icon in the comparison.
+  final Uint8List? icon;
+
   const DiffItem({
     required this.type,
     required this.packageName,
@@ -19,6 +25,7 @@ class DiffItem {
     this.toVersion = '',
     this.isSystem = false,
     this.sizeBytes = 0,
+    this.icon,
   });
 }
 
@@ -64,6 +71,7 @@ class SnapshotDiff {
           toVersion: entry.versionName,
           isSystem: entry.isSystem,
           sizeBytes: entry.sizeBytes,
+          icon: entry.icon,
         ));
       } else if (prev.versionCode != entry.versionCode ||
           prev.versionName != entry.versionName) {
@@ -75,6 +83,7 @@ class SnapshotDiff {
           toVersion: entry.versionName,
           isSystem: entry.isSystem,
           sizeBytes: entry.sizeBytes,
+          icon: entry.icon,
         ));
       } else {
         unchanged.add(DiffItem(
@@ -84,6 +93,7 @@ class SnapshotDiff {
           toVersion: entry.versionName,
           isSystem: entry.isSystem,
           sizeBytes: entry.sizeBytes,
+          icon: entry.icon,
         ));
       }
     }
@@ -97,6 +107,7 @@ class SnapshotDiff {
           fromVersion: entry.versionName,
           isSystem: entry.isSystem,
           sizeBytes: entry.sizeBytes,
+          icon: entry.icon,
         ));
       }
     }

@@ -2,9 +2,12 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../services/icon_cache.dart';
 import '../services/native_apps.dart';
 
-/// Loads an app icon from the native side and caches it in memory.
+/// Shows an app icon, preferring the app's persistent [IconCache] so a
+/// previously seen icon paints immediately instead of flashing a loading
+/// spinner. A cache miss is fetched from the native side once and remembered.
 class AppIcon extends StatefulWidget {
   const AppIcon({
     super.key,
@@ -22,22 +25,26 @@ class AppIcon extends StatefulWidget {
   /// icon is not fetched from the native side.
   final Uint8List? bytes;
 
-  static final Map<String, Uint8List?> _cache = {};
-
-  static void evictAll() => _cache.clear();
-
   @override
   State<AppIcon> createState() => _AppIconState();
 }
 
 class _AppIconState extends State<AppIcon> {
   Uint8List? _bytes;
-  bool _loading = true;
+  bool _loading = false;
+
+  /// Whether a native fetch has already been kicked off for this package, so a
+  /// rebuild does not queue a second one.
+  bool _requested = false;
 
   @override
   void initState() {
     super.initState();
-    _load();
+    _loading = widget.bytes == null;
+    // Repaint when the shared cache is replaced (e.g. the settings "refresh
+    // icon cache" action or a data import).
+    IconCache.instance.addListener(_onCacheChanged);
+    _resolve();
   }
 
   @override
@@ -45,58 +52,75 @@ class _AppIconState extends State<AppIcon> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.packageName != widget.packageName ||
         oldWidget.bytes != widget.bytes) {
-      _bytes = null;
-      _loading = true;
-      _load();
-    }
-  }
-
-  Future<void> _load() async {
-    if (widget.bytes != null) {
-      setState(() {
-        _bytes = widget.bytes;
-        _loading = false;
-      });
-      return;
-    }
-    final cached = AppIcon._cache[widget.packageName];
-    if (cached != null) {
-      if (!mounted) return;
-      setState(() {
-        _bytes = cached;
-        _loading = false;
-      });
-      return;
-    }
-    try {
-      final bytes = await NativeApps.getAppIcon(
-        widget.packageName,
-        size: (widget.size * 3).round(),
-      );
-      AppIcon._cache[widget.packageName] = bytes;
-      if (!mounted) return;
-      setState(() {
-        _bytes = bytes;
-        _loading = false;
-      });
-    } catch (_) {
-      AppIcon._cache[widget.packageName] = null;
-      if (!mounted) return;
-      setState(() {
-        _bytes = null;
-        _loading = false;
-      });
+      _bytes = widget.bytes;
+      _loading = widget.bytes == null;
+      _requested = false;
+      _resolve();
     }
   }
 
   @override
+  void dispose() {
+    IconCache.instance.removeListener(_onCacheChanged);
+    super.dispose();
+  }
+
+  void _onCacheChanged() {
+    if (!mounted) return;
+    setState(_resolve);
+  }
+
+  /// Decide what to paint for the current package. Called outside build, so it
+  /// assigns fields directly.
+  void _resolve() {
+    if (widget.bytes != null) {
+      _bytes = widget.bytes;
+      _loading = false;
+      _requested = false;
+      return;
+    }
+    final cached = IconCache.instance[widget.packageName];
+    if (cached != null) {
+      _bytes = cached;
+      _loading = false;
+      return;
+    }
+    // Not cached: fetch once and remember it.
+    if (_requested) return;
+    _requested = true;
+    _loading = true;
+    _fetch();
+  }
+
+  Future<void> _fetch() async {
+    Uint8List? bytes;
+    try {
+      bytes = await NativeApps.getAppIcon(
+        widget.packageName,
+        size: IconCache.fetchSize,
+      );
+    } catch (_) {
+      bytes = null;
+    }
+    if (!mounted) return;
+    if (bytes != null && bytes.isNotEmpty) {
+      IconCache.instance.put(widget.packageName, bytes);
+    }
+    setState(() {
+      _bytes = bytes;
+      _loading = false;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final bytes = _bytes ?? widget.bytes;
     final radius = BorderRadius.circular(widget.size * 0.26);
-    if (_bytes != null) {
+    if (bytes != null) {
       return ClipRRect(
         borderRadius: radius,
         child: Image.memory(
-          _bytes!,
+          bytes,
           width: widget.size,
           height: widget.size,
           gaplessPlayback: true,

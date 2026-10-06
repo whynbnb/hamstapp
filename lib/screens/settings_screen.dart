@@ -226,6 +226,14 @@ class SettingsScreen extends StatelessWidget {
               MaterialPageRoute(builder: (_) => const SyncScreen()),
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.image_outlined),
+            title: Text(context.strings.t('刷新图标缓存')),
+            subtitle: Text(
+              context.strings.t('重新读取所有应用的图标，修复缺失或过期的图标'),
+            ),
+            onTap: () => refreshIconCache(context, state),
+          ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('数据备份')),
           ListTile(
@@ -359,6 +367,71 @@ IconData _navModeIcon(NavMode mode) {
     case NavMode.floating:
       return Icons.bubble_chart_outlined;
   }
+}
+
+/// Clear the app icon cache and re-read every installed app's icon, showing a
+/// blocking progress dialog while it runs.
+Future<void> refreshIconCache(BuildContext context, AppState state) async {
+  final messenger = ScaffoldMessenger.of(context);
+  final s = context.strings;
+  if (state.apps.isEmpty) {
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(s.t('请先在「应用」页扫描应用列表'))),
+      );
+    return;
+  }
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(ctx.strings.t('刷新图标缓存')),
+      content: Text(
+        ctx.strings.t('将清空缓存并重新读取 {n} 个应用的图标。', {
+          'n': state.apps.length,
+        }),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: Text(ctx.strings.t('取消')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(ctx.strings.t('刷新')),
+        ),
+      ],
+    ),
+  );
+  if (ok != true || !context.mounted) return;
+
+  final navigator = Navigator.of(context, rootNavigator: true);
+  final dialog = showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    useRootNavigator: true,
+    builder: (_) => AlertDialog(
+      content: Row(
+        children: [
+          const SizedBox(
+            width: 22,
+            height: 22,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+          const SizedBox(width: 16),
+          Expanded(child: Text(s.t('正在刷新图标…'))),
+        ],
+      ),
+    ),
+  );
+  final n = await state.refreshIconCache();
+  if (navigator.canPop()) navigator.pop();
+  await dialog;
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(content: Text(s.t('已刷新 {n} 个应用图标', {'n': n}))),
+    );
 }
 
 class _SectionHeader extends StatelessWidget {

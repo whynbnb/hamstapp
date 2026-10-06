@@ -232,7 +232,12 @@ class _DiffTile extends StatelessWidget {
         : '${item.packageName}${item.sizeBytes > 0 ? ' · ${Fmt.size(item.sizeBytes)}' : ''}';
 
     return ListTile(
-      leading: AppIcon(packageName: item.packageName, label: item.appName, size: 40),
+      leading: AppIcon(
+        packageName: item.packageName,
+        label: item.appName,
+        size: 40,
+        bytes: item.icon,
+      ),
       title: Text(item.appName, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         uninstallReason.isNotEmpty ? '🗑️ $uninstallReason\n$base' : base,

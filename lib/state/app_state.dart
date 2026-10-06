@@ -16,6 +16,7 @@ import '../models/tile.dart';
 import '../models/tile_page.dart';
 import '../services/native_apps.dart';
 import '../services/storage.dart';
+import '../services/icon_cache.dart';
 import '../utils/format.dart';
 import '../utils/recommender.dart';
 import '../utils/search.dart';
@@ -105,7 +106,10 @@ const List<int> kThemeColorPresets = <int>[
 class AppState extends ChangeNotifier {
   final Storage storage;
 
-  AppState(this.storage);
+  AppState(this.storage) {
+    // Let the shared cache persist icons fetched on demand by widgets.
+    IconCache.instance.onDirty = _persistIcons;
+  }
 
   List<AppInfo> apps = <AppInfo>[];
   Map<String, AppMeta> meta = <String, AppMeta>{};
@@ -195,6 +199,9 @@ class AppState extends ChangeNotifier {
     snapshots = await _loadSnapshots();
     backupLists = await _loadBackupLists();
     settings = await _loadSettings();
+    IconCache.instance.replaceAll(
+      IconCache.decode(await storage.readJson(_kIcons)),
+    );
     _applyLanguage();
     _applyLanguage();
     launchLog = await _loadLaunchLog();
@@ -437,6 +444,9 @@ class AppState extends ChangeNotifier {
       scanning = false;
       notifyListeners();
     }
+    // Refresh the icon cache together with the app list, so updated app icons
+    // show up without a separate trip to Settings.
+    if (scanError == null) unawaited(refreshIconCache());
   }
 
   Map<String, String> _baseline() {
@@ -639,6 +649,7 @@ class AppState extends ChangeNotifier {
           categoryIds: List<String>.from(m.categoryIds),
           favorite: m.favorite,
           pinned: m.pinned,
+          icon: iconFor(a.packageName),
         ),
       );
     }
@@ -665,6 +676,7 @@ class AppState extends ChangeNotifier {
           pinned: m.pinned,
           uninstallReason: m.uninstallReason,
           uninstalledAt: m.uninstalledAt,
+          icon: iconFor(m.packageName),
         ),
       );
     }
@@ -780,6 +792,59 @@ class AppState extends ChangeNotifier {
       _kSnapshots,
       snapshots.map((s) => s.toMap()).toList(),
     );
+  }
+
+  // ------------------------------------------------------------------- icons
+
+  /// Cached icon bytes for [packageName], or null when never fetched.
+  Uint8List? iconFor(String packageName) => IconCache.instance[packageName];
+
+  /// Store a freshly fetched icon; [IconCache] persists it (coalesced).
+  void rememberIcon(String packageName, Uint8List bytes) {
+    IconCache.instance.put(packageName, bytes);
+  }
+
+  Future<void> _persistIcons() async {
+    await storage.writeJson(_kIcons, IconCache.instance.toJson());
+  }
+
+  Future<int>? _iconRefresh;
+
+  /// Drop the icon cache and re-read icons for every installed app from the
+  /// system. Returns how many icons were (re)loaded.
+  ///
+  /// Called by the settings "refresh icon cache" action and automatically after
+  /// an app-list scan; concurrent calls share the same run.
+  Future<int> refreshIconCache() {
+    final running = _iconRefresh;
+    if (running != null) return running;
+    final run = _runIconRefresh();
+    _iconRefresh = run;
+    return run;
+  }
+
+  Future<int> _runIconRefresh() async {
+    try {
+      IconCache.instance.clearSilent();
+      final next = <String, Uint8List>{};
+      for (final a in apps) {
+        try {
+          final bytes = await NativeApps.getAppIcon(
+            a.packageName,
+            size: IconCache.fetchSize,
+          );
+          if (bytes != null && bytes.isNotEmpty) next[a.packageName] = bytes;
+        } catch (_) {
+          // Keep going: one unreadable icon must not abort the refresh.
+        }
+      }
+      IconCache.instance.replaceAll(next);
+      await _persistIcons();
+      notifyListeners();
+      return next.length;
+    } finally {
+      _iconRefresh = null;
+    }
   }
 
   // ---------------------------------------------------------------- backups
@@ -1698,6 +1763,7 @@ class AppState extends ChangeNotifier {
         'apps': apps.map((a) => a.toMap()).toList(),
         'settings': settings,
         'launch_log': launchLog.map((e) => e.toMap()).toList(),
+        'icons': IconCache.instance.toJson(),
       },
     };
   }
@@ -1741,6 +1807,7 @@ class AppState extends ChangeNotifier {
     final newApps = _parseApps(d['apps']);
     final newSettings = _parseSettings(d['settings']);
     final newLaunchLog = _parseLaunchLog(d['launch_log']);
+    final newIcons = IconCache.decode(d['icons']);
 
     if (newPages.isEmpty) {
       newPages = [
@@ -1770,6 +1837,7 @@ class AppState extends ChangeNotifier {
     apps = newApps;
     settings = newSettings;
     launchLog = newLaunchLog;
+    IconCache.instance.replaceAll(newIcons);
     _pruneLaunchLog();
     // Don't carry the exporter's position memory into this device.
     settings.remove('last_home_index');
@@ -1801,6 +1869,7 @@ class AppState extends ChangeNotifier {
     apps = <AppInfo>[];
     settings = <String, dynamic>{};
     launchLog = <LaunchEvent>[];
+    IconCache.instance.replaceAll(<String, Uint8List>{});
     pendingUninstalls = <AppMeta>[];
     currentTilePageIndex = 0;
     tileEditMode = false;
@@ -1822,6 +1891,7 @@ class AppState extends ChangeNotifier {
     await _persistSettings();
     await storage.writeJson(_kAppsCache, apps.map((a) => a.toMap()).toList());
     await _persistLaunchLog();
+    await _persistIcons();
   }
 
   /// Transient, board-wide edit mode. While on, tiles can be moved/resized and
@@ -2183,6 +2253,7 @@ class AppState extends ChangeNotifier {
   static const _kSnapshots = 'snapshots';
   static const _kBackupLists = 'backup_lists';
   static const _kAppsCache = 'apps_cache';
+  static const _kIcons = 'icons';
   static const _kTilePages = 'tile_pages';
   static const _kTiles = 'tiles';
   static const _kSettings = 'settings';

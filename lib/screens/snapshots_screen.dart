@@ -80,6 +80,7 @@ List<SnapshotEntry> _currentEntries(AppState state) => state.apps
         firstInstallTime: a.firstInstallTime,
         isSystem: a.isSystem,
         sizeBytes: a.sizeBytes,
+        icon: state.iconFor(a.packageName),
       ),
     )
     .toList();
