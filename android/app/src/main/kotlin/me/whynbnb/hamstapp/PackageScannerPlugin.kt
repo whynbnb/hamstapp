@@ -1,4 +1,4 @@
-package com.hamstapp.hamstapp
+package me.whynbnb.hamstapp
 
 import android.content.ClipData
 import android.content.Context

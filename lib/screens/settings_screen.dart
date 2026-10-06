@@ -271,7 +271,7 @@ class SettingsScreen extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: Text(context.strings.t('版本')),
-            subtitle: const Text('1.0.0'),
+            subtitle: const Text('1.0'),
           ),
           const _DeviceInfoTile(),
           const Divider(height: 1),

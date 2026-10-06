@@ -5,7 +5,7 @@ plugins {
 }
 
 android {
-    namespace = "com.hamstapp.hamstapp"
+    namespace = "me.whynbnb.hamstapp"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -15,8 +15,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.hamstapp.hamstapp"
+        applicationId = "me.whynbnb.hamstapp"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
@@ -32,7 +31,8 @@ android {
         // You can force using the value of versionCode by specifying the `-P force-version-code-ignoring-abi=true`
         // flag during build.
         versionCode = flutter.versionCode
-        versionName = flutter.versionName
+        // App version shown to the system and the user.
+        versionName = "1.0"
     }
 
     buildTypes {

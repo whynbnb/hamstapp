@@ -1,4 +1,4 @@
-package com.hamstapp.hamstapp
+package me.whynbnb.hamstapp
 
 import android.net.Uri
 import android.provider.OpenableColumns
