@@ -453,6 +453,10 @@ const Map<String, String> _en = <String, String>{
 
   // ---- tiles
   '页面名称': 'Page name',
+  '磁贴页管理': 'Manage tile pages',
+  '{n} 个磁贴': '{n} tiles',
+  '将删除「{name}」，页面上的磁贴会移回第一页。确定删除吗？':
+      'Delete "{name}"? Its tiles will move back to the first page.',
   '页面': 'Page',
   '页面 {n}': 'Page {n}',
   '无磁贴页': 'No tile page',
@@ -468,6 +472,8 @@ const Map<String, String> _en = <String, String>{
   '已再添加一个到「{page}」': 'Added another to "{page}"',
   '已取消固定': 'Unpinned',
   '移除该磁贴': 'Remove this tile',
+  '确定移除这个磁贴吗？': 'Remove this tile?',
+  '移除': 'Remove',
   '「{page}」还没有磁贴\n点击右上角 ✏️ 进入编辑，再点 ➕ 选择要置顶的应用':
       'No tiles on "{page}" yet.\nTap ✏️ to edit, then ➕ to pick apps to pin.',
   '还没有收藏的应用\n点击右上角 ➕ 添加，即可在这里一键启动':

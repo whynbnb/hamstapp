@@ -1783,6 +1783,26 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Reorder a tile page for drag-and-drop lists.
+  ///
+  /// [newIndex] follows `ReorderableListView.onReorderItem` semantics: it is
+  /// already adjusted after the item was removed. The page currently in view is
+  /// kept in view (its index shifts if needed) rather than jumping to the moved
+  /// page.
+  Future<void> reorderTilePage(int oldIndex, int newIndex) async {
+    if (oldIndex < 0 || oldIndex >= tilePages.length) return;
+    final currentId = currentTilePageId;
+    final page = tilePages.removeAt(oldIndex);
+    tilePages.insert(newIndex.clamp(0, tilePages.length), page);
+    if (currentId != null) {
+      final idx = tilePages.indexWhere((p) => p.id == currentId);
+      if (idx >= 0) currentTilePageIndex = idx;
+    }
+    _rememberTilePage();
+    await _persistTilePages();
+    notifyListeners();
+  }
+
   // ---------------------------------------------------------------- filtering
 
   List<AppInfo> get visibleApps {

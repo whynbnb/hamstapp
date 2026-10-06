@@ -634,6 +634,22 @@ void main() {
     expect(state.currentTilePageId, isNotNull);
   });
 
+  test('reorderTilePage moves a page and keeps the viewed page in view', () async {
+    final state = AppState(_MemStorage());
+    state.tilePages = [
+      TilePage(id: 'p1', name: 'P1', createdAt: 0),
+      TilePage(id: 'p2', name: 'P2', createdAt: 0),
+      TilePage(id: 'p3', name: 'P3', createdAt: 0),
+    ];
+    state.currentTilePageIndex = 1; // viewing P2
+
+    await state.reorderTilePage(0, 2); // move P1 to the end
+
+    expect(state.tilePages.map((p) => p.id).toList(), ['p2', 'p3', 'p1']);
+    expect(state.currentTilePageId, 'p2'); // still viewing P2
+    expect(state.currentTilePageIndex, 0);
+  });
+
   test('search matches pinyin initials and full pinyin', () {
     expect(AppSearch.score('com.tencent.mm', '微信', 'wx'), isNotNull);
     expect(AppSearch.score('com.tencent.mm', '微信', 'weixin'), isNotNull);

@@ -20,6 +20,7 @@ import '../widgets/floating_nav.dart';
 import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 import 'categories_tab.dart';
+import 'tile_pages_screen.dart';
 import 'usage_stats_screen.dart';
 
 class QuickLaunchScreen extends StatefulWidget {
@@ -172,6 +173,14 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
           tooltip: s.t('置顶应用到磁贴'),
           icon: const Icon(Icons.add),
           onPressed: () => showPinSheet(context, state),
+        ),
+        IconButton(
+          tooltip: s.t('磁贴页管理'),
+          icon: const Icon(Icons.dashboard_customize_outlined),
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => TilePagesScreen(state: state)),
+          ),
         ),
         TextButton.icon(
           onPressed: () => state.setTileEditMode(false),
@@ -1174,7 +1183,12 @@ class _PageBar extends StatelessWidget {
           ),
           child: GestureDetector(
             onTap: () => onSelect(i),
-            onLongPress: () => _pageMenu(context, state, i, onChanged),
+            // Page management (rename / reorder / delete) lives in the
+            // dedicated management screen reached from edit mode; outside edit
+            // mode a long press does nothing.
+            onLongPress: editing
+                ? () => _pageMenu(context, state, i, onChanged)
+                : null,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               padding: EdgeInsets.symmetric(horizontal: hPad),
@@ -1370,8 +1384,11 @@ void _pageMenu(
               subtitle: Text(s.t('页面上的磁贴会移回第一个页面')),
               onTap: () async {
                 Navigator.pop(ctx);
-                await state.deleteTilePage(page.id);
-                onChanged();
+                // Deleting a page needs a second confirmation.
+                if (await confirmDeleteTilePage(context, state, page)) {
+                  await state.deleteTilePage(page.id);
+                  onChanged();
+                }
               },
             ),
         ],
@@ -1451,10 +1468,15 @@ class _Tile extends StatelessWidget {
     final frameless = !tile.border;
 
     final ink = InkWell(
+      // Outside edit mode a tap launches the app and a long press does nothing
+      // (the tile options live in the edit-mode menu); in edit mode a tap opens
+      // the tile menu and a long press drags the tile.
       onTap: editable
           ? () => _showTileMenu(context)
           : () => launchApp(context, app.packageName),
-      onLongPress: editable ? null : () => _showTileMenu(context),
+      // Consume the long press so the blank-area long-press gesture (switching
+      // the launch sub-tab) stays limited to the empty board, not the tiles.
+      onLongPress: editable ? null : () {},
       child: _inner(context, glass: glass, frameless: frameless),
     );
 
@@ -1705,9 +1727,29 @@ class _Tile extends StatelessWidget {
                 ListTile(
                   leading: const Icon(Icons.push_pin_outlined),
                   title: Text(context.strings.t('移除该磁贴')),
-                  onTap: () {
+                  onTap: () async {
                     Navigator.pop(ctx);
-                    state.removeTile(tile.id);
+                    // Removing a tile needs a second confirmation.
+                    final ok = await showDialog<bool>(
+                      context: context,
+                      builder: (dctx) => AlertDialog(
+                        title: Text(context.strings.t('移除该磁贴')),
+                        content: Text(
+                          context.strings.t('确定移除这个磁贴吗？'),
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dctx, false),
+                            child: Text(context.strings.t('取消')),
+                          ),
+                          FilledButton(
+                            onPressed: () => Navigator.pop(dctx, true),
+                            child: Text(context.strings.t('移除')),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (ok == true) state.removeTile(tile.id);
                   },
                 ),
               ],

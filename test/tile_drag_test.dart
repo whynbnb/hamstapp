@@ -822,6 +822,7 @@ void main() {
     WidgetTester tester, {
     required List<Tile> tiles,
     int lastLaunchTab = 0,
+    bool editing = false,
   }) async {
     // Stub the platform channel so any AppIcon spinner resolves (otherwise
     // pumpAndSettle would never settle).
@@ -843,6 +844,7 @@ void main() {
       ..tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)]
       ..tiles = tiles
       ..currentTilePageIndex = 0
+      ..tileEditMode = editing
       ..settings = {'last_launch_tab': lastLaunchTab};
 
     await tester.pumpWidget(
@@ -888,7 +890,7 @@ void main() {
     expect(state.lastLaunchTab, 0); // 磁贴 is already the first, nothing to do
   });
 
-  testWidgets('long-pressing a tile opens its menu, not the sub-tab switch', (
+  testWidgets('long-pressing a tile does nothing and does not switch tabs', (
     tester,
   ) async {
     final state = await pumpLaunch(
@@ -902,11 +904,15 @@ void main() {
       tester.getCenter(find.byKey(const ValueKey('t1'))),
     );
     await tester.pump(kLongPressTimeout + const Duration(milliseconds: 120));
+    await gesture.moveBy(const Offset(-120, 0));
+    await tester.pump();
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(find.text('显示应用名称'), findsOneWidget); // the tile menu
-    expect(state.lastLaunchTab, 0); // did not switch sub-tab
+    // No menu outside edit mode, and a press on a tile must not trigger the
+    // blank-area sub-tab switch.
+    expect(find.text('显示应用名称'), findsNothing);
+    expect(state.lastLaunchTab, 0);
   });
 
   testWidgets('long press on the blank board arms with one light tick', (
@@ -967,5 +973,38 @@ void main() {
     // Light arm tick, then the standard sub-tab tick (default effect = 25ms).
     expect(durations, [15, 25]);
     expect(state.lastLaunchTab, 1);
+  });
+
+  testWidgets('removing a tile asks for confirmation first', (tester) async {
+    final state = await pumpLaunch(
+      tester,
+      editing: true,
+      tiles: [
+        Tile(id: 't1', packageName: 'com.a', pageId: 'p1', col: 0, row: 0, w: 2, h: 2),
+      ],
+    );
+
+    // In edit mode a tap opens the tile menu.
+    await tester.tap(find.byKey(const ValueKey('t1')));
+    await tester.pumpAndSettle();
+    expect(find.text('移除该磁贴'), findsOneWidget);
+
+    await tester.tap(find.text('移除该磁贴'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+
+    // Cancelling keeps the tile.
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(state.tiles.length, 1);
+
+    // Confirming removes it.
+    await tester.tap(find.byKey(const ValueKey('t1')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移除该磁贴'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('移除'));
+    await tester.pumpAndSettle();
+    expect(state.tiles, isEmpty);
   });
 }
