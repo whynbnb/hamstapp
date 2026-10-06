@@ -93,6 +93,12 @@ class NativeApps {
     return ok ?? false;
   }
 
+  /// Opens an http(s) URL (e.g. the project's GitHub page) in a browser.
+  static Future<bool> openUrl(String url) async {
+    final ok = await _channel.invokeMethod<bool>('openUrl', {'url': url});
+    return ok ?? false;
+  }
+
   static Future<bool> uninstallApp(String packageName) async {
     final ok = await _channel.invokeMethod<bool>(
       'uninstallApp',

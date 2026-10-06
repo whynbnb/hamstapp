@@ -119,6 +119,9 @@ const Map<String, String> _en = <String, String>{
   '恢复': 'Restore',
   '恢复标注数据': 'Restore annotations',
   '刷新': 'Refresh',
+  '关闭': 'Close',
+  '本软件以 MIT 许可证开源，可自由使用、修改与分发。':
+      'This software is open source under the MIT License.',
   '刷新图标缓存': 'Refresh icon cache',
   '重新读取所有应用的图标，修复缺失或过期的图标':
       'Re-read every app icon to fix missing or outdated ones',

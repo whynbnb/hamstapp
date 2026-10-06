@@ -114,6 +114,10 @@ class PackageScannerPlugin(
                 val pkg = call.argument<String>("packageName")
                 mainHandler.post { result.success(pkg != null && openAppInfo(pkg)) }
             }
+            "openUrl" -> {
+                val url = call.argument<String>("url")
+                mainHandler.post { result.success(url != null && openUrl(url)) }
+            }
             "uninstallApp" -> {
                 val pkg = call.argument<String>("packageName")
                 mainHandler.post { result.success(pkg != null && requestUninstall(pkg)) }
@@ -336,6 +340,17 @@ class PackageScannerPlugin(
     private fun openAppInfo(packageName: String): Boolean {
         val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.fromParts("package", packageName, null)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        return runCatching {
+            context.startActivity(intent)
+            true
+        }.getOrDefault(false)
+    }
+
+    /** Open an http(s) link (e.g. the project's GitHub page) in a browser. */
+    private fun openUrl(url: String): Boolean {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return runCatching {

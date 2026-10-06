@@ -10,6 +10,12 @@ import '../widgets/theme_color_picker.dart';
 import 'haptics_settings_screen.dart';
 import 'sync_screen.dart';
 
+/// App version shown in Settings and the About dialog.
+const String kAppVersion = '1.0';
+
+/// Project repository, opened from the About dialog.
+const String kProjectUrl = 'https://github.com/whynbnb/hamstapp';
+
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
 
@@ -267,25 +273,15 @@ class SettingsScreen extends StatelessWidget {
             leading: const Icon(Icons.pets),
             title: Text(context.strings.t('囤囤 · Hamstapp')),
             subtitle: Text(context.strings.t('Android 应用管理器')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => showAboutInfo(context),
           ),
           ListTile(
             leading: const Icon(Icons.info_outline),
             title: Text(context.strings.t('版本')),
-            subtitle: const Text('1.0'),
+            subtitle: const Text(kAppVersion),
           ),
           const _DeviceInfoTile(),
-          const Divider(height: 1),
-          _SectionHeader(context.strings.t('提示')),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 24),
-            child: Text(
-              context.strings.t(
-                '磁贴：在「启动 → 磁贴」点击右上角 ✏️ 进入编辑模式，'
-                '长按磁贴拖动移动、拖动右下角缩放；完成后点击右上角「完成」退出。',
-              ),
-              style: const TextStyle(fontSize: 13, height: 1.5),
-            ),
-          ),
         ],
       ),
     );
@@ -367,6 +363,60 @@ IconData _navModeIcon(NavMode mode) {
     case NavMode.floating:
       return Icons.bubble_chart_outlined;
   }
+}
+
+/// The "About" dialog: app icon, version, MIT license and a tappable link to
+/// the project's GitHub repository.
+Future<void> showAboutInfo(BuildContext context) {
+  final s = context.strings;
+  final scheme = Theme.of(context).colorScheme;
+  return showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(22),
+            child: Image.asset(
+              'assets/app_icon.png',
+              width: 88,
+              height: 88,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            s.t('囤囤 · Hamstapp'),
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 2),
+          Text('${s.t('版本')} $kAppVersion'),
+          const SizedBox(height: 14),
+          Text(
+            s.t('本软件以 MIT 许可证开源，可自由使用、修改与分发。'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: scheme.onSurfaceVariant,
+              fontSize: 13,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 6),
+          TextButton.icon(
+            onPressed: () => NativeApps.openUrl(kProjectUrl),
+            icon: const Icon(Icons.link, size: 18),
+            label: const Text('github.com/whynbnb/hamstapp'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: Text(s.t('关闭')),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Clear the app icon cache and re-read every installed app's icon, showing a
