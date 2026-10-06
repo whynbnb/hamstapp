@@ -65,6 +65,20 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     setState(() {});
   }
 
+  /// Switch the launch sub-tab by [delta] (+1 = next, -1 = previous).
+  ///
+  /// Used by the long-press-and-drag gesture on the tile board's blank area:
+  /// a normal horizontal swipe there is consumed by the board's own page pager,
+  /// so this is the only way to reach e.g. 分类 without touching the tab bar.
+  void _switchLaunchTab(int delta) {
+    final target = (_tabs.index + delta).clamp(0, 3);
+    if (target == _tabs.index) return;
+    // Use the standard sub-tab tick so the gesture feels the same as tapping or
+    // swiping between 磁贴/分类/收藏/最近.
+    _haptics.tickNow(target);
+    _tabs.animateTo(target);
+  }
+
   /// Boils a sub-tab swipe down to at most one tick, fired the moment the
   /// gesture commits to a different tab (crossing the midpoint) rather than
   /// waiting for the snap animation to finish.
@@ -130,7 +144,11 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
               ? const NeverScrollableScrollPhysics()
               : const PageScrollPhysics(),
           children: [
-            _TilesTab(state: state),
+            _TilesTab(
+              state: state,
+              onSwitchTab: _switchLaunchTab,
+              onArm: () => context.read<AppState>().hapticLight(),
+            ),
             CategoriesTab(state: state),
             _FavoritesTab(state: state),
             _RecentTab(
@@ -383,8 +401,21 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
 // ---------------------------------------------------------------- 磁贴
 
 class _TilesTab extends StatefulWidget {
-  const _TilesTab({required this.state});
+  const _TilesTab({
+    required this.state,
+    required this.onSwitchTab,
+    required this.onArm,
+  });
   final AppState state;
+
+  /// Called with +1 (next) or -1 (previous) when the user long-presses the
+  /// blank area of the board and slides horizontally, to switch the launch
+  /// sub-tab (磁贴/分类/收藏/最近).
+  final ValueChanged<int> onSwitchTab;
+
+  /// Called once when the long press reaches its threshold, so the gesture can
+  /// give a light "armed" tick before the finger slides.
+  final VoidCallback onArm;
 
   @override
   State<_TilesTab> createState() => _TilesTabState();
@@ -397,6 +428,13 @@ class _TilesTabState extends State<_TilesTab> {
   /// Coalesces tile-page haptics so one swipe or tap ticks exactly once,
   /// however many pages the gesture glides across.
   late final PagerHaptics _haptics;
+
+  /// Long-press-and-slide on the board's blank area switches the launch
+  /// sub-tab. [_holdMoved] latches so one hold yields at most one switch.
+  bool _holdMoved = false;
+
+  /// Horizontal travel (logical px) after a long press before it switches tab.
+  static const double _holdThreshold = 48;
 
   int _clamp(int i) {
     final n = widget.state.tilePages.length;
@@ -474,6 +512,43 @@ class _TilesTabState extends State<_TilesTab> {
     return false;
   }
 
+  void _onHoldStart(LongPressStartDetails d) {
+    _holdMoved = false;
+    // Light tick the moment the long press arms, before any movement.
+    widget.onArm();
+  }
+
+  /// After a long press on the blank board, a horizontal slide switches the
+  /// launch sub-tab (left = next, right = previous). A plain quick swipe is
+  /// untouched: it is claimed by the board's own page pager.
+  void _onHoldMove(LongPressMoveUpdateDetails d) {
+    if (_holdMoved) return;
+    final dx = d.offsetFromOrigin.dx;
+    if (dx <= -_holdThreshold) {
+      _holdMoved = true;
+      widget.onSwitchTab(1);
+    } else if (dx >= _holdThreshold) {
+      _holdMoved = true;
+      widget.onSwitchTab(-1);
+    }
+  }
+
+  void _onHoldEnd(LongPressEndDetails d) => _holdMoved = false;
+
+  /// Wraps the board with the blank-area long-press gesture. Left alone while
+  /// editing tiles, where a long press is used to drag a tile instead.
+  Widget _withHoldToSwitch(Widget child) {
+    if (widget.state.tileEditMode) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onLongPressStart: _onHoldStart,
+      onLongPressMoveUpdate: _onHoldMove,
+      onLongPressEnd: _onHoldEnd,
+      onLongPressCancel: () => _holdMoved = false,
+      child: child,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
@@ -481,10 +556,12 @@ class _TilesTabState extends State<_TilesTab> {
     // Keep the drag-prediction clamp in step when pages are added/removed.
     _haptics.setPageCount(pages.length);
     if (pages.isEmpty) {
-      return _hint(
-        context,
-        icon: Icons.grid_view_rounded,
-        text: context.strings.t('还没有磁贴页'),
+      return _withHoldToSwitch(
+        _hint(
+          context,
+          icon: Icons.grid_view_rounded,
+          text: context.strings.t('还没有磁贴页'),
+        ),
       );
     }
     if (_index >= pages.length) _index = pages.length - 1;
@@ -492,17 +569,19 @@ class _TilesTabState extends State<_TilesTab> {
     return Column(
       children: [
         Expanded(
-          child: NotificationListener<ScrollNotification>(
-            onNotification: _onPagesScroll,
-            child: PageView.builder(
-              controller: _controller,
-              physics: state.tileEditMode
-                  ? const NeverScrollableScrollPhysics()
-                  : const PageScrollPhysics(),
-              itemCount: pages.length,
-              onPageChanged: _setIndex,
-              itemBuilder: (context, i) =>
-                  _TileBoard(state: state, page: pages[i]),
+          child: _withHoldToSwitch(
+            NotificationListener<ScrollNotification>(
+              onNotification: _onPagesScroll,
+              child: PageView.builder(
+                controller: _controller,
+                physics: state.tileEditMode
+                    ? const NeverScrollableScrollPhysics()
+                    : const PageScrollPhysics(),
+                itemCount: pages.length,
+                onPageChanged: _setIndex,
+                itemBuilder: (context, i) =>
+                    _TileBoard(state: state, page: pages[i]),
+              ),
             ),
           ),
         ),

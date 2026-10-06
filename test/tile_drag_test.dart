@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -813,5 +814,158 @@ void main() {
     state.setAppSort(AppSort.updateTime);
     await tester.pump(const Duration(milliseconds: 20));
     expect(find.textContaining('更新于'), findsOneWidget);
+  });
+
+  // ---- long-press the blank board to switch launch sub-tabs
+
+  Future<AppState> pumpLaunch(
+    WidgetTester tester, {
+    required List<Tile> tiles,
+    int lastLaunchTab = 0,
+  }) async {
+    // Stub the platform channel so any AppIcon spinner resolves (otherwise
+    // pumpAndSettle would never settle).
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      channel,
+      (call) async => null,
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'A')]
+      ..tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)]
+      ..tiles = tiles
+      ..currentTilePageIndex = 0
+      ..settings = {'last_launch_tab': lastLaunchTab};
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+    return state;
+  }
+
+  testWidgets('long-press blank board then slide left switches sub-tab', (
+    tester,
+  ) async {
+    final state = await pumpLaunch(tester, tiles: const []);
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView).last),
+    );
+    // Hold past the long-press timeout, then slide left (to the next sub-tab).
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 120));
+    await gesture.moveBy(const Offset(-120, 0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(state.lastLaunchTab, 1); // 磁贴 -> 分类
+  });
+
+  testWidgets('sliding right on the first sub-tab stays put', (tester) async {
+    final state = await pumpLaunch(tester, tiles: const []);
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView).last),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 120));
+    await gesture.moveBy(const Offset(120, 0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(state.lastLaunchTab, 0); // 磁贴 is already the first, nothing to do
+  });
+
+  testWidgets('long-pressing a tile opens its menu, not the sub-tab switch', (
+    tester,
+  ) async {
+    final state = await pumpLaunch(
+      tester,
+      tiles: [
+        Tile(id: 't1', packageName: 'com.a', pageId: 'p1', col: 0, row: 0, w: 2, h: 2),
+      ],
+    );
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('t1'))),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 120));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    expect(find.text('显示应用名称'), findsOneWidget); // the tile menu
+    expect(state.lastLaunchTab, 0); // did not switch sub-tab
+  });
+
+  testWidgets('long press on the blank board arms with one light tick', (
+    tester,
+  ) async {
+    await pumpLaunch(tester, tiles: const []);
+
+    final durations = <int>[];
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      if (call.method == 'vibrate') {
+        durations.add(((call.arguments as Map)['duration'] as num).toInt());
+      }
+      return null;
+    });
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView).last),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 120));
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    // Just the light "armed" tick; no slide, so no switch tick.
+    expect(durations, [15]);
+  });
+
+  testWidgets('sliding after the long press switches with the normal tick', (
+    tester,
+  ) async {
+    final state = await pumpLaunch(tester, tiles: const []);
+
+    final durations = <int>[];
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      if (call.method == 'vibrate') {
+        durations.add(((call.arguments as Map)['duration'] as num).toInt());
+      }
+      return null;
+    });
+
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byType(PageView).last),
+    );
+    await tester.pump(kLongPressTimeout + const Duration(milliseconds: 120));
+    // Cross the threshold, then keep sliding: still only the one switch tick.
+    await gesture.moveBy(const Offset(-70, 0));
+    await tester.pump();
+    await gesture.moveBy(const Offset(-120, 0));
+    await tester.pump();
+    await gesture.up();
+    await tester.pumpAndSettle();
+
+    // Light arm tick, then the standard sub-tab tick (default effect = 25ms).
+    expect(durations, [15, 25]);
+    expect(state.lastLaunchTab, 1);
   });
 }

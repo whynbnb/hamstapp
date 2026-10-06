@@ -1363,6 +1363,19 @@ class AppState extends ChangeNotifier {
     await _emitHaptic();
   }
 
+  /// A short, subtle tick for gesture thresholds (e.g. the tile board's
+  /// long-press slide). Independent of the configured effect so it always reads
+  /// as a light "click" rather than a heavier configured buzz. Respects the
+  /// master haptics switch.
+  Future<void> hapticLight() async {
+    if (!hapticsEnabled) return;
+    try {
+      await NativeApps.vibrate(15, amplitude: 64);
+    } catch (_) {
+      // Haptics are best-effort; ignore devices/platforms without support.
+    }
+  }
+
   /// Duration (ms) and amplitude (1..255) for the current effect/level.
   ///
   /// Flutter's built-in HapticFeedback maps to a handful of system constants

@@ -213,4 +213,33 @@ void main() {
 
     expect(vibrates, 1);
   });
+
+  testWidgets('a quick flick between launch sub-tabs ticks before settling', (
+    tester,
+  ) async {
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..apps = [_ai('com.a', 'A')];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    vibrates = 0;
+    await tester.fling(find.byType(TabBarView), const Offset(-400, 0), 2000);
+    // A few frames in, while the settling animation is still running, the tick
+    // must already have fired (over-half of the swipe should not wait for the
+    // animation to finish).
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    await tester.pump(const Duration(milliseconds: 16));
+    expect(vibrates, 1, reason: 'the flick should tick before the settle ends');
+
+    await tester.pumpAndSettle();
+    expect(vibrates, 1); // and never a second time
+  });
 }

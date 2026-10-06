@@ -37,6 +37,13 @@ class PagerHaptics {
   /// the gesture (including its settling fling) is fully over.
   bool _ticked = false;
 
+  /// Whether the current scroll activity began as a finger drag.
+  bool _dragging = false;
+
+  /// Minimum per-frame ballistic movement (logical px) that counts as a flick
+  /// strong enough to change the page.
+  static const double _flickDelta = 6;
+
   /// Keep the drag prediction clamp in step with the pager's page count.
   void setPageCount(int count) {
     _pageCount = count < 1 ? 1 : count;
@@ -52,6 +59,7 @@ class PagerHaptics {
   void align(int index) {
     _current = index;
     _ticked = false;
+    _dragging = false;
   }
 
   /// The user directly selected [index] (e.g. tapped a chip): play one tick
@@ -89,25 +97,51 @@ class PagerHaptics {
   }
 
   /// The gesture (drag + its settling fling) is fully over.
-  void endGesture() => _ticked = false;
+  void endGesture() {
+    _ticked = false;
+    _dragging = false;
+  }
 
   /// Feed a horizontal scroll notification from the pager.
   void handleScroll(ScrollNotification n) {
     if (n is ScrollStartNotification) {
       // A new drag re-arms the guard; the ballistic phase (dragDetails == null)
       // must not, otherwise it would tick again while settling.
-      if (n.dragDetails != null) beginDrag();
+      if (n.dragDetails != null) {
+        beginDrag();
+        _dragging = true;
+      }
     } else if (n is ScrollUpdateNotification) {
-      // Ignore the ballistic/settling phase: only the finger itself should
-      // decide whether the gesture commits to another page.
-      if (n.dragDetails == null) return;
       final vp = n.metrics.viewportDimension;
-      if (vp <= 0) return;
-      dragTo((n.metrics.pixels / vp).round());
+      if (n.dragDetails != null) {
+        // Finger down: tick as soon as the drag commits to another page.
+        _dragging = true;
+        if (_ticked || vp <= 0) return;
+        dragTo((n.metrics.pixels / vp).round());
+      } else {
+        // First ballistic frame after the finger lifted. A quick flick will
+        // change the page, so tick now rather than waiting for the settle
+        // animation to reach the halfway point.
+        if (_dragging && !_ticked && vp > 0) {
+          final delta = n.scrollDelta ?? 0;
+          if (delta.abs() >= _flickDelta) {
+            // Mirror PageScrollPhysics: a flick nudges the page by half before
+            // rounding, so this predicts the page it will actually settle on.
+            final page = n.metrics.pixels / vp;
+            final target = _clamp((page + (delta < 0 ? -0.5 : 0.5)).round());
+            if (target != _current) {
+              _ticked = true;
+              onTick();
+            }
+          }
+        }
+        _dragging = false;
+      }
     } else if (n is ScrollEndNotification) {
       // The settling fling finished: ready for the next action. The finger-up
-      // event still carries drag details, so only the final idle end clears it.
+      // event does not carry a drag end here, so only the final idle end clears.
       if (n.dragDetails == null) endGesture();
+      _dragging = false;
     }
   }
 }
