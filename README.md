@@ -19,7 +19,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
 </p>
 
-> Vibe-coded with DeepSeek V4.0 Flash / OpenCode
+> Vibe-coded with DeepSeek V4.1 Flash / OpenCode
 
 ---
 
