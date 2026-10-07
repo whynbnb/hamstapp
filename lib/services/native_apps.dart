@@ -99,6 +99,14 @@ class NativeApps {
     return ok ?? false;
   }
 
+  /// Keeps the system status bar hidden (`hidden: true`) or visible.
+  ///
+  /// The native side re-applies this whenever the window regains focus, so the
+  /// bar stays hidden even after the notification shade is pulled down.
+  static Future<void> setStatusBarHidden(bool hidden) async {
+    await _channel.invokeMethod<bool>('setStatusBarHidden', hidden);
+  }
+
   static Future<bool> uninstallApp(String packageName) async {
     final ok = await _channel.invokeMethod<bool>(
       'uninstallApp',

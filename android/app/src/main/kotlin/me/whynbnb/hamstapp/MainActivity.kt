@@ -3,6 +3,8 @@ package me.whynbnb.hamstapp
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.view.DragEvent
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -14,16 +16,55 @@ class MainActivity : FlutterActivity() {
     private var plugin: PackageScannerPlugin? = null
     private var channel: MethodChannel? = null
 
+    /** When true the status bar is kept hidden; re-applied on every refocus. */
+    private var statusBarHidden = false
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val ch = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
         channel = ch
-        plugin = PackageScannerPlugin(applicationContext, ch)
-        ch.setMethodCallHandler(plugin)
+        val p = PackageScannerPlugin(applicationContext, ch)
+        plugin = p
+        ch.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "setStatusBarHidden" -> {
+                    statusBarHidden = call.arguments as? Boolean ?: false
+                    applyStatusBarVisibility()
+                    result.success(null)
+                }
+                else -> p.onMethodCall(call, result)
+            }
+        }
+    }
+
+    /**
+     * Hide the status bar (revealed only transiently by a top swipe) or show it.
+     *
+     * Uses the window insets controller instead of Flutter's fullscreen flags so
+     * the hidden state survives the notification shade: [onWindowFocusChanged]
+     * re-applies it as soon as the window regains focus.
+     */
+    private fun applyStatusBarVisibility() {
+        runCatching {
+            val controller = WindowInsetsControllerCompat(window, window.decorView)
+            if (statusBarHidden) {
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.statusBars())
+            } else {
+                controller.show(WindowInsetsCompat.Type.statusBars())
+            }
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) applyStatusBarVisibility()
     }
 
     override fun onPostResume() {
         super.onPostResume()
+        applyStatusBarVisibility()
         attachDropListener()
     }
 
