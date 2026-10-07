@@ -16,7 +16,7 @@ import '../utils/search.dart';
 import '../utils/tile_layout.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/category_editor.dart';
-import '../widgets/floating_nav.dart';
+import '../widgets/collapsed_nav.dart';
 import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 import 'categories_tab.dart';
@@ -171,8 +171,8 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        leading: FloatingNavScope.activeOf(context)
-            ? const FloatingNavButton()
+        leading: CollapsedNavScope.activeOf(context)
+            ? const CollapsedNavButton()
             : null,
         titleSpacing: 8,
         title: editing

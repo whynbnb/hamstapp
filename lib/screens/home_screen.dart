@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
 import '../state/app_state.dart';
-import '../widgets/floating_nav.dart';
+import '../widgets/collapsed_nav.dart';
 import '../widgets/uninstall_reason.dart';
 import 'apps_screen.dart';
 import 'quick_launch_screen.dart';
@@ -18,7 +18,14 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  /// Index of the Settings tab within [destinations] below.
+  static const int _settingsTab = 3;
+
   late int _index;
+
+  /// Last tab that was not Settings, so leaving Settings can return to it.
+  int _lastContentIndex = 0;
+
   bool _uninstallSheetVisible = false;
   bool _navOpen = false;
 
@@ -26,9 +33,10 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _index = context.read<AppState>().lastHomeIndex.clamp(0, 3);
+    if (_index != _settingsTab) _lastContentIndex = _index;
   }
 
-  void _select(AppState state, int i) {
+  void _select(AppState state, int i, {bool forceHaptic = false}) {
     if (state.tileEditMode) {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
@@ -37,7 +45,8 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       return;
     }
-    if (i != _index) state.haptic(HapticTrigger.mainTabs);
+    if (i != _settingsTab) _lastContentIndex = i;
+    if (i != _index || forceHaptic) state.haptic(HapticTrigger.mainTabs);
     state.setLastHomeIndex(i);
     setState(() => _index = i);
   }
@@ -83,75 +92,87 @@ class _HomeScreenState extends State<HomeScreen> {
 
     final mq = MediaQuery.of(context);
     final mode = state.resolvedNavMode(mq.size.width, mq.size.height);
-    final floating = mode == NavMode.floating;
+    final collapsed = mode == NavMode.collapsed;
 
     // The scope lets every top-level screen render the fixed top-left button
-    // without knowing about the home layout.
-    final body = FloatingNavScope(
-      active: floating,
+    // without knowing about the home layout. Tapping it opens the panel;
+    // long-pressing it jumps back to the Launch tab with a haptic tick.
+    final body = CollapsedNavScope(
+      active: collapsed,
       onOpen: () => setState(() => _navOpen = !_navOpen),
+      onLongPress: () {
+        setState(() => _navOpen = false);
+        _select(state, 0, forceHaptic: true);
+      },
       child: IndexedStack(index: _index, children: screens),
     );
 
-    switch (mode) {
-      case NavMode.rail:
-        return Scaffold(
-          body: Row(
-            children: [
-              NavigationRail(
-                selectedIndex: _index,
-                onDestinationSelected: (i) => _select(state, i),
-                labelType: NavigationRailLabelType.all,
-                destinations: [
-                  for (final d in destinations)
-                    NavigationRailDestination(
-                      icon: Icon(d.icon),
-                      selectedIcon: Icon(d.selectedIcon),
-                      label: Text(d.label),
-                    ),
-                ],
+    final Widget scaffold = switch (mode) {
+      NavMode.rail => Scaffold(
+        body: Row(
+          children: [
+            NavigationRail(
+              selectedIndex: _index,
+              onDestinationSelected: (i) => _select(state, i),
+              labelType: NavigationRailLabelType.all,
+              destinations: [
+                for (final d in destinations)
+                  NavigationRailDestination(
+                    icon: Icon(d.icon),
+                    selectedIcon: Icon(d.selectedIcon),
+                    label: Text(d.label),
+                  ),
+              ],
+            ),
+            const VerticalDivider(width: 1),
+            Expanded(child: body),
+          ],
+        ),
+      ),
+      NavMode.collapsed => Scaffold(
+        body: Stack(
+          children: [
+            Positioned.fill(child: body),
+            if (_navOpen)
+              _CollapsedNavOverlay(
+                index: _index,
+                destinations: destinations,
+                onDismiss: () => setState(() => _navOpen = false),
+                onSelect: (i) {
+                  setState(() => _navOpen = false);
+                  _select(state, i);
+                },
               ),
-              const VerticalDivider(width: 1),
-              Expanded(child: body),
-            ],
-          ),
-        );
-      case NavMode.floating:
-        return Scaffold(
-          body: Stack(
-            children: [
-              Positioned.fill(child: body),
-              if (_navOpen)
-                _FloatingNavOverlay(
-                  index: _index,
-                  destinations: destinations,
-                  onDismiss: () => setState(() => _navOpen = false),
-                  onSelect: (i) {
-                    setState(() => _navOpen = false);
-                    _select(state, i);
-                  },
-                ),
-            ],
-          ),
-        );
-      case NavMode.auto:
-      case NavMode.bottom:
-        return Scaffold(
-          body: body,
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: _index,
-            onDestinationSelected: (i) => _select(state, i),
-            destinations: [
-              for (final d in destinations)
-                NavigationDestination(
-                  icon: Icon(d.icon),
-                  selectedIcon: Icon(d.selectedIcon),
-                  label: d.label,
-                ),
-            ],
-          ),
-        );
-    }
+          ],
+        ),
+      ),
+      NavMode.auto || NavMode.bottom => Scaffold(
+        body: body,
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (i) => _select(state, i),
+          destinations: [
+            for (final d in destinations)
+              NavigationDestination(
+                icon: Icon(d.icon),
+                selectedIcon: Icon(d.selectedIcon),
+                label: d.label,
+              ),
+          ],
+        ),
+      ),
+    };
+
+    // System back on the Settings tab returns to the tab it was opened from
+    // instead of leaving the app; every other tab keeps the default behaviour.
+    return PopScope(
+      canPop: _index != _settingsTab,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || _index != _settingsTab) return;
+        _select(state, _lastContentIndex);
+      },
+      child: scaffold,
+    );
   }
 }
 
@@ -164,10 +185,10 @@ class _NavItem {
   final String label;
 }
 
-/// Panel revealed from the top-left button in floating mode. Anchored below the
-/// AppBar so it never hides the header, and dismisses on any outside tap.
-class _FloatingNavOverlay extends StatelessWidget {
-  const _FloatingNavOverlay({
+/// Panel revealed from the top-left button in collapsed mode. Anchored below
+/// the AppBar so it never hides the header, and dismisses on any outside tap.
+class _CollapsedNavOverlay extends StatelessWidget {
+  const _CollapsedNavOverlay({
     required this.index,
     required this.destinations,
     required this.onSelect,

@@ -52,8 +52,9 @@ enum CategorySort { manual, name, count }
 ///   and tablets in portrait stay on the normal bottom bar.
 /// - [bottom]: always the normal bottom navigation bar.
 /// - [rail]: always a left side rail (best for tablets).
-/// - [floating]: no persistent bar; a floating button reveals the navigation.
-enum NavMode { auto, bottom, rail, floating }
+/// - [collapsed]: no persistent bar; a button in the app bar reveals the
+///   navigation (long-press it to jump back to Launch).
+enum NavMode { auto, bottom, rail, collapsed }
 
 /// Which color scheme the app follows.
 ///
@@ -1558,6 +1559,9 @@ class AppState extends ChangeNotifier {
   /// User-selected navigation presentation. Defaults to [NavMode.auto].
   NavMode get navMode {
     final raw = settings['nav_mode'] as String?;
+    // `floating` was the pre-1.0 name for [NavMode.collapsed]; keep reading it
+    // so existing installs do not silently fall back to [NavMode.auto].
+    if (raw == 'floating') return NavMode.collapsed;
     return NavMode.values.firstWhere(
       (m) => m.name == raw,
       orElse: () => NavMode.auto,

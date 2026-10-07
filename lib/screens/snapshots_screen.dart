@@ -5,7 +5,7 @@ import '../l10n/app_strings.dart';
 import '../models/snapshot.dart';
 import '../state/app_state.dart';
 import '../utils/format.dart';
-import '../widgets/floating_nav.dart';
+import '../widgets/collapsed_nav.dart';
 import 'backup_lists_screen.dart';
 import 'compare_screen.dart';
 
@@ -35,8 +35,8 @@ class _SnapshotsScreenState extends State<SnapshotsScreen>
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        leading: FloatingNavScope.activeOf(context)
-            ? const FloatingNavButton()
+        leading: CollapsedNavScope.activeOf(context)
+            ? const CollapsedNavButton()
             : null,
         title: Text(
           context.strings.t('快照与备份'),

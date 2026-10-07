@@ -281,13 +281,13 @@ const Map<String, String> _en = <String, String>{
   '自动': 'Auto',
   '底部': 'Bottom',
   '侧边栏': 'Side rail',
-  '悬浮': 'Floating',
+  '折叠': 'Collapsed',
   '自动：平板横屏用侧边栏，手机与竖屏用底部导航':
       'Auto: side rail on tablets in landscape, bottom bar elsewhere',
   '正常：底部导航栏（当前默认）': 'Normal: bottom navigation bar',
   '侧边栏：左侧竖排，适合平板': 'Side rail: vertical, best for tablets',
-  '无导航栏：点右下角悬浮按钮展开导航':
-      'No bar: tap the floating button to open navigation',
+  '折叠：点左上角按钮展开导航，长按直达启动页':
+      'Collapsed: tap the top-left button to open navigation, long-press for Launch',
   '手动排序': 'Manual',
   '按名称': 'By name',
   '按应用数': 'By app count',

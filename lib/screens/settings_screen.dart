@@ -5,7 +5,7 @@ import '../l10n/app_strings.dart';
 import '../services/native_apps.dart';
 import '../state/app_state.dart';
 import '../utils/backup_actions.dart';
-import '../widgets/floating_nav.dart';
+import '../widgets/collapsed_nav.dart';
 import '../widgets/theme_color_picker.dart';
 import 'haptics_settings_screen.dart';
 import 'sync_screen.dart';
@@ -26,8 +26,8 @@ class SettingsScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        leading: FloatingNavScope.activeOf(context)
-            ? const FloatingNavButton()
+        leading: CollapsedNavScope.activeOf(context)
+            ? const CollapsedNavButton()
             : null,
         title: Text(
           context.strings.t('设置'),
@@ -190,8 +190,8 @@ class SettingsScreen extends StatelessWidget {
                   child: Text(context.strings.t('侧边栏')),
                 ),
                 DropdownMenuItem(
-                  value: NavMode.floating,
-                  child: Text(context.strings.t('悬浮')),
+                  value: NavMode.collapsed,
+                  child: Text(context.strings.t('折叠')),
                 ),
               ],
             ),
@@ -347,8 +347,8 @@ String _navModeLabel(AppStrings s, NavMode mode) {
       return s.t('正常：底部导航栏（当前默认）');
     case NavMode.rail:
       return s.t('侧边栏：左侧竖排，适合平板');
-    case NavMode.floating:
-      return s.t('无导航栏：点右下角悬浮按钮展开导航');
+    case NavMode.collapsed:
+      return s.t('折叠：点左上角按钮展开导航，长按直达启动页');
   }
 }
 
@@ -360,8 +360,8 @@ IconData _navModeIcon(NavMode mode) {
       return Icons.call_to_action_outlined;
     case NavMode.rail:
       return Icons.view_sidebar_outlined;
-    case NavMode.floating:
-      return Icons.bubble_chart_outlined;
+    case NavMode.collapsed:
+      return Icons.menu;
   }
 }
 
