@@ -248,7 +248,8 @@ void main() {
   ) async {
     final state = AppState(_MemStorage())
       ..initialized = true
-      ..apps = [_ai('com.a', 'A')];
+      ..apps = [_ai('com.a', 'A')]
+      ..settings['last_launch_tab'] = 0;
 
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
@@ -258,7 +259,7 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 50));
 
-    // 磁贴 is the first section; swiping right (previous) loops to 最近.
+    // 最近 is the first section; swiping right (previous) wraps to 收藏.
     await tester.drag(find.byType(PageView).first, const Offset(600, 0));
     await tester.pumpAndSettle();
 

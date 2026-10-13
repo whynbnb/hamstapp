@@ -151,7 +151,8 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
-    final editing = state.tileEditMode && _tabs.index == 0;
+    // 磁贴 is the second tab (最近 sits to its left).
+    final editing = state.tileEditMode && _tabs.index == 1;
 
     // The four sections live directly in the header (no title text) to save a
     // whole row of vertical space.
@@ -166,10 +167,10 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
         fontWeight: FontWeight.w500,
       ),
       tabs: [
+        Tab(height: 40, text: context.strings.t('最近')),
         Tab(height: 40, text: context.strings.t('磁贴')),
         Tab(height: 40, text: context.strings.t('分类')),
         Tab(height: 40, text: context.strings.t('收藏')),
-        Tab(height: 40, text: context.strings.t('最近')),
       ],
     );
 
@@ -200,21 +201,21 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
           itemBuilder: (context, virtual) {
             switch (((virtual % _tabCount) + _tabCount) % _tabCount) {
               case 0:
-                return _TilesTab(
-                  state: state,
-                  onSwitchTab: _switchLaunchTab,
-                  onArm: () => context.read<AppState>().hapticLight(),
-                );
-              case 1:
-                return CategoriesTab(state: state);
-              case 2:
-                return _FavoritesTab(state: state);
-              default:
                 return _RecentTab(
                   state: state,
                   sort: _recentSort,
                   sinceMillis: _recentSince,
                 );
+              case 1:
+                return _TilesTab(
+                  state: state,
+                  onSwitchTab: _switchLaunchTab,
+                  onArm: () => context.read<AppState>().hapticLight(),
+                );
+              case 2:
+                return CategoriesTab(state: state);
+              default:
+                return _FavoritesTab(state: state);
             }
           },
         ),
@@ -226,7 +227,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   /// constant width (the tile "+" only appears while editing).
   List<Widget> _actions(BuildContext context, AppState state, bool editing) {
     final s = context.strings;
-    if (_tabs.index == 0 && editing) {
+    if (_tabs.index == 1 && editing) {
       return [
         IconButton(
           tooltip: s.t('置顶应用到磁贴'),
@@ -250,7 +251,15 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
       ];
     }
     switch (_tabs.index) {
-      case 0:
+      case 0: // 最近
+        return [
+          IconButton(
+            tooltip: s.t('排序 / 时间筛选'),
+            icon: const Icon(Icons.tune),
+            onPressed: () => _showRecentFilterSheet(context),
+          ),
+        ];
+      case 1: // 磁贴
         return [
           IconButton(
             tooltip: s.t('编辑磁贴（添加/拖动/缩放）'),
@@ -273,7 +282,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
             },
           ),
         ];
-      case 1:
+      case 2: // 分类
         return [
           IconButton(
             tooltip: s.t('新建分类'),
@@ -281,20 +290,12 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
             onPressed: () => showCategoryEditor(context, state, null),
           ),
         ];
-      case 2:
+      default: // 收藏
         return [
           IconButton(
             tooltip: s.t('添加收藏'),
             icon: const Icon(Icons.add),
             onPressed: () => showFavoriteSheet(context, state),
-          ),
-        ];
-      default:
-        return [
-          IconButton(
-            tooltip: s.t('排序 / 时间筛选'),
-            icon: const Icon(Icons.tune),
-            onPressed: () => _showRecentFilterSheet(context),
           ),
         ];
     }

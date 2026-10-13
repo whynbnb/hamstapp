@@ -821,7 +821,7 @@ void main() {
   Future<AppState> pumpLaunch(
     WidgetTester tester, {
     required List<Tile> tiles,
-    int lastLaunchTab = 0,
+    int lastLaunchTab = 1,
     bool editing = false,
   }) async {
     // Stub the platform channel so any AppIcon spinner resolves (otherwise
@@ -872,10 +872,10 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(state.lastLaunchTab, 1); // 磁贴 -> 分类
+    expect(state.lastLaunchTab, 2); // 磁贴 -> 分类
   });
 
-  testWidgets('sliding right on the first sub-tab wraps to the last', (
+  testWidgets('sliding right on the board switches to the previous sub-tab', (
     tester,
   ) async {
     final state = await pumpLaunch(tester, tiles: const []);
@@ -889,7 +889,7 @@ void main() {
     await gesture.up();
     await tester.pumpAndSettle();
 
-    expect(state.lastLaunchTab, 3); // 磁贴 loops back to 最近
+    expect(state.lastLaunchTab, 0); // 磁贴 -> 最近
   });
 
   testWidgets('long-pressing a tile does nothing and does not switch tabs', (
@@ -914,7 +914,7 @@ void main() {
     // No menu outside edit mode, and a press on a tile must not trigger the
     // blank-area sub-tab switch.
     expect(find.text('显示应用名称'), findsNothing);
-    expect(state.lastLaunchTab, 0);
+    expect(state.lastLaunchTab, 1);
   });
 
   testWidgets('long press on the blank board arms with one light tick', (
@@ -974,7 +974,7 @@ void main() {
 
     // Light arm tick, then the standard sub-tab tick (default effect = 25ms).
     expect(durations, [15, 25]);
-    expect(state.lastLaunchTab, 1);
+    expect(state.lastLaunchTab, 2);
   });
 
   testWidgets('removing a tile asks for confirmation first', (tester) async {

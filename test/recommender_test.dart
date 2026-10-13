@@ -261,7 +261,7 @@ void main() {
         ..currentTilePageIndex = 0
         ..settings = {
           'remember_position': true,
-          'last_launch_tab': 3,
+          'last_launch_tab': 0,
           'recent_recommendations': enabled,
         };
     }
@@ -314,7 +314,7 @@ void main() {
         ..launchLog = log
         ..tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)]
         ..currentTilePageIndex = 0
-        ..settings = {'remember_position': true, 'last_launch_tab': 3};
+        ..settings = {'remember_position': true, 'last_launch_tab': 0};
 
       await tester.pumpWidget(
         ChangeNotifierProvider<AppState>.value(

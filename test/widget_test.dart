@@ -724,7 +724,7 @@ void main() {
     await fresh.init();
     expect(fresh.rememberPosition, isFalse);
     expect(fresh.lastHomeIndex, 0);
-    expect(fresh.lastLaunchTab, 0);
+    expect(fresh.lastLaunchTab, 1);
     expect(fresh.currentTilePageIndex, 0);
   });
 

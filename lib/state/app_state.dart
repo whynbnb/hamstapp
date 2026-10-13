@@ -348,7 +348,10 @@ class AppState extends ChangeNotifier {
   }
 
   Map<String, dynamic> _parseSettings(dynamic raw) {
-    if (raw is Map) return raw.cast<String, dynamic>();
+    // Copy into a plain map: `raw.cast` returns a view whose `[]=` re-checks
+    // values against the source map's value type, which rejects settings that
+    // mix map- and scalar-valued keys.
+    if (raw is Map) return Map<String, dynamic>.from(raw);
     return <String, dynamic>{};
   }
 
@@ -1352,8 +1355,23 @@ class AppState extends ChangeNotifier {
 
   // ---------------------------------------------------------------- settings
 
-  Future<Map<String, dynamic>> _loadSettings() async =>
-      _parseSettings(await storage.readJson(_kSettings));
+  Future<Map<String, dynamic>> _loadSettings() async {
+    final loaded = _parseSettings(await storage.readJson(_kSettings));
+    // 最近 used to be the last launch sub-tab; it now sits left of 磁贴, which
+    // shifted every launch sub-tab index. Remap a value written by an older
+    // build once (guarded by a marker so it never runs twice).
+    if (loaded[_kLaunchTabOrder] != 'recent-left') {
+      const remap = <int>[1, 2, 3, 0]; // old index -> new index
+      final old = loaded['last_launch_tab'];
+      if (old is num) {
+        final i = old.toInt();
+        if (i >= 0 && i < remap.length) loaded['last_launch_tab'] = remap[i];
+      }
+      loaded[_kLaunchTabOrder] = 'recent-left';
+      await storage.writeJson(_kSettings, loaded);
+    }
+    return loaded;
+  }
 
   Future<void> _persistSettings() async {
     await storage.writeJson(_kSettings, settings);
@@ -1416,10 +1434,11 @@ class AppState extends ChangeNotifier {
     await _persistSettings();
   }
 
-  /// Last launch sub-tab (磁贴/分类/收藏/最近).
+  /// Last launch sub-tab, in the order 最近 / 磁贴 / 分类 / 收藏. Defaults to
+  /// 磁贴 (index 1), which sits just right of 最近.
   int get lastLaunchTab {
-    if (!rememberPosition) return 0;
-    return (settings['last_launch_tab'] as num?)?.toInt() ?? 0;
+    if (!rememberPosition) return _kTilesTabIndex;
+    return (settings['last_launch_tab'] as num?)?.toInt() ?? _kTilesTabIndex;
   }
 
   Future<void> setLastLaunchTab(int value) async {
@@ -2289,6 +2308,13 @@ class AppState extends ChangeNotifier {
   static const _kTiles = 'tiles';
   static const _kSettings = 'settings';
   static const _kLaunchLog = 'launch_log';
+
+  /// Index of the 磁贴 launch sub-tab in the current order
+  /// (最近 / 磁贴 / 分类 / 收藏).
+  static const int _kTilesTabIndex = 1;
+
+  /// Settings key recording that the launch sub-tab order migration has run.
+  static const String _kLaunchTabOrder = 'launch_tab_order';
 
   /// Keep the event log small but deep enough for time-of-day analysis.
   static const int _kLaunchLogCap = 2000;

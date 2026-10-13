@@ -83,7 +83,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(state.currentTilePageIndex, 1);
-    expect(state.lastLaunchTab, 0, reason: 'still on 磁贴');
+    expect(state.lastLaunchTab, 1, reason: 'still on 磁贴');
 
     // Top half -> launch sub-tabs (磁贴 -> 分类).
     await tester.dragFrom(
@@ -91,7 +91,7 @@ void main() {
       const Offset(-320, 0),
     );
     await tester.pumpAndSettle();
-    expect(state.lastLaunchTab, 1);
+    expect(state.lastLaunchTab, 2);
   });
 
   testWidgets('bottomLaunch: top half swipes tile pages, bottom half launch', (
@@ -109,7 +109,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(state.currentTilePageIndex, 1);
-    expect(state.lastLaunchTab, 0);
+    expect(state.lastLaunchTab, 1);
 
     // Bottom half -> launch sub-tabs.
     await tester.dragFrom(
@@ -117,7 +117,7 @@ void main() {
       const Offset(-320, 0),
     );
     await tester.pumpAndSettle();
-    expect(state.lastLaunchTab, 1);
+    expect(state.lastLaunchTab, 2);
   });
 
   testWidgets('holdDrag (default) keeps the plain swipe on the tile pages', (
@@ -134,6 +134,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(state.currentTilePageIndex, 1);
-    expect(state.lastLaunchTab, 0, reason: 'a plain swipe must not change tabs');
+    expect(state.lastLaunchTab, 1, reason: 'a plain swipe must not change tabs');
   });
 }
