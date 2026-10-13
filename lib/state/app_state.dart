@@ -69,6 +69,17 @@ enum AppThemeMode { system, light, dark }
 /// - [glass]: frosted, translucent "通透" look.
 enum TileStyle { colorful, glass }
 
+/// How a horizontal swipe on the 磁贴 board is split between switching the
+/// launch sub-tabs (磁贴/分类/收藏/最近) and the board's own tile pages (磁贴页).
+///
+/// - [holdDrag]: long-press the board and slide to change the launch sub-tab;
+///   a plain swipe always moves the tile pages (the original behaviour).
+/// - [topLaunch]: a swipe on the top half changes the launch sub-tab, while the
+///   bottom half moves the tile pages.
+/// - [bottomLaunch]: a swipe on the bottom half changes the launch sub-tab,
+///   while the top half moves the tile pages.
+enum TileSwipeMode { holdDrag, topLaunch, bottomLaunch }
+
 /// Where a haptic tick may be triggered.
 enum HapticTrigger { mainTabs, launchTabs, tilePages }
 
@@ -1552,6 +1563,22 @@ class AppState extends ChangeNotifier {
 
   Future<void> setTileStyle(TileStyle value) async {
     settings['tile_style'] = value.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// How swipes on the 磁贴 board switch the launch sub-tabs vs. the tile pages.
+  /// Defaults to [TileSwipeMode.holdDrag].
+  TileSwipeMode get tileSwipeMode {
+    final raw = settings['tile_swipe_mode'] as String?;
+    return TileSwipeMode.values.firstWhere(
+      (m) => m.name == raw,
+      orElse: () => TileSwipeMode.holdDrag,
+    );
+  }
+
+  Future<void> setTileSwipeMode(TileSwipeMode value) async {
+    settings['tile_swipe_mode'] = value.name;
     await _persistSettings();
     notifyListeners();
   }

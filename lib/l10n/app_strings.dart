@@ -224,6 +224,16 @@ const Map<String, String> _en = <String, String>{
   '下次启动时回到上次的导航页、子标签和磁贴页':
       'Reopen on the last navigation tab, sub-tab and tile page you were on',
   '新增磁贴默认大小': 'Default size for new tiles',
+  '子标签切换方式': 'Sub-tab switching',
+  '长按拖动': 'Long-press',
+  '上半屏启动': 'Top launch',
+  '下半屏启动': 'Bottom launch',
+  '长按磁贴空白处左右滑动切换启动子标签；直接滑动切换磁贴页':
+      'Long-press the board and slide to switch launch sub-tabs; a plain swipe moves tile pages',
+  '上半屏滑动切换启动子标签，下半屏滑动切换磁贴页':
+      'Swipe the top half to switch launch sub-tabs, the bottom half for tile pages',
+  '下半屏滑动切换启动子标签，上半屏滑动切换磁贴页':
+      'Swipe the bottom half to switch launch sub-tabs, the top half for tile pages',
   '显示应用名称': 'Show app name',
   '关闭后磁贴只显示图标': 'When off, the tile shows only its icon',
   '内边距': 'Inner padding',

@@ -633,17 +633,84 @@ class _TilesTabState extends State<_TilesTab> {
 
   void _onHoldEnd(LongPressEndDetails d) => _holdMoved = false;
 
-  /// Wraps the board with the blank-area long-press gesture. Left alone while
-  /// editing tiles, where a long press is used to drag a tile instead.
-  Widget _withHoldToSwitch(Widget child) {
-    if (widget.state.tileEditMode) return child;
-    return GestureDetector(
-      behavior: HitTestBehavior.translucent,
-      onLongPressStart: _onHoldStart,
-      onLongPressMoveUpdate: _onHoldMove,
-      onLongPressEnd: _onHoldEnd,
-      onLongPressCancel: () => _holdMoved = false,
-      child: child,
+  // ---- gesture layer -------------------------------------------------------
+
+  /// Whether the last split-mode swipe started in the top half of the board.
+  bool _splitTop = false;
+  double _splitDx = 0;
+
+  /// Wraps the board with the blank-area gesture layer.
+  ///
+  /// The [GestureDetector] stays in the tree across edit-mode and swipe-mode
+  /// changes (only its callbacks are cleared) so the same widget type is kept
+  /// here: removing it used to rebuild the inner pager, which snapped the board
+  /// back to the page its controller was created on.
+  ///
+  /// - [TileSwipeMode.holdDrag]: long-press the blank board and slide to switch
+  ///   the launch sub-tab.
+  /// - [TileSwipeMode.topLaunch] / [TileSwipeMode.bottomLaunch]: a plain swipe
+  ///   switches either the launch sub-tab or the tile pages, depending on which
+  ///   half of the board it started in.
+  Widget _boardGestures(Widget child) {
+    final editing = widget.state.tileEditMode;
+    final split = widget.state.tileSwipeMode != TileSwipeMode.holdDrag;
+    final canHold = !editing && !split;
+    final canSplit = !editing && split;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final half = constraints.maxHeight / 2;
+        return GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onLongPressStart: canHold ? _onHoldStart : null,
+          onLongPressMoveUpdate: canHold ? _onHoldMove : null,
+          onLongPressEnd: canHold ? _onHoldEnd : null,
+          onLongPressCancel: canHold ? () => _holdMoved = false : null,
+          onHorizontalDragStart:
+              canSplit ? (d) => _onSplitStart(d, half) : null,
+          onHorizontalDragUpdate: canSplit ? _onSplitUpdate : null,
+          onHorizontalDragEnd: canSplit ? _onSplitEnd : null,
+          child: child,
+        );
+      },
+    );
+  }
+
+  void _onSplitStart(DragStartDetails d, double halfHeight) {
+    _splitTop = d.localPosition.dy < halfHeight;
+    _splitDx = 0;
+  }
+
+  void _onSplitUpdate(DragUpdateDetails d) => _splitDx += d.delta.dx;
+
+  /// Routes a finished swipe to the launch sub-tabs or the tile pages depending
+  /// on which half of the board it started in.
+  void _onSplitEnd(DragEndDetails d) {
+    final velocity = d.primaryVelocity ?? 0;
+    final dx = _splitDx.abs() >= 24 ? _splitDx : -velocity * 0.08;
+    if (dx.abs() < 8) return;
+    final delta = dx < 0 ? 1 : -1; // swipe left -> next
+    if (_splitTargetsLaunch) {
+      widget.onSwitchTab(delta);
+    } else {
+      _switchTilePage(delta);
+    }
+  }
+
+  bool get _splitTargetsLaunch {
+    final top = _splitTop;
+    return widget.state.tileSwipeMode == TileSwipeMode.topLaunch ? top : !top;
+  }
+
+  /// Move the tile-page pager by [delta] pages (the pager loops).
+  void _switchTilePage(int delta) {
+    if (widget.state.tilePages.length <= 1 || !_controller.hasClients) return;
+    final current = _controller.page?.round() ?? _virtualOf(_index);
+    final target = current + delta;
+    _haptics.tickNow(_logicalOf(target));
+    _controller.animateToPage(
+      target,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOut,
     );
   }
 
@@ -654,7 +721,7 @@ class _TilesTabState extends State<_TilesTab> {
     // Keep the drag-prediction clamp in step when pages are added/removed.
     _haptics.setPageCount(pages.length);
     if (pages.isEmpty) {
-      return _withHoldToSwitch(
+      return _boardGestures(
         _hint(
           context,
           icon: Icons.grid_view_rounded,
@@ -667,12 +734,13 @@ class _TilesTabState extends State<_TilesTab> {
     return Column(
       children: [
         Expanded(
-          child: _withHoldToSwitch(
+          child: _boardGestures(
             NotificationListener<ScrollNotification>(
               onNotification: _onPagesScroll,
               child: PageView.builder(
                 controller: _controller,
-                physics: state.tileEditMode
+                physics: state.tileEditMode ||
+                        state.tileSwipeMode != TileSwipeMode.holdDrag
                     ? const NeverScrollableScrollPhysics()
                     : const PageScrollPhysics(),
                 itemCount: null,

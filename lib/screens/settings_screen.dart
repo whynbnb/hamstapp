@@ -221,6 +221,34 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.swap_horiz),
+            title: Text(context.strings.t('子标签切换方式')),
+            subtitle: Text(
+              _tileSwipeModeLabel(context.strings, state.tileSwipeMode),
+            ),
+            trailing: DropdownButton<TileSwipeMode>(
+              value: state.tileSwipeMode,
+              underline: const SizedBox.shrink(),
+              onChanged: (v) {
+                if (v != null) state.setTileSwipeMode(v);
+              },
+              items: [
+                DropdownMenuItem(
+                  value: TileSwipeMode.holdDrag,
+                  child: Text(context.strings.t('长按拖动')),
+                ),
+                DropdownMenuItem(
+                  value: TileSwipeMode.topLaunch,
+                  child: Text(context.strings.t('上半屏启动')),
+                ),
+                DropdownMenuItem(
+                  value: TileSwipeMode.bottomLaunch,
+                  child: Text(context.strings.t('下半屏启动')),
+                ),
+              ],
+            ),
+          ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('高级')),
           ListTile(
@@ -316,6 +344,17 @@ String _tileStyleLabel(AppStrings s, TileStyle style) {
       return s.t('每个应用一种纯色，醒目活泼');
     case TileStyle.glass:
       return s.t('毛玻璃半透明，轻盈通透');
+  }
+}
+
+String _tileSwipeModeLabel(AppStrings s, TileSwipeMode mode) {
+  switch (mode) {
+    case TileSwipeMode.holdDrag:
+      return s.t('长按磁贴空白处左右滑动切换启动子标签；直接滑动切换磁贴页');
+    case TileSwipeMode.topLaunch:
+      return s.t('上半屏滑动切换启动子标签，下半屏滑动切换磁贴页');
+    case TileSwipeMode.bottomLaunch:
+      return s.t('下半屏滑动切换启动子标签，上半屏滑动切换磁贴页');
   }
 }
 
