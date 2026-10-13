@@ -152,4 +152,49 @@ void main() {
 
     expect(state.lastLaunchTab, 3, reason: '分类 -> 收藏');
   });
+
+  testWidgets('split mode: a quick short flick follows the finger direction', (
+    tester,
+  ) async {
+    final state = _state(TileSwipeMode.topLaunch);
+    await _pump(tester, state);
+
+    final board = tester.getRect(find.byType(PageView).last);
+    // ~40px over 60ms: recognised, but the travel accumulated after the touch
+    // slop stays under the 24px threshold, so it is decided by velocity. A left
+    // flick must still advance to the next page, not jump back.
+    await tester.timedDragFrom(
+      Offset(board.center.dx, board.bottom - 20),
+      const Offset(-40, 0),
+      const Duration(milliseconds: 60),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      state.currentTilePageIndex,
+      1,
+      reason: 'a left flick must advance forward, not jump back',
+    );
+  });
+
+  testWidgets('split mode: a quick short right flick goes back', (
+    tester,
+  ) async {
+    final state = _state(TileSwipeMode.topLaunch);
+    await _pump(tester, state);
+
+    final board = tester.getRect(find.byType(PageView).last);
+    await tester.timedDragFrom(
+      Offset(board.center.dx, board.bottom - 20),
+      const Offset(40, 0),
+      const Duration(milliseconds: 60),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      state.currentTilePageIndex,
+      2,
+      reason: 'a right flick must go back (磁贴 wraps to the last page)',
+    );
+  });
 }

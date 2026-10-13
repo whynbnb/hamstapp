@@ -109,7 +109,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
       onHorizontalDragUpdate: (d) => _bodySwipeDx += d.delta.dx,
       onHorizontalDragEnd: (d) {
         final velocity = d.primaryVelocity ?? 0;
-        final dx = _bodySwipeDx.abs() >= 24 ? _bodySwipeDx : -velocity * 0.08;
+        final dx = _bodySwipeDx.abs() >= 24 ? _bodySwipeDx : velocity * 0.08;
         if (dx.abs() < 8) return;
         _switchLaunchTab(dx < 0 ? 1 : -1); // swipe left -> next
       },
@@ -720,7 +720,7 @@ class _TilesTabState extends State<_TilesTab> {
   /// on which half of the board it started in.
   void _onSplitEnd(DragEndDetails d) {
     final velocity = d.primaryVelocity ?? 0;
-    final dx = _splitDx.abs() >= 24 ? _splitDx : -velocity * 0.08;
+    final dx = _splitDx.abs() >= 24 ? _splitDx : velocity * 0.08;
     if (dx.abs() < 8) return;
     final delta = dx < 0 ? 1 : -1; // swipe left -> next
     if (_splitTargetsLaunch) {
