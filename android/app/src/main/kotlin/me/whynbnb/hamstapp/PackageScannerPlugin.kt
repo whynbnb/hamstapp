@@ -1,6 +1,7 @@
 package me.whynbnb.hamstapp
 
 import android.content.ClipData
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
@@ -20,7 +21,9 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import android.provider.Settings
+import android.service.notification.NotificationListenerService
 import android.util.Base64
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -67,6 +70,12 @@ class PackageScannerPlugin(
     private val channel: MethodChannel
 ) : MethodChannel.MethodCallHandler {
 
+    init {
+        // Load the persisted unread-notification state as soon as the bridge
+        // exists, so counts are available even before the listener connects.
+        NotificationStore.init(context)
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(4)
     private val iconCache = ConcurrentHashMap<String, ByteArray>()
@@ -108,7 +117,15 @@ class PackageScannerPlugin(
             }
             "launchApp" -> {
                 val pkg = call.argument<String>("packageName")
-                mainHandler.post { result.success(pkg != null && launchApp(pkg)) }
+                mainHandler.post {
+                    val ok = pkg != null && launchApp(pkg)
+                    if (ok && pkg != null) {
+                        // Launching the app counts as reading its notifications.
+                        NotificationStore.markAllRead(pkg)
+                        NotificationStore.emit()
+                    }
+                    result.success(ok)
+                }
             }
             "openAppInfo" -> {
                 val pkg = call.argument<String>("packageName")
@@ -263,6 +280,32 @@ class PackageScannerPlugin(
                         runCatching { shareApk(path, name) }.getOrDefault(false)
                     mainHandler.post { result.success(ok) }
                 }
+            }
+            "hasNotificationAccess" -> {
+                result.success(hasNotificationAccess())
+            }
+            "openNotificationAccessSettings" -> {
+                mainHandler.post { result.success(openNotificationAccessSettings()) }
+            }
+            "getNotificationCounts" -> {
+                result.success(NotificationStore.counts())
+            }
+            "notificationDiagnostics" -> {
+                val counts = NotificationStore.counts()
+                result.success(
+                    mapOf(
+                        "connected" to NotificationStore.listenerConnected,
+                        "lastEventAt" to NotificationStore.lastEventAt,
+                        "events" to NotificationStore.eventCount,
+                        "packages" to counts.size,
+                        "total" to counts.values.sum(),
+                        "counts" to counts,
+                        "recent" to NotificationStore.recentEvents(),
+                    ),
+                )
+            }
+            "requestNotificationRebind" -> {
+                mainHandler.post { result.success(requestNotificationRebind()) }
             }
             else -> result.notImplemented()
         }
@@ -1274,6 +1317,18 @@ class PackageScannerPlugin(
 
     private companion object {
         val DEX_NAME = Regex("classes\\d*\\.dex")
+
+        /**
+         * Hidden system action that shows the notification-access toggle for one
+         * specific listener. Public API only exposes the whole list, so the raw
+         * string is used and the call falls back to the list when unsupported.
+         */
+        const val ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS =
+            "android.settings.NOTIFICATION_LISTENER_DETAIL_SETTINGS"
+
+        /** Extra carrying the flattened [ComponentName] for the action above. */
+        const val EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME =
+            "android.provider.extra.NOTIFICATION_LISTENER_COMPONENT_NAME"
     }
 
     /** `{entries: [...], totalBytes: n}` for one source. */
@@ -1464,6 +1519,49 @@ class PackageScannerPlugin(
     } catch (_: Throwable) {
         false
     }
+
+    /** Whether the user granted this app notification-listener access. */
+    private fun hasNotificationAccess(): Boolean = runCatching {
+        NotificationManagerCompat.getEnabledListenerPackages(context)
+            .contains(context.packageName)
+    }.getOrDefault(false)
+
+    /**
+     * Opens the system UI where notification access is granted.
+     *
+     * Android has **no runtime permission dialog** for this special access, so
+     * the app can only take the user there. Where the device supports it we jump
+     * straight to 囤囤's own toggle page; otherwise we fall back to the full list.
+     */
+    private fun openNotificationAccessSettings(): Boolean {
+        val detail = Intent(ACTION_NOTIFICATION_LISTENER_DETAIL_SETTINGS)
+            .putExtra(
+                EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME,
+                ComponentName(context, NotifListenerService::class.java)
+                    .flattenToString(),
+            )
+        if (startExternal(detail)) return true
+        return startExternal(
+            Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS),
+        )
+    }
+
+    /** Launches [intent] in its own task, reporting whether a target was found. */
+    private fun startExternal(intent: Intent): Boolean = try {
+        context.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        true
+    } catch (_: Throwable) {
+        false
+    }
+
+    /**
+     * Asks the system to re-bind the notification listener, e.g. right after the
+     * user granted access, so counts start flowing without a reboot.
+     */
+    private fun requestNotificationRebind(): Boolean = runCatching {
+        val component = ComponentName(context, NotifListenerService::class.java)
+        NotificationListenerService.requestRebind(component)
+    }.isSuccess
 
     /**
      * Copies an installed APK into the app's private cache and hands it to the

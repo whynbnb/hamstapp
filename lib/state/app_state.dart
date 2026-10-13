@@ -15,6 +15,7 @@ import '../models/snapshot.dart';
 import '../models/tile.dart';
 import '../models/tile_page.dart';
 import '../services/native_apps.dart';
+import '../services/notification_badges.dart';
 import '../services/storage.dart';
 import '../services/icon_cache.dart';
 import '../utils/format.dart';
@@ -147,6 +148,10 @@ class AppState extends ChangeNotifier {
   DateTime? lastScanAt;
   bool includeSystemInScan = true;
 
+  /// Subscription to the native notification-count stream (lives for the
+  /// lifetime of the state).
+  StreamSubscription<Map<String, int>>? _notificationSub;
+
   String query = '';
   AppScope scope = AppScope.all;
   AppFilter filter = AppFilter.all;
@@ -277,6 +282,16 @@ class AppState extends ChangeNotifier {
     // positions so the board stops re-packing them on later edits.
     await _migrateTilePositions();
     apps = _parseApps(await storage.readJson(_kAppsCache));
+    _applyNotificationBadges();
+    NativeApps.startListening();
+    _notificationSub ??= NativeApps.notificationCounts.listen(
+      NotificationBadges.instance.setCounts,
+    );
+    // The listener service is often bound (and publishes its counts) *before*
+    // this engine exists, so those events were dropped; seed from the native
+    // side now instead of waiting for the next notification. The rebind also
+    // recovers a listener the system dropped while the app was closed.
+    unawaited(syncNotificationBadges());
     initialized = true;
     notifyListeners();
   }
@@ -1370,6 +1385,19 @@ class AppState extends ChangeNotifier {
       loaded[_kLaunchTabOrder] = 'recent-left';
       await storage.writeJson(_kSettings, loaded);
     }
+    // Notification settings were split apart: the single on/off switch became
+    // the "capture" master switch, and the one badge style became per-surface
+    // modes. Copy the old values across once so an update keeps the user's
+    // choice.
+    if (!loaded.containsKey('notification_capture') &&
+        loaded['notification_badges'] is bool) {
+      loaded['notification_capture'] = loaded['notification_badges'];
+    }
+    final legacyBadgeStyle = loaded['notification_badge_style'];
+    if (legacyBadgeStyle is String) {
+      loaded['tile_badge_mode'] ??= legacyBadgeStyle;
+      loaded['other_badge_mode'] ??= legacyBadgeStyle;
+    }
     return loaded;
   }
 
@@ -1385,6 +1413,141 @@ class AppState extends ChangeNotifier {
     await _persistSettings();
     await applyStatusBarVisibility(value);
     notifyListeners();
+  }
+
+  // ---- notifications
+
+  /// Master switch: whether system notifications are captured (read) at all.
+  /// Off by default because it needs the user to grant notification access.
+  bool get notificationCapture =>
+      settings['notification_capture'] as bool? ?? false;
+
+  /// Badge mode for the app icons on the tile board.
+  NotificationBadgeMode get tileBadgeMode =>
+      _badgeMode(settings['tile_badge_mode']);
+
+  /// Badge mode for the page chips below the tile board.
+  NotificationBadgeMode get pageBadgeMode =>
+      _badgeMode(settings['page_badge_mode']);
+
+  /// Badge mode for everything else (lists, categories, favourites, …).
+  NotificationBadgeMode get otherBadgeMode =>
+      _badgeMode(settings['other_badge_mode']);
+
+  static NotificationBadgeMode _badgeMode(Object? raw) =>
+      NotificationBadgeMode.values.firstWhere(
+        (m) => m.name == raw,
+        orElse: () => NotificationBadgeMode.count,
+      );
+
+  Future<void> setNotificationCapture(bool value) async {
+    settings['notification_capture'] = value;
+    NotificationBadges.instance.setCapture(value);
+    if (value) {
+      await syncNotificationBadges();
+    } else {
+      NotificationBadges.instance.clear();
+    }
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  Future<void> setTileBadgeMode(NotificationBadgeMode value) async {
+    settings['tile_badge_mode'] = value.name;
+    NotificationBadges.instance.setMode(value, NotificationBadgeSurface.tile);
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  Future<void> setPageBadgeMode(NotificationBadgeMode value) async {
+    settings['page_badge_mode'] = value.name;
+    NotificationBadges.instance.setMode(value, NotificationBadgeSurface.page);
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  Future<void> setOtherBadgeMode(NotificationBadgeMode value) async {
+    settings['other_badge_mode'] = value.name;
+    NotificationBadges.instance.setMode(value, NotificationBadgeSurface.list);
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Whether the user granted this app notification-listener access.
+  Future<bool> hasNotificationAccess() async {
+    try {
+      return await NativeApps.hasNotificationAccess();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens the system "notification access" UI (directly to our own entry when
+  /// the device supports it, otherwise the full list).
+  Future<bool> openNotificationAccessSettings() async {
+    try {
+      return await NativeApps.openNotificationAccessSettings();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Live state of the native listener: `{connected, events, packages, total,
+  /// lastEventAt}`. Empty when the bridge is unavailable (e.g. tests).
+  Future<Map<String, dynamic>> notificationDiagnostics() async {
+    try {
+      return await NativeApps.notificationDiagnostics();
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Pushes the persisted switch and modes into the shared badge state so the
+  /// leaf widgets paint the right thing.
+  void _applyNotificationBadges() {
+    NotificationBadges.instance
+      ..setCapture(notificationCapture)
+      ..setMode(tileBadgeMode, NotificationBadgeSurface.tile)
+      ..setMode(pageBadgeMode, NotificationBadgeSurface.page)
+      ..setMode(otherBadgeMode, NotificationBadgeSurface.list);
+  }
+
+  /// Re-reads the native counts, nudging the system to (re)bind the listener
+  /// first (needed right after access is granted). Safe to call repeatedly.
+  Future<void> syncNotificationBadges() async {
+    _applyNotificationBadges();
+    if (!notificationCapture) {
+      NotificationBadges.instance.clear();
+      return;
+    }
+    try {
+      if (await NativeApps.hasNotificationAccess()) {
+        await NativeApps.requestNotificationRebind();
+      }
+      NotificationBadges.instance.setCounts(
+        await NativeApps.getNotificationCounts(),
+      );
+    } catch (_) {
+      // Native side unavailable (e.g. widget tests): keep the current counts.
+    }
+  }
+
+  /// Reads the current counts without asking the system to rebind. Used at
+  /// startup and whenever the app returns to the foreground, where a plain
+  /// refresh is enough (and does not hit the rebind rate limit).
+  Future<void> refreshNotificationCounts() async {
+    _applyNotificationBadges();
+    if (!notificationCapture) {
+      NotificationBadges.instance.clear();
+      return;
+    }
+    try {
+      NotificationBadges.instance.setCounts(
+        await NativeApps.getNotificationCounts(),
+      );
+    } catch (_) {
+      // Native side unavailable (e.g. widget tests).
+    }
   }
 
   /// Default side length (in grid cells) for newly added tiles. Defaults to 2,

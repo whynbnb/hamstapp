@@ -20,6 +20,8 @@ class NativeApps {
       StreamController<String>.broadcast();
   static final StreamController<bool> _dragging =
       StreamController<bool>.broadcast();
+  static final StreamController<Map<String, int>> _notifCounts =
+      StreamController<Map<String, int>>.broadcast();
 
   /// Paths of APK files dragged onto the window (copied into the app cache).
   static Stream<String> get droppedApks => _dropped.stream;
@@ -27,12 +29,23 @@ class NativeApps {
   /// Whether an external file drag is currently hovering over the window.
   static Stream<bool> get apkDragging => _dragging.stream;
 
-  /// Registers the shared method-call handler. Safe to call multiple times.
-  static void startListening() => _ensureHandler();
+  /// Active-notification counts per package pushed by the native listener.
+  static Stream<Map<String, int>> get notificationCounts =>
+      _notifCounts.stream;
+
+  /// Registers the shared method-call handler. Safe to call multiple times and
+  /// when no Flutter binding exists yet (e.g. pure-Dart tests); a later call
+  /// retries.
+  static void startListening() {
+    try {
+      _ensureHandler();
+    } catch (_) {
+      // No binary messenger yet.
+    }
+  }
 
   static void _ensureHandler() {
     if (_handlerSet) return;
-    _handlerSet = true;
     _channel.setMethodCallHandler((call) async {
       switch (call.method) {
         case 'downloadProgress':
@@ -53,9 +66,24 @@ class NativeApps {
           if (!_dragging.isClosed) _dragging.add(true);
         case 'apkDragEnded':
           if (!_dragging.isClosed) _dragging.add(false);
+        case 'notificationsChanged':
+          final m = (call.arguments as Map?)?.cast<dynamic, dynamic>();
+          if (!_notifCounts.isClosed) _notifCounts.add(_countsFrom(m?['counts']));
       }
       return null;
     });
+    _handlerSet = true;
+  }
+
+  /// Coerces a native `{package: count}` map into a typed int map.
+  static Map<String, int> _countsFrom(Object? raw) {
+    final out = <String, int>{};
+    if (raw is Map) {
+      raw.forEach((key, value) {
+        if (value is num) out['$key'] = value.toInt();
+      });
+    }
+    return out;
   }
 
   static Future<List<AppInfo>> getInstalledApps({bool includeSystem = true}) async {
@@ -105,6 +133,38 @@ class NativeApps {
   /// bar stays hidden even after the notification shade is pulled down.
   static Future<void> setStatusBarHidden(bool hidden) async {
     await _channel.invokeMethod<bool>('setStatusBarHidden', hidden);
+  }
+
+  /// Whether the user granted this app notification-listener access.
+  static Future<bool> hasNotificationAccess() async {
+    final ok = await _channel.invokeMethod<bool>('hasNotificationAccess');
+    return ok ?? false;
+  }
+
+  /// Opens the system "notification access" list.
+  static Future<bool> openNotificationAccessSettings() async {
+    final ok =
+        await _channel.invokeMethod<bool>('openNotificationAccessSettings');
+    return ok ?? false;
+  }
+
+  /// Active per-package notification counts (empty until the listener connects).
+  static Future<Map<String, int>> getNotificationCounts() async {
+    final raw = await _channel
+        .invokeMethod<Map<dynamic, dynamic>>('getNotificationCounts');
+    return _countsFrom(raw);
+  }
+
+  /// Asks the system to re-bind the listener, e.g. right after access is granted.
+  static Future<void> requestNotificationRebind() async {
+    await _channel.invokeMethod<bool>('requestNotificationRebind');
+  }
+
+  /// Live state of the native notification listener, for the settings screen.
+  static Future<Map<String, dynamic>> notificationDiagnostics() async {
+    final raw = await _channel
+        .invokeMethod<Map<dynamic, dynamic>>('notificationDiagnostics');
+    return (raw ?? const {}).cast<String, dynamic>();
   }
 
   static Future<bool> uninstallApp(String packageName) async {

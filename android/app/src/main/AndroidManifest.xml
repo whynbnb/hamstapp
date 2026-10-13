@@ -45,6 +45,18 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <!-- Reads other apps' notifications to draw unread bubbles on their
+             icons. Bound by the system; guarded by a signature permission and
+             only active once the user grants notification access. -->
+        <service
+            android:name=".NotifListenerService"
+            android:label="囤囤"
+            android:exported="true"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

@@ -25,6 +25,10 @@ class MainActivity : FlutterActivity() {
         channel = ch
         val p = PackageScannerPlugin(applicationContext, ch)
         plugin = p
+        // Forward notification-listener updates to Dart while this engine lives.
+        NotificationStore.sink = { counts ->
+            runCatching { ch.invokeMethod("notificationsChanged", mapOf("counts" to counts)) }
+        }
         ch.setMethodCallHandler { call, result ->
             when (call.method) {
                 "setStatusBarHidden" -> {
@@ -137,6 +141,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         plugin = null
         channel = null
+        NotificationStore.sink = null
         super.onDestroy()
     }
 }

@@ -7,6 +7,7 @@ import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
 import '../models/tile.dart';
 import '../models/tile_page.dart';
+import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/format.dart';
@@ -1329,6 +1330,70 @@ class _CornerGripPainter extends CustomPainter {
 ///
 /// Normal mode: compact chips showing only the page name.
 /// Edit mode: larger chips with the tile count, and the "new page" button.
+/// Unread badge for one tile-page chip: the total unread count of every app on
+/// that page, drawn as a number or a dot (or nothing) per the page-bar setting.
+class _PageUnreadBadge extends StatelessWidget {
+  const _PageUnreadBadge({required this.page, required this.state});
+
+  final TilePage page;
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: NotificationBadges.instance,
+      builder: (context, _) {
+        final badges = NotificationBadges.instance;
+        final mode = badges.modeFor(NotificationBadgeSurface.page);
+        if (mode == NotificationBadgeMode.none) return const SizedBox.shrink();
+        var total = 0;
+        for (final t in state.tiles) {
+          if (t.pageId != page.id) continue;
+          total += badges.countFor(
+            t.packageName,
+            surface: NotificationBadgeSurface.page,
+          );
+        }
+        if (total <= 0) return const SizedBox.shrink();
+
+        final scheme = Theme.of(context).colorScheme;
+        final ring = scheme.surface;
+        if (mode == NotificationBadgeMode.dot) {
+          return Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(
+              color: scheme.error,
+              shape: BoxShape.circle,
+              border: Border.all(color: ring, width: 1.5),
+            ),
+          );
+        }
+        return Container(
+          height: 15,
+          constraints: const BoxConstraints(minWidth: 15),
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 3.5),
+          decoration: BoxDecoration(
+            color: scheme.error,
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: ring, width: 1.5),
+          ),
+          child: Text(
+            NotificationBadges.labelFor(total),
+            style: TextStyle(
+              color: scheme.onError,
+              fontSize: 9.5,
+              fontWeight: FontWeight.w700,
+              height: 1.0,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class _PageBar extends StatelessWidget {
   const _PageBar({
     required this.state,
@@ -1382,40 +1447,55 @@ class _PageBar extends StatelessWidget {
             onLongPress: editing
                 ? () => _pageMenu(context, state, i, onChanged)
                 : null,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: EdgeInsets.symmetric(horizontal: hPad),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: selected
-                    ? scheme.primaryContainer
-                    : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-                borderRadius: BorderRadius.circular(editing ? 20 : 14),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    page.name,
-                    style: TextStyle(
-                      fontSize: isSingle ? 18 : baseFont,
-                      height: isSingle ? 1.0 : null,
-                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: fg,
-                    ),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  padding: EdgeInsets.symmetric(horizontal: hPad),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? scheme.primaryContainer
+                        : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(editing ? 20 : 14),
                   ),
-                  if (editing) ...[
-                    const SizedBox(width: 5),
-                    Text(
-                      '$count',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: fg.withValues(alpha: 0.7),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        page.name,
+                        style: TextStyle(
+                          fontSize: isSingle ? 18 : baseFont,
+                          height: isSingle ? 1.0 : null,
+                          fontWeight: selected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: fg,
+                        ),
                       ),
-                    ),
-                  ],
-                ],
-              ),
+                      if (editing) ...[
+                        const SizedBox(width: 5),
+                        Text(
+                          '$count',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: fg.withValues(alpha: 0.7),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                // Floats over the chip's top-right corner so it never widens
+                // the chip or shifts the row.
+                if (!editing)
+                  Positioned(
+                    top: -5,
+                    right: -5,
+                    child: _PageUnreadBadge(page: page, state: state),
+                  ),
+              ],
             ),
           ),
         );
@@ -1623,7 +1703,12 @@ class _Tile extends StatelessWidget {
     final width = tile.w * cellW + (tile.w - 1) * gap;
     final height = tile.h * cellW + (tile.h - 1) * gap;
 
-    final content = _content(context, editable);
+    final content = _withBadge(
+      _content(context, editable),
+      width,
+      height,
+      editable,
+    );
 
     if (!editable) return content;
 
@@ -1647,6 +1732,39 @@ class _Tile extends StatelessWidget {
         onDraggableCanceled: (v, o) => onDragCancel(),
         child: content,
       ),
+    );
+  }
+
+  /// Draws the unread bubble in the tile's own top-right corner (not the
+  /// icon's), scaled to the tile. Hidden while arranging tiles.
+  Widget _withBadge(Widget child, double width, double height, bool editable) {
+    if (editable) return child;
+    final shortest = width < height ? width : height;
+    return ListenableBuilder(
+      listenable: NotificationBadges.instance,
+      builder: (context, _) {
+        final badges = NotificationBadges.instance;
+        final count = badges.countFor(
+          app.packageName,
+          surface: NotificationBadgeSurface.tile,
+        );
+        if (count <= 0) return child;
+        return Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Positioned.fill(child: child),
+            Positioned(
+              top: 2,
+              right: 2,
+              child: IconNotificationBadge(
+                count: count,
+                iconSize: shortest,
+                mode: badges.modeFor(NotificationBadgeSurface.tile),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 
@@ -1801,6 +1919,7 @@ class _Tile extends StatelessWidget {
               child: AppIcon(
                 packageName: app.packageName,
                 label: app.appName,
+                showNotificationBadge: false,
                 size: (shortest - pad * 2)
                     .clamp(8.0, double.infinity)
                     .toDouble(),
@@ -1826,6 +1945,7 @@ class _Tile extends StatelessWidget {
                       child: AppIcon(
                         packageName: app.packageName,
                         label: app.appName,
+                        showNotificationBadge: false,
                         size: side.clamp(8.0, double.infinity).toDouble(),
                       ),
                     );

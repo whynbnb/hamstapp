@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
 import '../services/native_apps.dart';
+import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/backup_actions.dart';
 import '../widgets/collapsed_nav.dart';
@@ -250,6 +251,63 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           const Divider(height: 1),
+          _SectionHeader(context.strings.t('通知')),
+          SwitchListTile(
+            secondary: const Icon(Icons.notifications_active_outlined),
+            title: Text(context.strings.t('捕获通知')),
+            subtitle: Text(
+              context.strings.t('读取系统通知，用于未读角标；划掉通知不算已读，打开应用后清除'),
+            ),
+            value: state.notificationCapture,
+            onChanged: (v) => _toggleNotificationCapture(context, state, v),
+          ),
+          const _NotificationStatusTile(),
+          ListTile(
+            leading: const Icon(Icons.grid_view_rounded),
+            title: Text(context.strings.t('磁贴图标角标')),
+            subtitle: Text(
+              _badgeModeLabel(context.strings, state.tileBadgeMode),
+            ),
+            trailing: DropdownButton<NotificationBadgeMode>(
+              value: state.tileBadgeMode,
+              underline: const SizedBox.shrink(),
+              onChanged: (v) {
+                if (v != null) state.setTileBadgeMode(v);
+              },
+              items: _badgeModeItems(context),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.view_carousel_outlined),
+            title: Text(context.strings.t('磁贴页面角标')),
+            subtitle: Text(
+              _badgeModeLabel(context.strings, state.pageBadgeMode),
+            ),
+            trailing: DropdownButton<NotificationBadgeMode>(
+              value: state.pageBadgeMode,
+              underline: const SizedBox.shrink(),
+              onChanged: (v) {
+                if (v != null) state.setPageBadgeMode(v);
+              },
+              items: _badgeModeItems(context),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.list_alt),
+            title: Text(context.strings.t('其它位置角标')),
+            subtitle: Text(
+              _badgeModeLabel(context.strings, state.otherBadgeMode),
+            ),
+            trailing: DropdownButton<NotificationBadgeMode>(
+              value: state.otherBadgeMode,
+              underline: const SizedBox.shrink(),
+              onChanged: (v) {
+                if (v != null) state.setOtherBadgeMode(v);
+              },
+              items: _badgeModeItems(context),
+            ),
+          ),
+          const Divider(height: 1),
           _SectionHeader(context.strings.t('高级')),
           ListTile(
             leading: const Icon(Icons.cloud_outlined),
@@ -356,6 +414,68 @@ String _tileSwipeModeLabel(AppStrings s, TileSwipeMode mode) {
     case TileSwipeMode.bottomLaunch:
       return s.t('下半屏滑动切换启动子标签，上半屏滑动切换磁贴页');
   }
+}
+
+String _badgeModeLabel(AppStrings s, NotificationBadgeMode mode) {
+  switch (mode) {
+    case NotificationBadgeMode.count:
+      return s.t('数字（超过 99 显示 99+）');
+    case NotificationBadgeMode.dot:
+      return s.t('红点');
+    case NotificationBadgeMode.none:
+      return s.t('不显示');
+  }
+}
+
+List<DropdownMenuItem<NotificationBadgeMode>> _badgeModeItems(
+  BuildContext context,
+) {
+  final s = context.strings;
+  return [
+    DropdownMenuItem(
+      value: NotificationBadgeMode.count,
+      child: Text(s.t('数字')),
+    ),
+    DropdownMenuItem(value: NotificationBadgeMode.dot, child: Text(s.t('红点'))),
+    DropdownMenuItem(
+      value: NotificationBadgeMode.none,
+      child: Text(s.t('不显示')),
+    ),
+  ];
+}
+
+/// Turns notification capture on/off, guiding the user to the system
+/// "notification access" UI the first time (the permission has no runtime
+/// dialog and cannot be requested programmatically).
+Future<void> _toggleNotificationCapture(
+  BuildContext context,
+  AppState state,
+  bool value,
+) async {
+  await state.setNotificationCapture(value);
+  if (!value) return;
+  if (await state.hasNotificationAccess()) return;
+  if (!context.mounted) return;
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(ctx.strings.t('需要通知使用权')),
+      content: Text(
+        ctx.strings.t('囤囤需要「通知使用权」才能读取其它应用的通知并在图标上显示角标。'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: Text(ctx.strings.t('取消')),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: Text(ctx.strings.t('去开启')),
+        ),
+      ],
+    ),
+  );
+  if (go == true) await state.openNotificationAccessSettings();
 }
 
 IconData _tileStyleIcon(TileStyle style) {
@@ -521,6 +641,223 @@ Future<void> refreshIconCache(BuildContext context, AppState state) async {
     ..showSnackBar(
       SnackBar(content: Text(s.t('已刷新 {n} 个应用图标', {'n': n}))),
     );
+}
+
+/// Shows whether notifications are actually being captured, and doubles as the
+/// shortcut into the system notification-access UI.
+class _NotificationStatusTile extends StatefulWidget {
+  const _NotificationStatusTile();
+
+  @override
+  State<_NotificationStatusTile> createState() => _NotificationStatusTileState();
+}
+
+class _NotificationStatusTileState extends State<_NotificationStatusTile>
+    with WidgetsBindingObserver {
+  /// Whether notification access is granted; null while the first check runs.
+  bool? _granted;
+
+  /// Latest native diagnostics (see [AppState.notificationDiagnostics]).
+  Map<String, dynamic> _diag = const {};
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _check();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Re-check on return from the system settings screen.
+    if (state == AppLifecycleState.resumed) _check();
+  }
+
+  Future<void> _check() async {
+    final app = context.read<AppState>();
+    bool granted;
+    try {
+      granted = await NativeApps.hasNotificationAccess();
+    } catch (_) {
+      granted = false;
+    }
+    final diag = await app.notificationDiagnostics();
+    if (!mounted) return;
+    final changed = _granted != granted;
+    setState(() {
+      _granted = granted;
+      _diag = diag;
+    });
+    if (changed && granted) {
+      // Access was just granted: start pulling counts.
+      await app.syncNotificationBadges();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.strings;
+    final scheme = Theme.of(context).colorScheme;
+    final capturing = context.watch<AppState>().notificationCapture;
+    final granted = _granted;
+    final connected = _diag['connected'] == true;
+    final events = (_diag['events'] as num?)?.toInt() ?? 0;
+
+    final IconData icon;
+    final Color? iconColor;
+    final Widget subtitle;
+    if (!capturing) {
+      icon = Icons.notifications_off_outlined;
+      iconColor = null;
+      subtitle = Text(s.t('未开启：打开上面的开关即可开始捕获'));
+    } else if (granted != true) {
+      icon = Icons.error_outline;
+      iconColor = scheme.error;
+      subtitle = Text(
+        granted == null
+            ? s.t('正在检查…')
+            : s.t('未授权 · 点击前往系统设置开启'),
+      );
+    } else if (!connected) {
+      icon = Icons.sync_problem;
+      iconColor = scheme.error;
+      subtitle = Text(s.t('已授权，但通知服务未连接 · 点此修复'));
+    } else {
+      icon = Icons.notifications_active;
+      iconColor = scheme.primary;
+      subtitle = ListenableBuilder(
+        listenable: NotificationBadges.instance,
+        builder: (context, _) => Text(
+          s.t('正在捕获 · {n} 个应用有未读（事件 {events}）', {
+            'n': NotificationBadges.instance.appCount,
+            'events': events,
+          }),
+        ),
+      );
+    }
+
+    return ListTile(
+      leading: Icon(icon, color: iconColor),
+      title: Text(s.t('状态')),
+      subtitle: subtitle,
+      trailing: IconButton(
+        icon: const Icon(Icons.info_outline),
+        tooltip: s.t('诊断信息'),
+        onPressed: _showDiagnostics,
+      ),
+      onTap: () async {
+        final app = context.read<AppState>();
+        if (granted != true) {
+          await app.openNotificationAccessSettings();
+        } else {
+          // A rebind alone cannot force the system to re-bind a listener it
+          // dropped, so when it is missing walk the user through re-granting.
+          await app.syncNotificationBadges();
+          if (!connected && mounted) await _showReconnectHelp();
+        }
+        await _check();
+      },
+    );
+  }
+
+  /// Dumps the listener state and the recent notification events, so a wrong
+  /// badge can be traced back to what the app actually sent.
+  Future<void> _showDiagnostics() async {
+    final s = context.strings;
+    final app = context.read<AppState>();
+    final granted = await app.hasNotificationAccess();
+    final diag = await app.notificationDiagnostics();
+    if (!mounted) return;
+    final recent = (diag['recent'] as List?)?.cast<dynamic>() ?? const [];
+    final counts = (diag['counts'] as Map?)?.cast<dynamic, dynamic>() ?? const {};
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('诊断信息')),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _diagLine(s, '通知使用权', granted ? s.t('已授权') : s.t('未授权')),
+                _diagLine(
+                  s,
+                  '监听服务',
+                  diag['connected'] == true ? s.t('已连接') : s.t('未连接'),
+                ),
+                _diagLine(s, '收到事件', '${diag['events'] ?? 0}'),
+                _diagLine(
+                  s,
+                  '未读数据',
+                  '${diag['packages'] ?? 0} 应用 / ${diag['total'] ?? 0} 条',
+                ),
+                const SizedBox(height: 8),
+                Text(s.t('每个应用的未读数：'), style: _diagStyle),
+                Text(counts.isEmpty ? s.t('（暂无）') : counts.toString()),
+                const SizedBox(height: 8),
+                Text(s.t('最近通知事件：'), style: _diagStyle),
+                if (recent.isEmpty)
+                  Text(s.t('（暂无）'))
+                else
+                  ...recent.map((e) => Text('$e')),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(s.t('关闭')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static const TextStyle _diagStyle = TextStyle(
+    fontSize: 12,
+    fontWeight: FontWeight.bold,
+  );
+
+  Widget _diagLine(AppStrings s, String label, String value) => Padding(
+    padding: const EdgeInsets.only(bottom: 2),
+    child: Text('$label：$value', style: const TextStyle(fontSize: 12)),
+  );
+
+  Future<void> _showReconnectHelp() async {
+    final s = context.strings;
+    final app = context.read<AppState>();
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('通知服务未连接')),
+        content: Text(
+          s.t(
+            '系统没有把通知监听服务绑定给囤囤。在接下来的系统设置里，把「囤囤」的通知使用权关掉再打开即可恢复。',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.t('去设置')),
+          ),
+        ],
+      ),
+    );
+    if (go == true) await app.openNotificationAccessSettings();
+  }
 }
 
 class _SectionHeader extends StatelessWidget {

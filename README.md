@@ -48,6 +48,10 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - **Favorites** — a quick grid of the apps you starred.
 - **Recent** — launch history with *all / today / 7-day / 30-day* filters, sorted by recency or frequency,
   plus time-of-day **recommendations** learned from your habits.
+- **Notification badges** — grant notification access, turn on *Capture notifications*, and app icons
+  get an unread bubble: choose **count / dot / hidden**, set separately for the tile board and the rest.
+  Badges follow **unread** semantics: dismissing a notification keeps the bubble, which clears when you
+  open it, the app withdraws it, or you launch the app from 囤囤.
 
 ### 📦 App manager
 - Scan installed apps (optionally including system apps); the list is cached for instant launch.
@@ -80,10 +84,11 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - **Export / import** the whole state as one JSON package.
 - A persistent **icon cache** so icons appear instantly, with an on-demand refresh.
 - **Offline by default** — the only network access is the remote sources you configure yourself.
+- **Notification badges** are read on-device from the system notification access you grant; nothing is uploaded.
 
 ### 🎨 Interface
 - Light / dark / system theme, custom seed colour, **Chinese & English**.
-- Navigation: bottom bar, side rail, or a floating button.
+- Navigation: bottom bar, side rail, or a collapsed button.
 - Adjustable haptics, optional full-screen (hide the status bar), remember last position.
 
 ## 📥 Install

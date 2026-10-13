@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -17,7 +19,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// Index of the Settings tab within [destinations] below.
   static const int _settingsTab = 3;
 
@@ -32,8 +34,35 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _index = context.read<AppState>().lastHomeIndex.clamp(0, 3);
     if (_index != _settingsTab) _lastContentIndex = _index;
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Notification events that arrive while the app is backgrounded can be
+    // missed, so re-read the counts whenever we come back to the foreground.
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_syncNotifications(context.read<AppState>()));
+    }
+  }
+
+  Future<void> _syncNotifications(AppState app) async {
+    final diag = await app.notificationDiagnostics();
+    // The system drops the listener now and then (and the rebind is rate
+    // limited), so only ask for a reconnect when it is actually missing.
+    if (diag['connected'] == false && await app.hasNotificationAccess()) {
+      await app.syncNotificationBadges();
+    } else {
+      await app.refreshNotificationCounts();
+    }
   }
 
   void _select(AppState state, int i, {bool forceHaptic = false}) {
