@@ -36,6 +36,10 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   late final PageController _tabPager;
   int _lastTab = 0;
 
+  /// Accumulated horizontal travel of a body-wide swipe used in the split
+  /// swipe modes (the launch pager itself no longer scrolls natively there).
+  double _bodySwipeDx = 0;
+
   /// The four launch sections (磁贴/分类/收藏/最近). The pager loops, so pages
   /// are addressed by a large "virtual" index reduced modulo [_tabCount].
   static const int _tabCount = 4;
@@ -87,6 +91,30 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   int get _tabPagerLogical {
     final page = (_tabPager.page ?? _tabVirtual(_lastTab)).round();
     return ((page % _tabCount) + _tabCount) % _tabCount;
+  }
+
+  /// A body-wide horizontal swipe that switches the launch sub-tab.
+  ///
+  /// Only used in the split swipe modes, where the launch pager is switched
+  /// programmatically instead of scrolled natively: a native fling kept
+  /// grabbing the next swipe for a moment after landing, which made both halves
+  /// keep changing the launch sub-tab instead of the tile pages. On the 磁贴
+  /// board the deeper per-half gesture takes over, so this only fires on the
+  /// other sub-tabs (分類 / 收藏 / 最近).
+  Widget _splitSwipeLayer({required bool enabled, required Widget child}) {
+    if (!enabled) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onHorizontalDragStart: (_) => _bodySwipeDx = 0,
+      onHorizontalDragUpdate: (d) => _bodySwipeDx += d.delta.dx,
+      onHorizontalDragEnd: (d) {
+        final velocity = d.primaryVelocity ?? 0;
+        final dx = _bodySwipeDx.abs() >= 24 ? _bodySwipeDx : -velocity * 0.08;
+        if (dx.abs() < 8) return;
+        _switchLaunchTab(dx < 0 ? 1 : -1); // swipe left -> next
+      },
+      child: child,
+    );
   }
 
   /// Move the launch pager from [currentLogical] to [logical] following the tab
@@ -153,6 +181,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     final state = context.watch<AppState>();
     // 磁贴 is the second tab (最近 sits to its left).
     final editing = state.tileEditMode && _tabs.index == 1;
+    final split = state.tileSwipeMode != TileSwipeMode.holdDrag;
 
     // The four sections live directly in the header (no title text) to save a
     // whole row of vertical space.
@@ -189,35 +218,38 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
             : tabs,
         actions: _actions(context, state, editing),
       ),
-      body: NotificationListener<ScrollNotification>(
-        onNotification: _onTabsScroll,
-        child: PageView.builder(
-          controller: _tabPager,
-          physics: editing
-              ? const NeverScrollableScrollPhysics()
-              : const PageScrollPhysics(),
-          itemCount: null,
-          onPageChanged: _onLaunchPageChanged,
-          itemBuilder: (context, virtual) {
-            switch (((virtual % _tabCount) + _tabCount) % _tabCount) {
-              case 0:
-                return _RecentTab(
-                  state: state,
-                  sort: _recentSort,
-                  sinceMillis: _recentSince,
-                );
-              case 1:
-                return _TilesTab(
-                  state: state,
-                  onSwitchTab: _switchLaunchTab,
-                  onArm: () => context.read<AppState>().hapticLight(),
-                );
-              case 2:
-                return CategoriesTab(state: state);
-              default:
-                return _FavoritesTab(state: state);
-            }
-          },
+      body: _splitSwipeLayer(
+        enabled: split && !editing,
+        child: NotificationListener<ScrollNotification>(
+          onNotification: _onTabsScroll,
+          child: PageView.builder(
+            controller: _tabPager,
+            physics: editing || split
+                ? const NeverScrollableScrollPhysics()
+                : const PageScrollPhysics(),
+            itemCount: null,
+            onPageChanged: _onLaunchPageChanged,
+            itemBuilder: (context, virtual) {
+              switch (((virtual % _tabCount) + _tabCount) % _tabCount) {
+                case 0:
+                  return _RecentTab(
+                    state: state,
+                    sort: _recentSort,
+                    sinceMillis: _recentSince,
+                  );
+                case 1:
+                  return _TilesTab(
+                    state: state,
+                    onSwitchTab: _switchLaunchTab,
+                    onArm: () => context.read<AppState>().hapticLight(),
+                  );
+                case 2:
+                  return CategoriesTab(state: state);
+                default:
+                  return _FavoritesTab(state: state);
+              }
+            },
+          ),
         ),
       ),
     );

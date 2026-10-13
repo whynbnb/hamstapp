@@ -136,4 +136,20 @@ void main() {
     expect(state.currentTilePageIndex, 1);
     expect(state.lastLaunchTab, 1, reason: 'a plain swipe must not change tabs');
   });
+
+  testWidgets('split mode: another sub-tab still switches launch on a swipe', (
+    tester,
+  ) async {
+    final state = _state(TileSwipeMode.topLaunch);
+    state.settings['last_launch_tab'] = 2; // open on 分类 (no tile board there)
+    await _pump(tester, state);
+
+    await tester.dragFrom(
+      tester.getCenter(find.byType(PageView).first),
+      const Offset(-320, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(state.lastLaunchTab, 3, reason: '分类 -> 收藏');
+  });
 }
