@@ -60,10 +60,19 @@ object NotificationStore {
     @Volatile
     var eventCount = 0L
 
-    /** Recent notification events, newest last, for the diagnostics dialog. */
-    private const val MAX_EVENTS = 24
+    /** Recent notification events, newest last; flushed to the log when it is
+     *  switched on so the history right before is not lost. */
+    private const val MAX_EVENTS = 50
 
     private val events = ArrayDeque<String>()
+
+    /** Set by MainActivity to forward log lines to Dart. */
+    @Volatile
+    var logSink: ((String, String) -> Unit)? = null
+
+    /** Whether the user turned the in-app log on. */
+    @Volatile
+    var loggingEnabled = false
 
     fun noteConnected(connected: Boolean) {
         listenerConnected = connected
@@ -74,12 +83,17 @@ object NotificationStore {
         eventCount++
     }
 
-    fun addEvent(line: String) {
+    fun addEvent(line: String, level: String = "info") {
         events.addLast(line)
         while (events.size > MAX_EVENTS) events.removeFirst()
+        if (loggingEnabled) logSink?.invoke(level, line)
     }
 
-    fun recentEvents(): List<String> = events.toList()
+    /** Re-sends the buffered events; called right after logging is switched on. */
+    fun flushEvents() {
+        if (!loggingEnabled) return
+        events.toList().forEach { logSink?.invoke("info", it) }
+    }
 
     @Synchronized
     fun init(context: Context) {

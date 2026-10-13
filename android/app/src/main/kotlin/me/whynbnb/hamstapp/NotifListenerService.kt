@@ -50,12 +50,16 @@ class NotifListenerService : NotificationListenerService() {
         NotificationStore.init(applicationContext)
         NotificationStore.noteConnected(true)
         importActive()
+        NotificationStore.addEvent(
+            "监听服务已连接 · ${NotificationStore.counts().size} 个应用有未读",
+        )
         NotificationStore.emit()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         NotificationStore.noteConnected(false)
+        NotificationStore.addEvent("监听服务已断开", level = "warn")
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification?) {

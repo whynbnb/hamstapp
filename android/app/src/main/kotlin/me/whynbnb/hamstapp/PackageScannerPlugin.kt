@@ -299,10 +299,13 @@ class PackageScannerPlugin(
                         "events" to NotificationStore.eventCount,
                         "packages" to counts.size,
                         "total" to counts.values.sum(),
-                        "counts" to counts,
-                        "recent" to NotificationStore.recentEvents(),
                     ),
                 )
+            }
+            "setLoggingEnabled" -> {
+                NotificationStore.loggingEnabled = call.arguments as? Boolean ?: false
+                if (NotificationStore.loggingEnabled) NotificationStore.flushEvents()
+                result.success(null)
             }
             "requestNotificationRebind" -> {
                 mainHandler.post { result.success(requestNotificationRebind()) }

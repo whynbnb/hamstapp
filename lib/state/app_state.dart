@@ -16,6 +16,7 @@ import '../models/tile.dart';
 import '../models/tile_page.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
+import '../services/app_log.dart';
 import '../services/storage.dart';
 import '../services/icon_cache.dart';
 import '../utils/format.dart';
@@ -283,16 +284,53 @@ class AppState extends ChangeNotifier {
     await _migrateTilePositions();
     apps = _parseApps(await storage.readJson(_kAppsCache));
     _applyNotificationBadges();
+    _applyLogging();
     NativeApps.startListening();
-    _notificationSub ??= NativeApps.notificationCounts.listen(
-      NotificationBadges.instance.setCounts,
-    );
+    _notificationSub ??= NativeApps.notificationCounts.listen(_onNotificationCounts);
     // The listener service is often bound (and publishes its counts) *before*
     // this engine exists, so those events were dropped; seed from the native
     // side now instead of waiting for the next notification. The rebind also
     // recovers a listener the system dropped while the app was closed.
     unawaited(syncNotificationBadges());
     initialized = true;
+    notifyListeners();
+  }
+
+  void _onNotificationCounts(Map<String, int> counts) {
+    NotificationBadges.instance.setCounts(counts);
+    AppLog.instance.log(
+      LogModule.notifications,
+      '未读更新 · ${counts.length} 个应用 · $counts',
+    );
+  }
+
+  /// Pushes the persisted log switch into [AppLog] and the native bridge.
+  void _applyLogging() {
+    final on = loggingEnabled;
+    AppLog.instance.setEnabled(on);
+    unawaited(_pushLoggingFlag(on));
+  }
+
+  Future<void> _pushLoggingFlag(bool on) async {
+    try {
+      await NativeApps.setLoggingEnabled(on);
+    } catch (_) {
+      // Native side unavailable (e.g. widget tests).
+    }
+  }
+
+  /// Whether the in-app log records anything. Off by default.
+  bool get loggingEnabled => settings['logging_enabled'] as bool? ?? false;
+
+  Future<void> setLoggingEnabled(bool value) async {
+    settings['logging_enabled'] = value;
+    AppLog.instance.setEnabled(value);
+    try {
+      await NativeApps.setLoggingEnabled(value);
+    } catch (_) {
+      // Native side unavailable (e.g. widget tests).
+    }
+    await _persistSettings();
     notifyListeners();
   }
 
@@ -405,6 +443,11 @@ class AppState extends ChangeNotifier {
     pendingUninstalls = <AppMeta>[];
     notifyListeners();
 
+    AppLog.instance.log(
+      LogModule.apps,
+      '开始扫描应用（含系统应用: $includeSystemInScan）',
+    );
+
     // Baseline used to detect removals: the most recent snapshot if one
     // exists ("当前 vs 上次快照"), otherwise the previous scan result.
     final baseline = _baseline();
@@ -466,10 +509,16 @@ class AppState extends ChangeNotifier {
       sw.stop();
       lastScanMs = sw.elapsedMilliseconds;
       lastScanAt = now;
+      AppLog.instance.log(
+        LogModule.apps,
+        '扫描完成 · ${result.length} 个应用 · ${sw.elapsedMilliseconds}ms'
+            '${pending.isEmpty ? '' : ' · 疑似卸载 ${pending.length} 个'}',
+      );
     } catch (e) {
       sw.stop();
       lastScanMs = sw.elapsedMilliseconds;
       scanError = e.toString();
+      AppLog.instance.error(LogModule.apps, '扫描失败 · $e');
     } finally {
       scanning = false;
       notifyListeners();

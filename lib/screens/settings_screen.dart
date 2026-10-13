@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
+import '../services/app_log.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../state/app_state.dart';
@@ -9,6 +10,7 @@ import '../utils/backup_actions.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/theme_color_picker.dart';
 import 'haptics_settings_screen.dart';
+import 'log_screen.dart';
 import 'sync_screen.dart';
 
 /// App version shown in Settings and the About dialog.
@@ -305,6 +307,36 @@ class SettingsScreen extends StatelessWidget {
                 if (v != null) state.setOtherBadgeMode(v);
               },
               items: _badgeModeItems(context),
+            ),
+          ),
+          const Divider(height: 1),
+          _SectionHeader(context.strings.t('日志')),
+          SwitchListTile(
+            secondary: const Icon(Icons.receipt_long_outlined),
+            title: Text(context.strings.t('启用日志')),
+            subtitle: Text(
+              context.strings.t('记录运行日志，便于排查问题（默认关闭）'),
+            ),
+            value: state.loggingEnabled,
+            onChanged: state.setLoggingEnabled,
+          ),
+          ListenableBuilder(
+            listenable: AppLog.instance,
+            builder: (context, _) => ListTile(
+              leading: const Icon(Icons.article_outlined),
+              title: Text(context.strings.t('查看日志')),
+              subtitle: Text(
+                state.loggingEnabled
+                    ? context.strings.t('{n} 条记录 · 可按模块筛选并复制', {
+                        'n': AppLog.instance.length,
+                      })
+                    : context.strings.t('日志未启用'),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const LogScreen()),
+              ),
             ),
           ),
           const Divider(height: 1),
@@ -747,9 +779,15 @@ class _NotificationStatusTileState extends State<_NotificationStatusTile>
       title: Text(s.t('状态')),
       subtitle: subtitle,
       trailing: IconButton(
-        icon: const Icon(Icons.info_outline),
-        tooltip: s.t('诊断信息'),
-        onPressed: _showDiagnostics,
+        icon: const Icon(Icons.article_outlined),
+        tooltip: s.t('查看通知日志'),
+        onPressed: () => Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) =>
+                const LogScreen(initialModule: LogModule.notifications),
+          ),
+        ),
       ),
       onTap: () async {
         final app = context.read<AppState>();
@@ -765,72 +803,6 @@ class _NotificationStatusTileState extends State<_NotificationStatusTile>
       },
     );
   }
-
-  /// Dumps the listener state and the recent notification events, so a wrong
-  /// badge can be traced back to what the app actually sent.
-  Future<void> _showDiagnostics() async {
-    final s = context.strings;
-    final app = context.read<AppState>();
-    final granted = await app.hasNotificationAccess();
-    final diag = await app.notificationDiagnostics();
-    if (!mounted) return;
-    final recent = (diag['recent'] as List?)?.cast<dynamic>() ?? const [];
-    final counts = (diag['counts'] as Map?)?.cast<dynamic, dynamic>() ?? const {};
-    await showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(s.t('诊断信息')),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _diagLine(s, '通知使用权', granted ? s.t('已授权') : s.t('未授权')),
-                _diagLine(
-                  s,
-                  '监听服务',
-                  diag['connected'] == true ? s.t('已连接') : s.t('未连接'),
-                ),
-                _diagLine(s, '收到事件', '${diag['events'] ?? 0}'),
-                _diagLine(
-                  s,
-                  '未读数据',
-                  '${diag['packages'] ?? 0} 应用 / ${diag['total'] ?? 0} 条',
-                ),
-                const SizedBox(height: 8),
-                Text(s.t('每个应用的未读数：'), style: _diagStyle),
-                Text(counts.isEmpty ? s.t('（暂无）') : counts.toString()),
-                const SizedBox(height: 8),
-                Text(s.t('最近通知事件：'), style: _diagStyle),
-                if (recent.isEmpty)
-                  Text(s.t('（暂无）'))
-                else
-                  ...recent.map((e) => Text('$e')),
-              ],
-            ),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(s.t('关闭')),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static const TextStyle _diagStyle = TextStyle(
-    fontSize: 12,
-    fontWeight: FontWeight.bold,
-  );
-
-  Widget _diagLine(AppStrings s, String label, String value) => Padding(
-    padding: const EdgeInsets.only(bottom: 2),
-    child: Text('$label：$value', style: const TextStyle(fontSize: 12)),
-  );
 
   Future<void> _showReconnectHelp() async {
     final s = context.strings;

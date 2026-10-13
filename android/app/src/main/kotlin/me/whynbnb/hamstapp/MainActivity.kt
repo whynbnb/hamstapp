@@ -29,6 +29,15 @@ class MainActivity : FlutterActivity() {
         NotificationStore.sink = { counts ->
             runCatching { ch.invokeMethod("notificationsChanged", mapOf("counts" to counts)) }
         }
+        // Forward notification events into the in-app log (only while it is on).
+        NotificationStore.logSink = { level, text ->
+            runCatching {
+                ch.invokeMethod(
+                    "nativeLog",
+                    mapOf("module" to "notifications", "level" to level, "text" to text),
+                )
+            }
+        }
         ch.setMethodCallHandler { call, result ->
             when (call.method) {
                 "setStatusBarHidden" -> {
@@ -142,6 +151,7 @@ class MainActivity : FlutterActivity() {
         plugin = null
         channel = null
         NotificationStore.sink = null
+        NotificationStore.logSink = null
         super.onDestroy()
     }
 }

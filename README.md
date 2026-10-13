@@ -85,6 +85,8 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - A persistent **icon cache** so icons appear instantly, with an on-demand refresh.
 - **Offline by default** — the only network access is the remote sources you configure yourself.
 - **Notification badges** are read on-device from the system notification access you grant; nothing is uploaded.
+- An **opt-in log** (off by default) records scan / install / sync / launch / notification events on-device;
+  filter it by module and copy the result when reporting a problem.
 
 ### 🎨 Interface
 - Light / dark / system theme, custom seed colour, **Chinese & English**.

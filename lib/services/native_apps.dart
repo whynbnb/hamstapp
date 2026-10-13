@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
 import '../models/apk_analysis.dart';
+import 'app_log.dart';
 
 /// Thin wrapper over the native `hamstapp/apps` MethodChannel.
 class NativeApps {
@@ -69,10 +70,32 @@ class NativeApps {
         case 'notificationsChanged':
           final m = (call.arguments as Map?)?.cast<dynamic, dynamic>();
           if (!_notifCounts.isClosed) _notifCounts.add(_countsFrom(m?['counts']));
+        case 'nativeLog':
+          final m = (call.arguments as Map?)?.cast<dynamic, dynamic>();
+          final text = m?['text'] as String?;
+          if (text != null && text.isNotEmpty) {
+            AppLog.instance.log(
+              LogModule.byName(m?['module'] as String?),
+              text,
+              level: _levelByName(m?['level'] as String?),
+            );
+          }
       }
       return null;
     });
     _handlerSet = true;
+  }
+
+  static LogLevel _levelByName(String? name) => switch (name) {
+    'warn' => LogLevel.warn,
+    'error' => LogLevel.error,
+    _ => LogLevel.info,
+  };
+
+  /// Turns native-side log forwarding on or off (only useful while the in-app
+  /// log is enabled).
+  static Future<void> setLoggingEnabled(bool enabled) async {
+    await _channel.invokeMethod<bool>('setLoggingEnabled', enabled);
   }
 
   /// Coerces a native `{package: count}` map into a typed int map.
@@ -109,6 +132,11 @@ class NativeApps {
     final ok = await _channel.invokeMethod<bool>(
       'launchApp',
       {'packageName': packageName},
+    );
+    AppLog.instance.log(
+      LogModule.launch,
+      ok == true ? '启动 $packageName' : '启动失败 $packageName',
+      level: ok == true ? LogLevel.info : LogLevel.warn,
     );
     return ok ?? false;
   }
@@ -193,7 +221,16 @@ class NativeApps {
       Map<String, dynamic> config) async {
     final r = await _channel
         .invokeMethod<Map<dynamic, dynamic>>('remoteTest', config);
-    return (r ?? {}).cast<String, dynamic>();
+    final out = (r ?? {}).cast<String, dynamic>();
+    final ok = out['ok'] == true;
+    AppLog.instance.log(
+      LogModule.sync,
+      ok
+          ? '测试远程源成功 · ${out['count'] ?? 0} 个文件'
+          : '测试远程源失败 · ${out['error'] ?? '未知错误'}',
+      level: ok ? LogLevel.info : LogLevel.warn,
+    );
+    return out;
   }
 
   /// Lists `.apk` files on a remote source, recursively. Each item has
@@ -202,9 +239,11 @@ class NativeApps {
       Map<String, dynamic> config) async {
     final raw = await _channel.invokeMethod<List<dynamic>>('remoteList', config);
     if (raw == null) return <Map<String, dynamic>>[];
-    return raw
+    final list = raw
         .map((e) => (e as Map).cast<String, dynamic>())
         .toList(growable: false);
+    AppLog.instance.log(LogModule.sync, '列出远程文件 · ${list.length} 个');
+    return list;
   }
 
   /// Downloads a remote file into the persistent cache; returns the local path.
@@ -226,6 +265,7 @@ class NativeApps {
     _ensureHandler();
     final id = 'dl_${DateTime.now().microsecondsSinceEpoch}';
     if (onProgress != null) _downloadProgress[id] = onProgress;
+    AppLog.instance.log(LogModule.sync, '开始下载 · $name');
     try {
       final path = await _channel.invokeMethod<String>('remoteDownload', {
         ...config,
@@ -242,7 +282,11 @@ class NativeApps {
       if (path == null || path.isEmpty) {
         throw StateError(AppStrings.current.t('下载失败'));
       }
+      AppLog.instance.log(LogModule.sync, '下载完成 · $name');
       return path;
+    } catch (e) {
+      AppLog.instance.error(LogModule.sync, '下载失败 · $name — $e');
+      rethrow;
     } finally {
       _downloadProgress.remove(id);
     }
@@ -321,6 +365,11 @@ class NativeApps {
   /// Hands a downloaded APK to the system package installer.
   static Future<bool> installApk(String path) async {
     final ok = await _channel.invokeMethod<bool>('installApk', {'path': path});
+    AppLog.instance.log(
+      LogModule.install,
+      ok == true ? '交给系统安装器: $path' : '无法拉起系统安装器: $path',
+      level: ok == true ? LogLevel.info : LogLevel.warn,
+    );
     return ok ?? false;
   }
 
