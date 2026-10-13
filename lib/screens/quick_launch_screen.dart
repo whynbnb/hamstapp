@@ -89,21 +89,22 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     return ((page % _tabCount) + _tabCount) % _tabCount;
   }
 
-  /// Move the launch pager to [logical], always sliding forward through the
-  /// loop.
+  /// Move the launch pager from [currentLogical] to [logical] following the tab
+  /// order, exactly the way the TabBar indicator travels.
   ///
-  /// Tapping a tab that sits "behind" the current one (e.g. 磁贴 → 最近) now
-  /// glides through 分类 and 收藏 instead of jumping back the short way, so
-  /// every sub-tab switch reads as forward motion. The duration grows with the
-  /// number of tabs crossed so a multi-tab hop does not blur past.
+  /// The pager moves linearly in index (never wrapping the loop), so 磁贴 →
+  /// 最近 glides forward through 分类 and 收藏 while 最近 → 分类 slides back
+  /// through 收藏. Wrapping the other way made the content and the indicator
+  /// move in opposite directions, which looked like a long detour.
   void _animateLaunchPager(int logical) {
     final current = (_tabPager.page ?? _tabVirtual(logical)).round();
     final currentLogical = ((current % _tabCount) + _tabCount) % _tabCount;
-    final diff = (logical - currentLogical) % _tabCount; // 0.._tabCount-1
+    final diff = logical - currentLogical; // -(_tabCount-1) .. _tabCount-1
     if (diff == 0) return;
+    final steps = diff.abs();
     _tabPager.animateToPage(
       current + diff,
-      duration: Duration(milliseconds: 240 + 110 * (diff - 1)),
+      duration: Duration(milliseconds: 240 + 110 * (steps - 1)),
       curve: Curves.easeOut,
     );
   }

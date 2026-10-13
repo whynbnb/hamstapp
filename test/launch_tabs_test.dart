@@ -33,45 +33,67 @@ AppInfo _ai(String pkg, String name) => AppInfo(
   uid: 0,
 );
 
+AppState _state({int startTab = 0}) => AppState(_MemStorage())
+  ..initialized = true
+  ..apps = [_ai('com.a', 'A')]
+  ..settings['last_launch_tab'] = startTab;
+
+Future<PageController> _pump(WidgetTester tester, AppState state) async {
+  await tester.pumpWidget(
+    ChangeNotifierProvider<AppState>.value(
+      value: state,
+      child: const MaterialApp(home: QuickLaunchScreen()),
+    ),
+  );
+  await tester.pumpAndSettle();
+  return tester.widget<PageView>(find.byType(PageView).first).controller!;
+}
+
+Finder _tab(String label) =>
+    find.descendant(of: find.byType(TabBar), matching: find.text(label));
+
 void main() {
-  testWidgets('switching to a "behind" tab slides forward through the loop', (
+  testWidgets('tapping a later tab slides forward through the tabs between', (
     tester,
   ) async {
-    final state = AppState(_MemStorage())
-      ..initialized = true
-      ..apps = [_ai('com.a', 'A')];
+    final pager = await _pump(tester, _state(startTab: 0)); // on 磁贴
 
-    await tester.pumpWidget(
-      ChangeNotifierProvider<AppState>.value(
-        value: state,
-        child: const MaterialApp(home: QuickLaunchScreen()),
-      ),
-    );
-    await tester.pumpAndSettle();
+    final before = pager.page!;
+    expect(before % 4, 0);
 
-    // The launch pager is the outer PageView (the tile board's own pager is
-    // nested inside it, so it comes later in the tree).
-    PageController pager() =>
-        tester.widget<PageView>(find.byType(PageView).first).controller!;
-
-    final before = pager().page!;
-    expect(before % 4, 0, reason: 'starts on 磁贴');
-
-    // 最近 sits three tabs "behind" 磁贴; it must glide forward through 分类
-    // and 收藏 instead of jumping back the short way.
-    await tester.tap(
-      find.descendant(of: find.byType(TabBar), matching: find.text('最近')),
-    );
+    await tester.tap(_tab('最近'));
     await tester.pump(); // kick off the animation
     await tester.pump(const Duration(milliseconds: 120)); // mid-flight
 
     expect(
-      pager().page!,
+      pager.page!,
       greaterThan(before),
-      reason: 'the pager should move forward, not backwards to the nearest tab',
+      reason: '磁贴 → 最近 should move forward, not jump back the short way',
     );
 
     await tester.pumpAndSettle();
-    expect(pager().page!.round() % 4, 3, reason: 'settles on 最近');
+    expect(pager.page!.round() % 4, 3, reason: 'settles on 最近');
+  });
+
+  testWidgets('tapping an earlier tab slides back, matching the tab bar', (
+    tester,
+  ) async {
+    final pager = await _pump(tester, _state(startTab: 3)); // on 最近
+
+    final before = pager.page!;
+    expect(before % 4, 3);
+
+    await tester.tap(_tab('分类'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      pager.page!,
+      lessThan(before),
+      reason: '最近 → 分类 should slide back through 收藏, not wrap the loop',
+    );
+
+    await tester.pumpAndSettle();
+    expect(pager.page!.round() % 4, 1, reason: 'settles on 分类');
   });
 }
