@@ -14,9 +14,11 @@ import '../models/remote_source.dart';
 import '../models/snapshot.dart';
 import '../models/tile.dart';
 import '../models/tile_page.dart';
+import '../models/web_app.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../services/app_log.dart';
+import '../services/pwa.dart';
 import '../services/storage.dart';
 import '../services/icon_cache.dart';
 import '../utils/format.dart';
@@ -127,12 +129,33 @@ class AppState extends ChangeNotifier {
 
   List<AppInfo> _apps = <AppInfo>[];
 
-  /// Installed apps, sorted as the last scan left them.
-  List<AppInfo> get apps => _apps;
+  /// Installed apps, plus the user's web entries, sorted as the last scan left
+  /// them. Web entries are merged in here so that every app-shaped surface —
+  /// the list, search, tiles, categories, favorites, the usage log — treats
+  /// them like any other app.
+  List<AppInfo> get apps => _mergedApps;
 
+  /// Sets the installed apps (a scan result, an import or a reset).
   set apps(List<AppInfo> value) {
     _apps = value;
-    // The lookup index below is derived from this list.
+    _rebuildApps();
+  }
+
+  /// Installed apps only: what the scan wrote, what the uninstall diff compares
+  /// against, and what the scan cache holds.
+  List<AppInfo> get installedApps => _apps;
+
+  List<AppInfo> _mergedApps = <AppInfo>[];
+
+  /// Websites the user added by hand. They are not packages, so they live
+  /// beside the scan instead of inside it — a scan must never wipe them.
+  List<WebApp> webApps = <WebApp>[];
+
+  void _rebuildApps() {
+    _mergedApps = webApps.isEmpty
+        ? _apps
+        : <AppInfo>[..._apps, ...webApps.map((w) => w.toAppInfo())];
+    // The lookup index below is derived from the merged list.
     _appIndex = null;
   }
 
@@ -296,6 +319,8 @@ class AppState extends ChangeNotifier {
     // positions so the board stops re-packing them on later edits.
     await _migrateTilePositions();
     apps = _parseApps(await storage.readJson(_kAppsCache));
+    webApps = _parseWebApps(await storage.readJson(_kWebApps));
+    _rebuildApps();
     _applyNotificationBadges();
     _applyLogging();
     NativeApps.startListening();
@@ -305,6 +330,16 @@ class AppState extends ChangeNotifier {
     // side now instead of waiting for the next notification. The rebind also
     // recovers a listener the system dropped while the app was closed.
     unawaited(syncNotificationBadges());
+    // Fill in entries added before the site itself was read (name, icon,
+    // manifest) and ones still missing an icon — quiet, best effort, once per
+    // session.
+    if (webApps.any(
+      (w) =>
+          (w.manifestUrl.isEmpty && w.iconUrl.isEmpty) ||
+          !IconCache.instance.containsKey(w.id),
+    )) {
+      unawaited(backfillWebApps());
+    }
     initialized = true;
     notifyListeners();
   }
@@ -413,6 +448,168 @@ class AppState extends ChangeNotifier {
     return <AppInfo>[];
   }
 
+  List<WebApp> _parseWebApps(dynamic raw) {
+    if (raw is List) {
+      return raw
+          .map((e) => WebApp.fromMap((e as Map).cast<dynamic, dynamic>()))
+          .where((w) => w.id.isNotEmpty)
+          .toList();
+    }
+    return <WebApp>[];
+  }
+
+  // ------------------------------------------------------------- web entries
+
+  /// The hand-added entry behind a synthetic package id, or null.
+  WebApp? webAppById(String id) {
+    for (final w in webApps) {
+      if (w.id == id) return w;
+    }
+    return null;
+  }
+
+  /// Adds a website as an app-shaped entry. Available everywhere apps are: a
+  /// tile, a category, favorites, search, the usage log.
+  ///
+  /// [site] is what [PwaDiscovery] read from the address (null when the address
+  /// could not be reached) and [iconBytes] its icon, so a PWA brings its own
+  /// name, icon, colours and display mode along.
+  Future<void> addWebApp({
+    required String url,
+    String name = '',
+    PwaSite? site,
+    Uint8List? iconBytes,
+  }) async {
+    final now = DateTime.now();
+    final entry = WebApp(
+      id: WebApp.newId(now),
+      name: name.trim(),
+      url: url.trim(),
+      createdAt: now.millisecondsSinceEpoch,
+    );
+    if (site != null) entry.applySite(site);
+    if (entry.name.trim().isEmpty) entry.name = entry.url;
+    webApps.add(entry);
+    if (iconBytes != null && iconBytes.isNotEmpty) {
+      IconCache.instance.put(entry.id, iconBytes);
+      await _persistIcons();
+    }
+    _rebuildApps();
+    metaFor(entry.id).lastKnownName = entry.name;
+    await _persistWebApps();
+    await _persistMeta();
+    AppLog.instance.log(
+      LogModule.apps,
+      '网页入口 · 添加 · ${entry.name} · ${entry.url} · '
+          '${entry.isPwa ? 'PWA（${entry.display}）' : '普通网页'}',
+    );
+    notifyListeners();
+  }
+
+  /// Re-reads the address: a site may have gained a manifest (or changed its
+  /// name/icon) since it was added. Returns what was found, or null.
+  Future<PwaSite?> refreshWebApp(String id) async {
+    final entry = webAppById(id);
+    if (entry == null) return null;
+    final site = await PwaDiscovery.discover(entry.url);
+    if (site == null) return null;
+    entry.applySite(site);
+    if (entry.name.trim().isEmpty) entry.name = entry.url;
+    // Normalised (validated, scaled, PNG) so a big or odd icon cannot break the
+    // cache, the launch screen or the Binder.
+    final bytes = await PwaDiscovery.fetchBestIcon(site);
+    if (bytes != null) {
+      IconCache.instance.put(entry.id, bytes);
+      await _persistIcons();
+    }
+    _rebuildApps();
+    metaFor(id).lastKnownName = entry.name;
+    await _persistWebApps();
+    await _persistMeta();
+    AppLog.instance.log(
+      LogModule.apps,
+      '网页入口 · 识别 · ${entry.name} · ${entry.url} · '
+          '${entry.isPwa ? 'PWA ${entry.display} · ${entry.manifestUrl}' : '无清单'}',
+    );
+    notifyListeners();
+    return site;
+  }
+
+  Future<void> updateWebApp(
+    String id, {
+    String? name,
+    String? url,
+    String? openMode,
+    String? browserPackage,
+    String? browserName,
+  }) async {
+    final index = webApps.indexWhere((w) => w.id == id);
+    if (index < 0) return;
+    final entry = webApps[index];
+    if (name != null && name.trim().isNotEmpty) entry.name = name.trim();
+    if (openMode != null) entry.openMode = openMode;
+    if (browserPackage != null) entry.browserPackage = browserPackage;
+    if (browserName != null) entry.browserName = browserName;
+    if (url != null && url.trim().isNotEmpty && url.trim() != entry.url) {
+      entry.url = url.trim();
+      // What the manifest said described the old address; drop it rather than
+      // launch into the wrong start_url. Callers re-read the site afterwards.
+      entry.startUrl = entry.url;
+      entry.scope = '';
+      entry.display = WebApp.displayBrowser;
+      entry.themeColor = 0;
+      entry.backgroundColor = 0;
+      entry.manifestUrl = '';
+      entry.iconUrl = '';
+    }
+    metaFor(id).lastKnownName = entry.name;
+    _rebuildApps();
+    await _persistWebApps();
+    await _persistMeta();
+    notifyListeners();
+  }
+
+  /// Removes a web entry, together with everything that pointed at it (its
+  /// metadata and any tile copies).
+  Future<void> removeWebApp(String id) async {
+    if (!webApps.any((w) => w.id == id)) return;
+    webApps.removeWhere((w) => w.id == id);
+    meta.remove(id);
+    tiles.removeWhere((t) => t.packageName == id);
+    _rebuildApps();
+    await _persistWebApps();
+    await _persistMeta();
+    await _persistTiles();
+    notifyListeners();
+  }
+
+  /// Re-reads the addresses of entries that were added before the site was
+  /// identified (older builds stored only a name and a URL) and of entries whose
+  /// icon never made it into the cache, so their icons and manifest details
+  /// appear without the user having to ask. Runs once per session, quietly.
+  Future<void> backfillWebApps() async {
+    if (_webBackfillDone) return;
+    _webBackfillDone = true;
+    for (final entry in List<WebApp>.from(webApps)) {
+      final needsSite = entry.manifestUrl.isEmpty && entry.iconUrl.isEmpty;
+      final needsIcon = !IconCache.instance.containsKey(entry.id);
+      if (!needsSite && !needsIcon) continue;
+      if (entry.url.isEmpty) continue;
+      try {
+        await refreshWebApp(entry.id);
+      } catch (_) {
+        // Offline, or the site is gone: leave the entry as it is.
+      }
+    }
+  }
+
+  bool _webBackfillDone = false;
+
+  Future<void> _persistWebApps() => storage.writeJson(
+        _kWebApps,
+        webApps.map((w) => w.toMap()).toList(),
+      );
+
   Map<String, dynamic> _parseSettings(dynamic raw) {
     // Copy into a plain map: `raw.cast` returns a view whose `[]=` re-checks
     // values against the source map's value type, which rejects settings that
@@ -516,7 +713,12 @@ class AppState extends ChangeNotifier {
       pendingUninstalls = pending;
 
       apps = result;
-      await storage.writeJson(_kAppsCache, apps.map((e) => e.toMap()).toList());
+      // Only installed apps are cached: web entries have their own store and
+      // must survive a scan.
+      await storage.writeJson(
+        _kAppsCache,
+        installedApps.map((e) => e.toMap()).toList(),
+      );
       await _persistMeta();
       // Installs/updates may have changed which entries packages expose.
       NativeApps.clearLaunchEntryCache();
@@ -529,6 +731,18 @@ class AppState extends ChangeNotifier {
         '扫描完成 · ${result.length} 个应用 · ${sw.elapsedMilliseconds}ms'
             '${pending.isEmpty ? '' : ' · 疑似卸载 ${pending.length} 个'}',
       );
+      // Installed web apps are worth reporting explicitly: they are the only
+      // way to tell "the device has none" from "detection missed one".
+      final webApps = result.where((a) => a.isWebApp).toList();
+      AppLog.instance.log(LogModule.apps, '网页应用 · ${webApps.length} 个');
+      for (final a in webApps) {
+        AppLog.instance.log(
+          LogModule.apps,
+          '网页应用 · ${a.appName} · ${a.packageName} · '
+              '${a.webUrl.isEmpty ? '网址未知' : a.webUrl}'
+              '${a.webSignal.isEmpty ? '' : ' · 命中=${a.webSignal}'}',
+        );
+      }
     } catch (e) {
       sw.stop();
       lastScanMs = sw.elapsedMilliseconds;
@@ -552,7 +766,7 @@ class AppState extends ChangeNotifier {
         return {for (final e in latest.entries) e.packageName: e.appName};
       }
     }
-    return {for (final a in apps) a.packageName: a.appName};
+    return {for (final a in installedApps) a.packageName: a.appName};
   }
 
   void clearPendingUninstalls() {
@@ -942,7 +1156,8 @@ class AppState extends ChangeNotifier {
     try {
       IconCache.instance.clearSilent();
       final next = <String, Uint8List>{};
-      for (final a in apps) {
+      // Web entries have no icon to fetch; the avatar fallback covers them.
+      for (final a in installedApps) {
         try {
           // Fetch the icon of the entry this app launches, not blindly the
           // application's own: they can differ.
@@ -959,12 +1174,24 @@ class AppState extends ChangeNotifier {
           // Keep going: one unreadable icon must not abort the refresh.
         }
       }
+      // Web entries are not installed apps, so their icons are not refetched —
+      // carry them over instead of dropping them.
+      _carryWebEntryIcons(next);
       IconCache.instance.replaceAll(next);
       await _persistIcons();
       notifyListeners();
       return next.length;
     } finally {
       _iconRefresh = null;
+    }
+  }
+
+  /// Keeps the icons of hand-added web entries (they are not installed apps, so
+  /// a bulk refresh would otherwise drop them) on top of the fresh map.
+  void _carryWebEntryIcons(Map<String, Uint8List> next) {
+    for (final w in webApps) {
+      final bytes = IconCache.instance[w.id];
+      if (bytes != null && bytes.isNotEmpty) next[w.id] = bytes;
     }
   }
 
@@ -2138,7 +2365,14 @@ class AppState extends ChangeNotifier {
     backupLists = newBackupLists;
     tiles = newTiles;
     tilePages = newPages;
-    apps = newApps;
+    // Web entries ride along in the backup as apps (they have to, so their
+    // tiles and metadata make sense); on the way back in they go to their own
+    // store, where a scan cannot touch them.
+    webApps = newApps
+        .where((a) => a.isWebEntry || WebApp.isWebId(a.packageName))
+        .map(WebApp.fromAppInfo)
+        .toList();
+    apps = newApps.where((a) => !WebApp.isWebId(a.packageName)).toList();
     settings = newSettings;
     launchLog = newLaunchLog;
     IconCache.instance.replaceAll(newIcons);
@@ -2172,6 +2406,7 @@ class AppState extends ChangeNotifier {
         ),
     ];
     apps = <AppInfo>[];
+    webApps = <WebApp>[];
     settings = <String, dynamic>{};
     launchLog = <LaunchEvent>[];
     IconCache.instance.replaceAll(<String, Uint8List>{});
@@ -2194,7 +2429,11 @@ class AppState extends ChangeNotifier {
     await _persistTiles();
     await _persistTilePages();
     await _persistSettings();
-    await storage.writeJson(_kAppsCache, apps.map((a) => a.toMap()).toList());
+    await storage.writeJson(
+      _kAppsCache,
+      installedApps.map((a) => a.toMap()).toList(),
+    );
+    await _persistWebApps();
     await _persistLaunchLog();
     await _persistIcons();
   }
@@ -2303,11 +2542,14 @@ class AppState extends ChangeNotifier {
           score = AppSearch.score(app.packageName, display, q);
         }
       }
+      // A web entry is worth finding by its address as well.
+      if (score == null && app.webUrl.isNotEmpty) {
+        score = AppSearch.score(app.webUrl, app.appName, q);
+      }
       if (score == null) return false;
       if (q.isNotEmpty) scores[app.packageName] = score;
       return true;
     }).toList();
-
     // While searching, rank by relevance rather than the selected sort order.
     if (q.isNotEmpty) {
       list.sort((a, b) {
@@ -2534,7 +2776,7 @@ class AppState extends ChangeNotifier {
     // Indexed: this is called from list rows and sort/filter paths, where a
     // linear scan over every installed app would add up.
     final index = _appIndex ??= {
-      for (final a in _apps) a.packageName: a,
+      for (final a in _mergedApps) a.packageName: a,
     };
     return index[packageName];
   }
@@ -2582,6 +2824,9 @@ class AppState extends ChangeNotifier {
           'user': userAppCount,
           'system': systemAppCount,
         }) +
+        // Installed web apps are called out here so the count is checkable
+        // from the app itself, without turning the log on.
+        s.t(' · 网页应用 {web}', {'web': webAppCount}) +
         s.t(' · 显示 {visible} · 用时 {ms} ms · {ago}', {
           'visible': visibleApps.length,
           'ms': lastScanMs,
@@ -2589,11 +2834,21 @@ class AppState extends ChangeNotifier {
         });
   }
 
+  /// Installed packages that are really websites (WebAPK / Trusted Web
+  /// Activity). They are ordinary apps everywhere else.
+  int get webAppCount => apps.where((a) => a.isWebApp).length;
+
   static const _kMeta = 'meta';
   static const _kCategories = 'categories';
   static const _kSnapshots = 'snapshots';
   static const _kBackupLists = 'backup_lists';
-  static const _kAppsCache = 'apps_cache';
+  /// Cached scan. Renamed when [AppInfo] gained the web-app fields so an old
+  /// cache cannot blank them out — the miss makes the app rescan on startup.
+  static const _kAppsCache = 'apps_cache_v2';
+
+  /// Websites added by hand (see [WebApp]). Kept apart from the scan cache so
+  /// no scan can drop them.
+  static const _kWebApps = 'web_apps';
   static const _kIcons = 'icons';
   static const _kTilePages = 'tile_pages';
   static const _kTiles = 'tiles';

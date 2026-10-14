@@ -13,6 +13,27 @@ class AppInfo {
   final int minSdk;
   final int uid;
 
+  /// Whether this package is an installed web app (PWA): a WebAPK shell or a
+  /// Trusted Web Activity. Such a package behaves like any other app — it can
+  /// be launched, pinned to a tile or favorited — but it really is a website,
+  /// so the UI labels it and can show [webUrl].
+  final bool isWebApp;
+
+  /// Which signal recognised it as a web app (`entry`, `package`, `metadata`),
+  /// as the scan reported it. Kept for the log, not for the UI, and not
+  /// persisted with the scan cache.
+  final String webSignal;
+
+  /// The site an installed web app stands for, or '' when the shell does not
+  /// declare one (or when this is not a web app).
+  final String webUrl;
+
+  /// Whether this is a web entry the user added by hand rather than an
+  /// installed package. Such an entry has a synthetic package name
+  /// ([WebApp.idPrefix]), no APK and nothing to uninstall — its "launch" opens
+  /// [webUrl] in a browser.
+  final bool isWebEntry;
+
   const AppInfo({
     required this.packageName,
     required this.appName,
@@ -27,6 +48,10 @@ class AppInfo {
     required this.targetSdk,
     required this.minSdk,
     required this.uid,
+    this.isWebApp = false,
+    this.webUrl = '',
+    this.webSignal = '',
+    this.isWebEntry = false,
   });
 
   factory AppInfo.fromMap(Map<dynamic, dynamic> map) {
@@ -44,6 +69,10 @@ class AppInfo {
       targetSdk: (map['targetSdk'] as num?)?.toInt() ?? 0,
       minSdk: (map['minSdk'] as num?)?.toInt() ?? 0,
       uid: (map['uid'] as num?)?.toInt() ?? 0,
+      isWebApp: map['isWebApp'] as bool? ?? false,
+      webUrl: map['webUrl'] as String? ?? '',
+      webSignal: map['webSignal'] as String? ?? '',
+      isWebEntry: map['isWebEntry'] as bool? ?? false,
     );
   }
 
@@ -69,5 +98,8 @@ class AppInfo {
         'targetSdk': targetSdk,
         'minSdk': minSdk,
         'uid': uid,
+        'isWebApp': isWebApp,
+        'webUrl': webUrl,
+        'isWebEntry': isWebEntry,
       };
 }

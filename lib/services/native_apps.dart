@@ -180,6 +180,49 @@ class NativeApps {
         .toList(growable: false);
   }
 
+  /// Opens a web entry in the app's own window: no browser UI, the manifest's
+  /// `theme_color` on the status bar and `background_color` behind the launch
+  /// icon, and links that leave the manifest's `scope` handed to the browser.
+  /// False when the host could not be started, so callers can fall back.
+  static Future<bool> openWebApp({
+    required String url,
+    required String name,
+    required String display,
+    required String scope,
+    required int themeColor,
+    required int backgroundColor,
+    String browserPackage = '',
+    Uint8List? icon,
+  }) async {
+    try {
+      final ok = await _channel.invokeMethod<bool>('openWebApp', {
+        'url': url,
+        'name': name,
+        'display': display,
+        'scope': scope,
+        'themeColor': themeColor,
+        'backgroundColor': backgroundColor,
+        if (browserPackage.isNotEmpty) 'browserPackage': browserPackage,
+        if (icon != null && icon.isNotEmpty) 'icon': icon,
+      });
+      return ok ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Live report of what the scan makes of installed web apps: totals, the
+  /// web apps found, and the packages that look suspicious without being
+  /// confirmed. Best effort — null when the native side cannot answer.
+  static Future<Map<String, dynamic>?> webAppReport() async {
+    try {
+      final raw = await _channel.invokeMethod<Map>('webAppReport');
+      return raw?.cast<String, dynamic>();
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Icon bytes for a package. When [activity] is given, the icon of that
   /// launcher entry is returned instead of the application's own (entries of
   /// one package can look different — the dialer and contacts tabs, say).
@@ -291,9 +334,32 @@ class NativeApps {
   }
 
   /// Opens an http(s) URL (e.g. the project's GitHub page) in a browser.
-  static Future<bool> openUrl(String url) async {
-    final ok = await _channel.invokeMethod<bool>('openUrl', {'url': url});
+  static Future<bool> openUrl(String url, {String? package}) async {
+    final ok = await _channel.invokeMethod<bool>('openUrl', {
+      'url': url,
+      if (package != null && package.isNotEmpty) 'package': package,
+    });
     return ok ?? false;
+  }
+
+  /// Apps that can open an http(s) address, for the "use this browser" choice.
+  static Future<List<BrowserApp>> browsers() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('browsers');
+      if (raw == null) return const [];
+      return raw
+          .whereType<Map>()
+          .map(
+            (e) => BrowserApp(
+              packageName: '${e['packageName']}',
+              label: '${e['label']}',
+            ),
+          )
+          .where((b) => b.packageName.isNotEmpty)
+          .toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// Keeps the system status bar hidden (`hidden: true`) or visible.
@@ -539,4 +605,12 @@ class NativeApps {
     });
     return ok ?? false;
   }
+}
+
+/// One app that can open an http(s) address: an option for "use this browser".
+class BrowserApp {
+  const BrowserApp({required this.packageName, required this.label});
+
+  final String packageName;
+  final String label;
 }

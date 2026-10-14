@@ -12,6 +12,7 @@ import '../widgets/theme_color_picker.dart';
 import 'haptics_settings_screen.dart';
 import 'log_screen.dart';
 import 'sync_screen.dart';
+import 'web_app_check_screen.dart';
 
 /// App version shown in Settings and the About dialog.
 const String kAppVersion = '1.0';
@@ -355,6 +356,19 @@ class SettingsScreen extends StatelessWidget {
                 context,
                 MaterialPageRoute(builder: (_) => const LogScreen()),
               ),
+            ),
+          ),
+          const Divider(height: 1),
+          ListTile(
+            leading: const Icon(Icons.public),
+            title: Text(context.strings.t('网页应用检测')),
+            subtitle: Text(
+              context.strings.t('查看扫描时对网页应用的识别情况（可复制）'),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const WebAppCheckScreen()),
             ),
           ),
           const Divider(height: 1),

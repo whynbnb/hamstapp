@@ -821,6 +821,89 @@ const Map<String, String> _en = <String, String>{
   '启动「{name}」的哪个入口？': 'Which entry of "{name}" should start?',
   '每个入口有各自的图标，选哪个就用哪个的图标':
       'Each entry has its own icon — the one you pick is the one shown',
+  '网页': 'Web',
+  '网页应用': 'Web app',
+  '添加网页应用': 'Add a web app',
+  '编辑网页应用': 'Edit web app',
+  '识别': 'Detect',
+  '打开方式': 'How it opens',
+  '独立窗口（没有地址栏）': 'Own window (no address bar)',
+  '用独立窗口打开': 'Open in its own window',
+  '用囤囤自己的窗口打开，像应用一样': 'Opens in this app’s own window, like an app',
+  '用浏览器打开：{name}': 'Open in browser: {name}',
+  '用哪个浏览器打开': 'Which browser opens it',
+  '窗口外的链接用哪个浏览器': 'Which browser takes over links outside it',
+  '没有找到能打开网页的应用': 'No app found that can open web pages',
+  '站点清单建议：{mode}': 'The site’s manifest asks for: {mode}',
+  '重新识别': 'Detect again',
+  '正在读取网站信息…': 'Reading the site…',
+  '识别后自动填写，也可以自己改': 'Filled in from the site, editable',
+  '保存后会像普通应用一样放进磁贴、收藏和分类；点按默认用独立窗口（无地址栏）打开，可在详情页改成浏览器。':
+      'Once saved it works on tiles, favorites and categories; tapping it opens in its own window (no address bar) by default — switch it to a browser on its detail page.',
+  '没有找到 PWA 清单（manifest），会当作普通网页':
+      'No web app manifest found — treated as a plain website',
+  '这个网站没有 PWA 清单，会用浏览器打开':
+      'This site has no manifest, so it opens in the browser',
+  'PWA · 显示模式 {mode}': 'PWA · display mode {mode}',
+  '已识别为 PWA · 显示模式 {mode}': 'Detected a PWA · display mode {mode}',
+  '读不到这个网址（网络或站点问题）': 'Could not read that address (network or site)',
+  '读不到这个网址（网络或站点问题），仍可保存为普通网页':
+      'Could not read that address (network or site); it can still be saved as a plain website',
+  '不是 HTTPS，无法作为 PWA 独立打开':
+      'Not HTTPS, so it cannot run as a standalone PWA',
+  '没有 PWA 清单：打开时会交给浏览器，可以放进磁贴、收藏和分类。':
+      'No manifest: it opens in the browser and still works on tiles, favorites and categories.',
+  'PWA · 显示模式 {mode}：打开时用囤囤自己的窗口，没有地址栏。':
+      'PWA · display mode {mode}: opens in an app window of its own, with no address bar.',
+  '清单 {url}': 'Manifest {url}',
+  '编辑名称 / 网址': 'Edit name / address',
+  '删除网页入口': 'Remove web entry',
+  '网址': 'Address',
+  '例如：知乎': 'e.g. Zhihu',
+  '例如：zhihu.com': 'e.g. zhihu.com',
+  '给它起个名字': 'Give it a name',
+  '网址看起来不对，例如 example.com':
+      'That address does not look right — try example.com',
+  '添加后可以像普通应用一样放进磁贴、收藏和分类；点开会用浏览器打开。':
+      'Once added it behaves like an app: put it on a tile, in favorites or a category; tapping it opens your browser.',
+  '这是你添加的网页入口：点开会用浏览器打开，可以放进磁贴、收藏和分类。':
+      'This is a web entry you added: tapping it opens your browser, and it can go on a tile, in favorites or a category.',
+  '已添加「{name}」': 'Added "{name}"',
+  '已保存「{name}」': 'Saved "{name}"',
+  '删除「{name}」？': 'Remove "{name}"?',
+  '这是一个网页入口，不是已安装的应用。删除会一并移除它的磁贴、收藏和分类等记录。':
+      'This is a web entry, not an installed app. Removing it also drops its tiles, favorites and categories.',
+  '这个网页入口没有网址': 'This web entry has no address',
+  '独立窗口打不开，已改用浏览器': 'The app window would not open — used the browser instead',
+  '打不开 {url}：设备上没有能处理它的应用':
+      'Cannot open {url}: nothing on the device handles it',
+  ' · 网页应用 {web}': ' · web apps {web}',
+  '网页应用检测': 'Web app check-up',
+  '查看扫描时对网页应用的识别情况（可复制）':
+      'See what the scan made of installed web apps (copyable)',
+  '包 {total} 个 · 用户 {user} · 系统 {system}':
+      'Packages {total} · user {user} · system {system}',
+  '元数据可读 {meta} · 桌面入口 {entries} · 入口命中 {shells}':
+      'Metadata readable {meta} · launcher entries {entries} · shell matches {shells}',
+  '已识别网页应用': 'Detected web apps',
+  '疑似网页应用（未确认）': 'Possible web apps (unconfirmed)',
+  '未发现网页应用': 'No web app found',
+  '没有可疑的候选': 'No suspicious package',
+  '入口类名': 'Entry class',
+  'APK 很小': 'Tiny APK',
+  '读取失败': 'Could not read',
+  '说明：浏览器「添加到主屏幕」有时只在桌面留下一个快捷方式，它不是一个应用包，'
+          '系统不允许第三方读取或启动，所以无法纳入。要把它变成真正的网页应用，'
+          '请在浏览器里用「安装应用」（WebAPK / TWA），装好后它会出现在上面的列表里。':
+      'Note: a browser "add to home screen" sometimes leaves only a shortcut on '
+          'the desktop. A shortcut is not an app package, and the system does not '
+          'let third-party apps read or start it, so it cannot be included. Use '
+          '"Install app" in the browser instead (WebAPK / TWA) — once installed it '
+          'shows up in the list above.',
+  '这是把网站装成应用的 PWA，可以像普通应用一样打开、加磁贴或收藏。':
+      'This is a website installed as an app (PWA). It opens, pins and favorites like any other app.',
+  '用浏览器打开': 'Open in browser',
+  '网址不可用': 'Address unavailable',
   '名称跟随入口': 'Name follows the entry',
   '用所选入口的名称（如「电话」）': 'Use the chosen entry\'s name (e.g. "电话")',
   '固定用应用原来的名称，图标仍跟随入口':

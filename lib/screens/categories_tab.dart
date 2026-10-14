@@ -9,6 +9,7 @@ import '../utils/search.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/category_editor.dart';
 import '../widgets/search_field.dart';
+import '../widgets/web_app_editor.dart';
 import 'app_detail_screen.dart';
 
 class CategoriesTab extends StatelessWidget {
@@ -492,6 +493,17 @@ class _PinSheetState extends State<_PinSheet> {
                       fontSize: 12,
                       color: Theme.of(ctx).colorScheme.onSurfaceVariant,
                     ),
+                  ),
+                  const SizedBox(height: 4),
+                  // The board is where a web app is most wanted, so its entry
+                  // can be created right here instead of hunting in Settings.
+                  TextButton.icon(
+                    onPressed: () async {
+                      await showWebAppEditor(context, state);
+                      if (mounted) setState(() {});
+                    },
+                    icon: const Icon(Icons.add_link, size: 18),
+                    label: Text(ctx.strings.t('添加网页应用')),
                   ),
                 ],
               ),

@@ -16,6 +16,7 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.VibrationEffect
@@ -94,6 +95,14 @@ class PackageScannerPlugin(
                     }
                 }
             }
+            "webAppReport" -> {
+                executor.execute {
+                    val report = runCatching { webAppReport() }.getOrElse {
+                        mapOf("error" to describe(it))
+                    }
+                    mainHandler.post { result.success(report) }
+                }
+            }
             "getAppIcon" -> {
                 val pkg = call.argument<String>("packageName")
                 val size = call.argument<Int>("size") ?: 144
@@ -160,7 +169,31 @@ class PackageScannerPlugin(
             }
             "openUrl" -> {
                 val url = call.argument<String>("url")
-                mainHandler.post { result.success(url != null && openUrl(url)) }
+                val pkg = call.argument<String>("package")
+                mainHandler.post { result.success(url != null && openUrl(url, pkg)) }
+            }
+            "browsers" -> {
+                executor.execute {
+                    val list = runCatching { browserApps() }.getOrDefault(emptyList())
+                    mainHandler.post { result.success(list) }
+                }
+            }
+            "openWebApp" -> {
+                val url = call.argument<String>("url")
+                if (url.isNullOrEmpty()) {
+                    result.success(false)
+                    return
+                }
+                mainHandler.post {
+                    val ok = runCatching { startWebAppWindow(call, url) }
+                        .onFailure {
+                            NotificationStore.addEvent(
+                                "网页应用 · 窗口启动异常 · ${describe(it)}"
+                            )
+                        }
+                        .getOrDefault(false)
+                    result.success(ok)
+                }
             }
             "uninstallApp" -> {
                 val pkg = call.argument<String>("packageName")
@@ -343,7 +376,12 @@ class PackageScannerPlugin(
 
     private fun scanApps(includeSystem: Boolean): List<Map<String, Any?>> {
         val pm = context.packageManager
-        val packages: List<PackageInfo> = pm.getInstalledPackages(0)
+        // GET_META_DATA so installed web apps (WebAPK / Trusted Web Activity)
+        // can be told apart from ordinary apps — see [webAppUrl]. It costs one
+        // manifest parse per package, which the scan budget can absorb.
+        val packages: List<PackageInfo> =
+            pm.getInstalledPackages(PackageManager.GET_META_DATA)
+        val shells = launcherWebApps(pm)
         val out = ArrayList<Map<String, Any?>>(packages.size)
         for (info in packages) {
             val app = info.applicationInfo ?: continue
@@ -353,6 +391,7 @@ class PackageScannerPlugin(
             val label = runCatching { app.loadLabel(pm).toString() }.getOrDefault(info.packageName)
             val sourceDir = app.sourceDir
             val sizeBytes = if (sourceDir != null) File(sourceDir).length() else 0L
+            val webUrl = webAppUrl(app, info.packageName, shells)
 
             out.add(
                 mapOf(
@@ -368,12 +407,199 @@ class PackageScannerPlugin(
                     "sizeBytes" to sizeBytes,
                     "targetSdk" to app.targetSdkVersion,
                     "minSdk" to app.minSdkVersion,
-                    "uid" to app.uid
+                    "uid" to app.uid,
+                    "isWebApp" to (webUrl != null),
+                    "webUrl" to (webUrl ?: ""),
+                    "webSignal" to webAppSignal(app, info.packageName, shells)
                 )
             )
         }
         return out
     }
+
+    /**
+     * How a package was recognised as a web app: `entry` (its launcher activity
+     * is a shell), `package` (the name says so) or `metadata` (it declares a
+     * web-app manifest entry). '' when it is an ordinary app.
+     */
+    private fun webAppSignal(
+        app: ApplicationInfo,
+        packageName: String,
+        shells: Map<String, String>,
+    ): String {
+        if (shells.containsKey(packageName)) return "entry"
+        val lowerPackage = packageName.lowercase(Locale.ROOT)
+        if (WEB_APP_PKG_MARKERS.any { lowerPackage.contains(it) }) return "package"
+        val md = app.metaData
+        if (md != null) {
+            for (key in md.keySet()) {
+                val lowerKey = key.lowercase(Locale.ROOT)
+                if (WEB_APP_META_MARKERS.any { lowerKey.contains(it) }) return "metadata"
+            }
+        }
+        return ""
+    }
+
+    /**
+     * Site behind an installed web app, or null when [packageName] is an
+     * ordinary app.
+     *
+     * A web app installed from a browser or a store is a real package — either
+     * a Chromium "WebAPK" shell or a Trusted Web Activity, which is what most
+     * Play Store web apps are — so it scans, launches, takes tiles and
+     * favorites like any other app. This only says which packages are really
+     * websites, using several signals at once so no single vendor's names are
+     * required: the launcher entry's type ([shells]), the package name, and the
+     * manifest metadata keys of the application. The URL may stay empty when a
+     * shell keeps it somewhere we cannot read.
+     */
+    private fun webAppUrl(
+        app: ApplicationInfo,
+        packageName: String,
+        shells: Map<String, String>,
+    ): String? {
+        if (webAppSignal(app, packageName, shells).isEmpty()) return null
+        val fromShell = shells[packageName]
+        return if (!fromShell.isNullOrEmpty()) {
+            fromShell
+        } else {
+            webAppUrlIn(app.metaData) ?: ""
+        }
+    }
+
+    /**
+     * Desktop entries of web apps, as package name to the site URL the entry
+     * declares ('' when it declares none) — from a single bulk query.
+     *
+     * The launcher activity's class name is public and says what the entry is
+     * (`org.chromium.webapk.shell_apk.MainActivity`, `…androidbrowserhelper.
+     * trusted.LauncherActivity`, `…customtabs.trusted.LauncherActivity`), so a
+     * shell is recognised even when its metadata is unreadable and its package
+     * name hints at nothing.
+     */
+    private fun launcherWebApps(pm: PackageManager): Map<String, String> {
+        val out = HashMap<String, String>()
+        var flags = PackageManager.GET_META_DATA
+        if (Build.VERSION.SDK_INT >= 24) {
+            flags = flags or PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS
+        }
+        val resolved = runCatching {
+            val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+            if (Build.VERSION.SDK_INT >= 33) {
+                pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(flags.toLong()))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(intent, flags)
+            }
+        }.getOrDefault(emptyList())
+        for (ri in resolved) {
+            val ai = ri.activityInfo ?: continue
+            val pkg = ai.packageName ?: continue
+            val cls = (ai.name ?: "").lowercase(Locale.ROOT)
+            val lowerPkg = pkg.lowercase(Locale.ROOT)
+            val looksLikeShell = WEB_APP_SHELL_MARKERS.any { cls.contains(it) } ||
+                WEB_APP_PKG_MARKERS.any { lowerPkg.contains(it) }
+            if (!looksLikeShell) continue
+            out[pkg] = webAppUrlIn(ai.metaData) ?: out[pkg] ?: ""
+        }
+        return out
+    }
+
+    /**
+     * Site URL declared in web-app metadata, or null. Swapped shells declare
+     * different keys and put them on either the `<application>` element or the
+     * launcher activity, so both are checked and only an http(s) value is
+     * accepted — metadata also holds things like icons and privacy links.
+     */
+    private fun webAppUrlIn(md: Bundle?): String? {
+        if (md == null) return null
+        var url: String? = null
+        for (key in md.keySet()) {
+            val lowerKey = key.lowercase(Locale.ROOT)
+            if (WEB_APP_URL_KEYS.none { lowerKey.contains(it) }) continue
+            val value = runCatching { md.getString(key) }.getOrNull()
+            if (value != null && value.startsWith("http")) url = value
+        }
+        return url
+    }
+
+    /**
+     * What the device actually holds, for the in-app check-up: totals, the
+     * installed web apps, and the packages that look suspicious without being
+     * confirmed. Nothing here is cached, so it reports the live state — the
+     * point is to tell "this device has no web apps" apart from "detection
+     * missed one", and to show shortcuts are not packages at all.
+     */
+    private fun webAppReport(): Map<String, Any?> {
+        val pm = context.packageManager
+        val packages = pm.getInstalledPackages(PackageManager.GET_META_DATA)
+        val shells = launcherWebApps(pm)
+        var user = 0
+        var system = 0
+        var metaReadable = 0
+        var launcherEntries = 0
+        val webApps = ArrayList<Map<String, Any?>>()
+        val candidates = ArrayList<Map<String, Any?>>()
+        for (info in packages) {
+            val app = info.applicationInfo ?: continue
+            val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            if (isSystem) system++ else user++
+            if (app.metaData != null) metaReadable++
+            val activity = launcherClass(pm, info.packageName)
+            if (activity.isNotEmpty()) launcherEntries++
+            val label = runCatching { app.loadLabel(pm).toString() }
+                .getOrDefault(info.packageName)
+            val size = app.sourceDir?.let { File(it).length() } ?: 0L
+            val webUrl = webAppUrl(app, info.packageName, shells)
+            val entry = mapOf(
+                "packageName" to info.packageName,
+                "appName" to label,
+                "activity" to activity,
+                "sizeBytes" to size,
+                "isSystem" to isSystem,
+                "webUrl" to (webUrl ?: ""),
+            )
+            if (webUrl != null) {
+                webApps.add(entry)
+                continue
+            }
+            val signal = candidateSignal(info.packageName, shells, size, isSystem)
+            if (signal != null) candidates.add(entry + mapOf("signal" to signal))
+        }
+        return mapOf(
+            "total" to packages.size,
+            "user" to user,
+            "system" to system,
+            "metaReadable" to metaReadable,
+            "launcherEntries" to launcherEntries,
+            "shells" to shells.size,
+            "webApps" to webApps,
+            "candidates" to candidates,
+        )
+    }
+
+    /** Why a package looks like a web app even though it was not confirmed. */
+    private fun candidateSignal(
+        packageName: String,
+        shells: Map<String, String>,
+        sizeBytes: Long,
+        isSystem: Boolean,
+    ): String? {
+        if (shells.containsKey(packageName)) return "entry"
+        if (WEB_APP_PKG_MARKERS.any { packageName.lowercase(Locale.ROOT).contains(it) }) {
+            return "packageName"
+        }
+        // A web app shell is a few dozen kilobytes; ordinary apps are not.
+        // System packages are skipped here — they are full of tiny stubs.
+        if (!isSystem && sizeBytes in 1..512_000L) return "small"
+        return null
+    }
+
+    /** Launcher activity class of a package, or '' when it has no entry. */
+    private fun launcherClass(pm: PackageManager, packageName: String): String =
+        runCatching {
+            pm.getLaunchIntentForPackage(packageName)?.component?.className ?: ""
+        }.getOrDefault("")
 
     /**
      * Icon of one launcher entry, falling back to the application icon. A
@@ -557,15 +783,126 @@ class PackageScannerPlugin(
         }.getOrDefault(false)
     }
 
+    /**
+     * Builds the intent for [WebAppActivity] and starts it.
+     *
+     * Every value read back from the call is converted through [Number]: Dart
+     * sends a 64-bit int when a colour does not fit in 32 bits (any colour with
+     * a high alpha byte does not), and reading that as an Int throws — which is
+     * what silently sent PWA entries to the browser before.
+     */
+    private fun startWebAppWindow(call: MethodCall, url: String): Boolean {
+        val name = call.argument<String>("name") ?: ""
+        val display = call.argument<String>("display") ?: "standalone"
+        val theme = intArgument(call, "themeColor")
+        val background = intArgument(call, "backgroundColor")
+        val icon = call.argument<ByteArray>("icon")
+        val intent = Intent(context, WebAppActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            putExtra(WebAppActivity.EXTRA_URL, url)
+            putExtra(WebAppActivity.EXTRA_NAME, name)
+            putExtra(WebAppActivity.EXTRA_DISPLAY, display)
+            putExtra(WebAppActivity.EXTRA_SCOPE, call.argument<String>("scope") ?: "")
+            putExtra(
+                WebAppActivity.EXTRA_BROWSER,
+                call.argument<String>("browserPackage") ?: "",
+            )
+            putExtra(WebAppActivity.EXTRA_THEME_COLOR, theme)
+            putExtra(WebAppActivity.EXTRA_BACKGROUND_COLOR, background)
+            if (icon != null && icon.isNotEmpty()) {
+                putExtra(WebAppActivity.EXTRA_ICON, icon)
+            }
+        }
+        val started = runCatching { context.startActivity(intent) }.isSuccess
+        NotificationStore.addEvent(
+            "网页应用 · 打开 · $name · $url · display=$display · " +
+                "theme=${Integer.toHexString(theme)} · 图标=${icon?.size ?: 0}B · " +
+                (if (started) "已启动窗口" else "启动窗口失败（改用浏览器）")
+        )
+        return started
+    }
+
+    /** A call argument as an Int, whatever width the codec used for it. */
+    private fun intArgument(call: MethodCall, key: String, def: Int = 0): Int =
+        (call.argument<Any>(key) as? Number)?.toInt() ?: def
+
     /** Open an http(s) link (e.g. the project's GitHub page) in a browser. */
-    private fun openUrl(url: String): Boolean {
+      private fun openUrl(url: String, packageName: String? = null): Boolean {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+            // A chosen browser: only it may handle the link. When it cannot, the
+            // caller falls back to the unqualified intent (the system's choice).
+            if (!packageName.isNullOrEmpty()) setPackage(packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         return runCatching {
             context.startActivity(intent)
             true
         }.getOrDefault(false)
+    }
+
+    /**
+     * Apps that can open an http(s) address, one entry per package: what "use
+     * this browser" can offer.
+     *
+     * A plain query for an https URL also returns apps that only handle links
+     * for their own hosts (shopping apps, chat apps), and a plain query is also
+     * how a browser that handles only some hosts gets missed. Probing with a
+     * host that cannot exist keeps only the handlers that accept *any* address —
+     * which is what a browser is — and the browser category adds any that
+     * advertise themselves as one.
+     */
+    private fun browserApps(): List<Map<String, Any?>> {
+        val nonce = System.currentTimeMillis()
+        fun handlers(intent: Intent): LinkedHashMap<String, String> {
+            val pm = context.packageManager
+            val out = LinkedHashMap<String, String>()
+            val resolved = runCatching {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    pm.queryIntentActivities(intent, PackageManager.ResolveInfoFlags.of(0L))
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.queryIntentActivities(intent, 0)
+                }
+            }.getOrDefault(emptyList())
+            for (ri in resolved) {
+                val ai = ri.activityInfo ?: continue
+                val pkg = ai.packageName ?: continue
+                if (pkg == context.packageName) continue
+                val label = runCatching { ai.loadLabel(pm).toString() }.getOrDefault(pkg)
+                out.putIfAbsent(pkg, label)
+            }
+            return out
+        }
+
+        // A host that cannot exist: only a handler that accepts *any* address
+        // answers, which is what a browser does and what an app handling links
+        // for its own site does not. Both schemes are required, so an app that
+        // merely registers an https deep link is left out.
+        val https = handlers(
+            Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("https://hamstapp-probe-$nonce.invalid/"),
+            )
+        )
+        val http = handlers(
+            Intent(
+                Intent.ACTION_VIEW,
+                Uri.parse("http://hamstapp-probe-$nonce.invalid/"),
+            )
+        )
+        val found = LinkedHashMap<String, String>()
+        for ((pkg, label) in https) {
+            if (http.containsKey(pkg)) found[pkg] = label
+        }
+        // Anything advertising the browser category is one, too.
+        for ((pkg, label) in handlers(
+            Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.APP_BROWSER")
+        )) {
+            found.putIfAbsent(pkg, label)
+        }
+        return found.entries
+            .sortedBy { it.value }
+            .map { mapOf("packageName" to it.key, "label" to it.value) }
     }
 
     private fun requestUninstall(packageName: String): Boolean {
@@ -1495,6 +1832,52 @@ class PackageScannerPlugin(
         /** Extra carrying the flattened [ComponentName] for the action above. */
         const val EXTRA_NOTIFICATION_LISTENER_COMPONENT_NAME =
             "android.provider.extra.NOTIFICATION_LISTENER_COMPONENT_NAME"
+
+        /**
+         * Web app markers, matched case-insensitively against metadata keys.
+         * Chromium browsers (Chrome, Edge, Samsung Internet…) install a site as
+         * a "WebAPK" shell, Play Store web apps are Trusted Web Activities, and
+         * some browsers/ROMs ship their own wrapper — hence several markers and
+         * no per-vendor branch.
+         *
+         * Only the trusted-activity prefixes and `webapk` are matched here: a
+         * plain "webapp" key is common in ordinary apps (Gmail carries a
+         * `…gms.webapp.…` entry), and the WebAPK cases it would add are already
+         * covered by the package name and the launcher class.
+         */
+        val WEB_APP_META_MARKERS = arrayOf(
+            "webapk",
+            "customtabs.trusted",
+            "browser.trusted",
+        )
+
+        /**
+         * Launcher-activity class markers: shell classes we know by name
+         * (Chromium's WebAPK shell, the Android Browser Helper and the older
+         * custom-tabs TWA launcher). Matched on the class name so a shell is
+         * recognisable even when its metadata is unreadable.
+         */
+        val WEB_APP_SHELL_MARKERS = arrayOf(
+            "webapk",
+            "webapp",
+            "web_app",
+            "androidbrowserhelper",
+            "customtabs.trusted",
+        )
+
+        /** Package names that spell out that the package is a web app. */
+        val WEB_APP_PKG_MARKERS = arrayOf("webapk", "webapp", "web_app")
+
+        /**
+         * Metadata keys holding the site URL, matched by lowercased substring:
+         * WebAPK's `…shell_apk.startUrl` and the TWA `…trusted.DEFAULT_URL`,
+         * plus the generic spellings a home-grown wrapper tends to use.
+         */
+        val WEB_APP_URL_KEYS = arrayOf(
+            "starturl",
+            "start_url",
+            "default_url",
+        )
     }
 
     /** `{entries: [...], totalBytes: n}` for one source. */

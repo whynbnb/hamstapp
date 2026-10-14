@@ -7,6 +7,7 @@ import '../widgets/app_tile.dart';
 import '../widgets/chip_scroller.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/uninstall_reason.dart';
+import '../widgets/web_app_editor.dart';
 import 'app_detail_screen.dart';
 import 'apk_analyzer_screen.dart';
 import 'sync_screen.dart';
@@ -65,6 +66,11 @@ class _AppsScreenState extends State<AppsScreen> {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          IconButton(
+            tooltip: context.strings.t('添加网页应用'),
+            icon: const Icon(Icons.add_link),
+            onPressed: () => showWebAppEditor(context, state),
+          ),
           IconButton(
             tooltip: context.strings.t('APK 分析'),
             icon: const Icon(Icons.manage_search),

@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
 import '../models/category.dart';
+import '../models/web_app.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../state/app_state.dart';
@@ -14,6 +15,7 @@ import '../utils/format.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_tile.dart';
 import '../widgets/chip_scroller.dart';
+import '../widgets/web_app_editor.dart';
 import 'apk_analyzer_screen.dart';
 
 class AppDetailScreen extends StatefulWidget {
@@ -39,6 +41,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
   late final TextEditingController _note;
   Timer? _debounce;
   bool _exporting = false;
+  bool _identifying = false;
 
   /// The entries this package can be started through, as the system reports
   /// them; null while unknown. Fetched live (never cached) because a package
@@ -58,6 +61,13 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
   }
 
   Future<void> _loadEntries() async {
+    // A web entry is not a package: nothing to resolve, and asking the package
+    // manager about a synthetic id is pointless.
+    final app = _appState.appByPackage(widget.packageName);
+    if (app != null && app.isWebEntry) {
+      if (mounted) setState(() => _entries = const []);
+      return;
+    }
     // refresh: true -> opening the page always shows the live picture, even if
     // a launch earlier in this session filled the cache.
     final list = await NativeApps.launchActivities(
@@ -102,6 +112,8 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
   /// Warning to show above the launch button, or null when nothing is off.
   String? _entryNotice(BuildContext context, AppInfo app) {
     final s = context.strings;
+    // A web entry is not a package: it has no entries to speak of.
+    if (app.isWebEntry) return null;
     if (!app.enabled) return s.t('这个应用已被停用，需要先在系统设置里启用');
     final entries = _entries;
     if (entries == null) return null; // Still loading.
@@ -119,6 +131,152 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     _reason.dispose();
     _note.dispose();
     super.dispose();
+  }
+
+  /// Re-reads the site's manifest and icon (a site may have become a PWA, or
+  /// changed its name), and reports what was found.
+  Future<void> _identifyEntry(AppState state) async {
+    setState(() => _identifying = true);
+    final site = await state.refreshWebApp(widget.packageName);
+    if (!mounted) return;
+    setState(() => _identifying = false);
+    final s = AppStrings.current;
+    final text = site == null
+        ? s.t('读不到这个网址（网络或站点问题）')
+        : site.isPwa
+        ? s.t('已识别为 PWA · 显示模式 {mode}', {'mode': site.display})
+        : s.t('这个网站没有 PWA 清单，会用浏览器打开');
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(text),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+  }
+
+  /// Picks how the entry opens, and which browser takes over when it does not
+  /// run in the app's own window. Both the window and the browser choice are per
+  /// entry, because a launcher-like app is used differently per site.
+  Future<void> _pickOpenMode(AppState state, WebApp entry) async {
+    final s = context.strings;
+    final browsers = await NativeApps.browsers();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SwitchListTile(
+                secondary: const Icon(Icons.open_in_full),
+                title: Text(s.t('独立窗口（没有地址栏）')),
+                subtitle: Text(s.t('用囤囤自己的窗口打开，像应用一样')),
+                value: entry.opensStandalone,
+                onChanged: (v) {
+                  state.updateWebApp(
+                    entry.id,
+                    openMode: v ? WebApp.openStandalone : WebApp.openBrowser,
+                  );
+                  setState(() {});
+                },
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    entry.opensStandalone
+                        ? s.t('窗口外的链接用哪个浏览器')
+                        : s.t('用哪个浏览器打开'),
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.public),
+                title: Text(s.t('系统默认')),
+                trailing: entry.browserPackage.isEmpty
+                    ? const Icon(Icons.check)
+                    : null,
+                onTap: () async {
+                  await state.updateWebApp(
+                    entry.id,
+                    browserPackage: '',
+                    browserName: '',
+                  );
+                  if (ctx.mounted) Navigator.pop(ctx);
+                  setState(() {});
+                },
+              ),
+              for (final browser in browsers)
+                ListTile(
+                  leading: const Icon(Icons.language),
+                  title: Text(browser.label),
+                  subtitle: Text(
+                    browser.packageName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  trailing: entry.browserPackage == browser.packageName
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () async {
+                    await state.updateWebApp(
+                      entry.id,
+                      browserPackage: browser.packageName,
+                      browserName: browser.label,
+                    );
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    setState(() {});
+                  },
+                ),
+              if (browsers.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    s.t('没有找到能打开网页的应用'),
+                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Removes a hand-added web entry, with its tiles and metadata.
+  Future<void> _removeWebEntry(AppState state) async {
+    final name = state.displayNameFor(widget.packageName);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(ctx.strings.t('删除「{name}」？', {'name': name})),
+        content: Text(
+          ctx.strings.t('这是一个网页入口，不是已安装的应用。删除会一并移除它的磁贴、收藏和分类等记录。'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.strings.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(ctx.strings.t('删除')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await state.removeWebApp(widget.packageName);
+    if (mounted) Navigator.pop(context);
   }
 
   String _currentPageName(AppState state) {
@@ -165,6 +323,10 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     final state = context.watch<AppState>();
     final meta = state.metaFor(widget.packageName);
     final app = state.appByPackage(widget.packageName);
+    // For a hand-added entry, the full picture (manifest, display mode, colours).
+    final webEntry = app?.isWebEntry == true
+        ? state.webAppById(widget.packageName)
+        : null;
     final name = state.displayNameFor(widget.packageName);
     final pinLocations = state.pinLocationsFor(widget.packageName);
     final currentPinCount = state.pinCountOnCurrentPage(widget.packageName);
@@ -173,7 +335,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
       appBar: AppBar(
         title: Text(name, overflow: TextOverflow.ellipsis),
         actions: [
-          if (app != null)
+          if (app != null && !app.isWebEntry)
             IconButton(
               tooltip: context.strings.t('分析已安装的 APK'),
               icon: const Icon(Icons.manage_search),
@@ -217,32 +379,57 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                             widget.packageName,
                             name,
                           );
+                        case 'editWeb':
+                          showWebAppEditor(
+                            context,
+                            state,
+                            entry: webAppFor(state, widget.packageName),
+                          );
+                        case 'removeWeb':
+                          _removeWebEntry(state);
                       }
                     },
-                    itemBuilder: (ctx) => [
-                      PopupMenuItem(
-                        value: 'export',
-                        child: ListTile(
-                          leading: const Icon(Icons.ios_share),
-                          title: Text(ctx.strings.t('导出 APK（分享）')),
-                        ),
-                      ),
-                      PopupMenuItem(
-                        value: 'info',
-                        child: ListTile(
-                          leading: const Icon(Icons.info_outline),
-                          title: Text(ctx.strings.t('应用信息')),
-                        ),
-                      ),
-                      if (!app.isSystem)
-                        PopupMenuItem(
-                          value: 'uninstall',
-                          child: ListTile(
-                            leading: const Icon(Icons.delete_outline),
-                            title: Text(ctx.strings.t('卸载')),
-                          ),
-                        ),
-                    ],
+                    itemBuilder: (ctx) => app.isWebEntry
+                        ? [
+                            PopupMenuItem(
+                              value: 'editWeb',
+                              child: ListTile(
+                                leading: const Icon(Icons.edit_outlined),
+                                title: Text(ctx.strings.t('编辑名称 / 网址')),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'removeWeb',
+                              child: ListTile(
+                                leading: const Icon(Icons.delete_outline),
+                                title: Text(ctx.strings.t('删除网页入口')),
+                              ),
+                            ),
+                          ]
+                        : [
+                            PopupMenuItem(
+                              value: 'export',
+                              child: ListTile(
+                                leading: const Icon(Icons.ios_share),
+                                title: Text(ctx.strings.t('导出 APK（分享）')),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'info',
+                              child: ListTile(
+                                leading: const Icon(Icons.info_outline),
+                                title: Text(ctx.strings.t('应用信息')),
+                              ),
+                            ),
+                            if (!app.isSystem)
+                              PopupMenuItem(
+                                value: 'uninstall',
+                                child: ListTile(
+                                  leading: const Icon(Icons.delete_outline),
+                                  title: Text(ctx.strings.t('卸载')),
+                                ),
+                              ),
+                          ],
                   ),
         ],
       ),
@@ -302,6 +489,120 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                   ),
                 ),
               ],
+            ),
+          if (app != null && app.isWebApp)
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 4),
+              decoration: BoxDecoration(
+                color: Theme.of(context)
+                    .colorScheme
+                    .primaryContainer
+                    .withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.public, size: 18),
+                      const SizedBox(width: 6),
+                      Text(
+                        context.strings.t('网页应用'),
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    app.isWebEntry
+                        ? (webEntry == null || !webEntry.isPwa
+                              ? context.strings.t(
+                                  '没有 PWA 清单：打开时会交给浏览器，可以放进磁贴、收藏和分类。',
+                                )
+                              : context.strings.t(
+                                  'PWA · 显示模式 {mode}：打开时用囤囤自己的窗口，没有地址栏。',
+                                  {'mode': webEntry.display},
+                                ))
+                        : context.strings.t(
+                            '这是把网站装成应用的 PWA，可以像普通应用一样打开、加磁贴或收藏。',
+                          ),
+                    style: const TextStyle(fontSize: 12.5, height: 1.35),
+                  ),
+                  const SizedBox(height: 8),
+                  SelectableText(
+                    app.webUrl.isEmpty
+                        ? context.strings.t('网址不可用')
+                        : app.webUrl,
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                  ),
+                  if (webEntry != null && webEntry.manifestUrl.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      context.strings.t('清单 {url}', {
+                        'url': webEntry.manifestUrl,
+                      }),
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                    ),
+                  ],
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (app.isWebEntry)
+                        TextButton.icon(
+                          onPressed: _identifying
+                              ? null
+                              : () => _identifyEntry(state),
+                          icon: _identifying
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.travel_explore, size: 16),
+                          label: Text(context.strings.t('重新识别')),
+                        ),
+                      if (app.isWebEntry)
+                        TextButton.icon(
+                          onPressed: () => showWebAppEditor(
+                            context,
+                            state,
+                            entry: webAppFor(state, widget.packageName),
+                          ),
+                          icon: const Icon(Icons.edit_outlined, size: 16),
+                          label: Text(context.strings.t('编辑')),
+                        ),
+                      TextButton.icon(
+                        onPressed: app.webUrl.isEmpty
+                            ? null
+                            : () => NativeApps.openUrl(app.webUrl),
+                        icon: const Icon(Icons.open_in_new, size: 16),
+                        label: Text(context.strings.t('用浏览器打开')),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          if (webEntry != null)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                webEntry.opensStandalone ? Icons.open_in_full : Icons.public,
+              ),
+              title: Text(context.strings.t('打开方式')),
+              subtitle: Text(
+                webEntry.opensStandalone
+                    ? context.strings.t('独立窗口（没有地址栏）')
+                    : context.strings.t('用浏览器打开：{name}', {
+                        'name': webEntry.browserName.isEmpty
+                            ? context.strings.t('系统默认')
+                            : webEntry.browserName,
+                      }),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => _pickOpenMode(state, webEntry),
             ),
           if (app != null &&
               _entries != null &&
@@ -508,7 +809,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
             Text(context.strings.t('还没有分类，点击「新建分类」创建一个吧'),
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
           const SizedBox(height: 24),
-          if (app != null) _InfoTable(app: app),
+          if (app != null && !app.isWebEntry) _InfoTable(app: app),
           const SizedBox(height: 24),
           _SectionTitle(context.strings.t('使用记录')),
           ListTile(
@@ -637,8 +938,11 @@ class _Header extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 4),
-              Text(packageName,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              if (app == null || !app!.isWebEntry)
+                // Selectable so the package name can be copied out when an
+                // entry or a web app needs a closer look.
+                SelectableText(packageName,
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
               if (app != null) ...[
                 const SizedBox(height: 6),
                 Wrap(
@@ -655,6 +959,13 @@ class _Header extends StatelessWidget {
                             id: '_s',
                             name: context.strings.t('系统应用'),
                             emoji: '⚙️'),
+                      ),
+                    if (app!.isWebApp)
+                      CategoryChip(
+                        category: AppCategory(
+                            id: '_w',
+                            name: context.strings.t('网页应用'),
+                            emoji: '🌐'),
                       ),
                   ],
                 ),

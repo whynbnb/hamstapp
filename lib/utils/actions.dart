@@ -2,12 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
+import '../models/app_info.dart';
+import '../services/app_log.dart';
+import '../services/icon_cache.dart';
 import '../services/native_apps.dart';
 import '../state/app_state.dart';
 import '../widgets/app_icon.dart';
 
 Future<void> launchApp(BuildContext context, String packageName) async {
   final state = context.read<AppState>();
+
+  // A web entry is a website, not a package: hand it to the browser.
+  final entry = state.appByPackage(packageName);
+  if (entry != null && entry.isWebEntry) {
+    await launchWebEntry(context, entry);
+    return;
+  }
+
   final remembered = state.metaFor(packageName).launchActivity;
 
   // Resolved live rather than from the scanned app list: a package can own
@@ -55,6 +66,80 @@ Future<void> launchApp(BuildContext context, String packageName) async {
   }
   if (!context.mounted) return;
   await _reportLaunchFailure(context, packageName, outcome);
+}
+
+/// Opens a hand-added web entry.
+///
+/// A PWA that asks for a display mode other than `browser` runs in the app's own
+/// standalone window (no address bar, tinted with the manifest's `theme_color`),
+/// which is what the standard says an installed web app should look like.
+/// Everything else — plain websites, a manifest that asks for `browser`, an
+/// address with no manifest at all — goes to the system browser.
+Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
+  final state = context.read<AppState>();
+  final web = state.webAppById(entry.packageName);
+  if (web == null || web.url.isEmpty) {
+    if (context.mounted) {
+      _snack(context, AppStrings.current.t('这个网页入口没有网址'));
+    }
+    return;
+  }
+
+  var opened = false;
+  final target = web.startUrl.isEmpty ? web.url : web.startUrl;
+  if (web.opensStandalone) {
+    opened = await NativeApps.openWebApp(
+      url: target,
+      name: web.name,
+      display: web.windowDisplay,
+      scope: web.scope,
+      themeColor: web.themeColor,
+      backgroundColor: web.backgroundColor,
+      browserPackage: web.browserPackage,
+      icon: IconCache.instance[web.id],
+    );
+    if (!opened) {
+      // The window host could not start for some reason; the browser at least
+      // gets the user to the site. Say so rather than opening something else
+      // silently.
+      AppLog.instance.warn(
+        LogModule.apps,
+        '网页入口 · 独立窗口启动失败，改用浏览器 · ${web.name} · $target',
+      );
+      opened = await NativeApps.openUrl(target, package: web.browserPackage);
+      if (opened && context.mounted) {
+        _snack(context, AppStrings.current.t('独立窗口打不开，已改用浏览器'));
+      }
+    }
+  } else {
+    opened = await NativeApps.openUrl(target, package: web.browserPackage);
+  }
+
+  if (!opened) {
+    if (context.mounted) {
+      _snack(
+        context,
+        AppStrings.current.t('打不开 {url}：设备上没有能处理它的应用', {
+          'url': web.url,
+        }),
+      );
+    }
+    return;
+  }
+  await state.markLaunched(entry.packageName);
+}
+
+/// Shows a short transient message; safe to call from any launch path.
+void _snack(BuildContext context, String text) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      SnackBar(
+        content: Text(text),
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
 }
 
 /// Explains a failed launch. Includes the package name: several packages can

@@ -59,6 +59,7 @@ class AppListTile extends StatelessWidget {
 
     final subtitleParts = <String>[
       if (app.versionName.isNotEmpty) 'v${app.versionName}',
+      if (app.isWebApp) context.strings.t('网页'),
       if (app.isSystem) context.strings.t('系统'),
       if (!app.enabled) context.strings.t('已停用'),
     ];
@@ -80,6 +81,13 @@ class AppListTile extends StatelessWidget {
               style: const TextStyle(fontWeight: FontWeight.w600),
             ),
           ),
+          // An installed web app is a website behind an app icon, so mark it
+          // next to the name as well — the tag is easy to miss in a long list.
+          if (app.isWebApp)
+            Padding(
+              padding: const EdgeInsets.only(left: 4),
+              child: Icon(Icons.public, size: 15, color: Colors.blueGrey.shade400),
+            ),
           if (meta.favorite)
             const Padding(
               padding: EdgeInsets.only(left: 4),
