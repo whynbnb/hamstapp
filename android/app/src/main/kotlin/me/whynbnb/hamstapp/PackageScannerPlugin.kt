@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.pm.ResolveInfo
 import android.content.pm.Signature
 import android.content.pm.SigningInfo
 import android.graphics.Bitmap
@@ -117,15 +118,40 @@ class PackageScannerPlugin(
             }
             "launchApp" -> {
                 val pkg = call.argument<String>("packageName")
+                val activity = call.argument<String>("activity")
                 mainHandler.post {
-                    val ok = pkg != null && launchApp(pkg)
-                    if (ok && pkg != null) {
+                    val reason = if (pkg == null) "missing" else launchApp(pkg, activity)
+                    if (reason == null && pkg != null) {
                         // Launching the app counts as reading its notifications.
                         NotificationStore.markAllRead(pkg)
                         NotificationStore.emit()
                     }
-                    result.success(ok)
+                    result.success(
+                        mapOf("ok" to (reason == null), "reason" to (reason ?: ""))
+                    )
                 }
+            }
+            "getLaunchActivities" -> {
+                val pkg = call.argument<String>("packageName")
+                executor.execute {
+                    val list = runCatching {
+                        if (pkg == null) emptyList() else launchActivities(pkg)
+                    }.getOrDefault(emptyList())
+                    mainHandler.post { result.success(list) }
+                }
+            }
+            "clearNotificationMark" -> {
+                val pkg = call.argument<String>("packageName")
+                if (pkg != null) {
+                    NotificationStore.markAllRead(pkg)
+                    NotificationStore.emit()
+                }
+                result.success(pkg != null)
+            }
+            "clearAllNotificationMarks" -> {
+                NotificationStore.clearAll()
+                NotificationStore.emit()
+                result.success(true)
             }
             "openAppInfo" -> {
                 val pkg = call.argument<String>("packageName")
@@ -374,13 +400,134 @@ class PackageScannerPlugin(
         return bitmap
     }
 
-    private fun launchApp(packageName: String): Boolean {
-        val intent = context.packageManager.getLaunchIntentForPackage(packageName) ?: return false
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    /**
+     * Every entry a package can be started through: its desktop icons plus any
+     * activity matching a probe intent, each carrying its own label and whether
+     * it is a desktop icon. The labels are the system's, so nothing is hardcoded
+     * per app.
+     */
+    private fun launchActivities(packageName: String): List<Map<String, Any?>> {
+        val pm = context.packageManager
+        val out = LinkedHashMap<String, Map<String, Any?>>()
+        fun add(ri: ResolveInfo, launcher: Boolean) {
+            val ai = ri.activityInfo ?: return
+            val existing = out[ai.name]
+            // A launcher entry outranks a probe match for the same activity.
+            if (existing != null) {
+                if (!launcher) return
+                if (existing["launcher"] == true) return
+            }
+            val label = runCatching { ri.loadLabel(pm).toString() }
+                .getOrNull()
+                ?.takeIf { it.isNotBlank() }
+                ?: ai.name
+            out[ai.name] = mapOf(
+                "name" to ai.name,
+                "label" to label,
+                "launcher" to launcher,
+            )
+        }
+        queryLauncherActivities(packageName).forEach { add(it, true) }
+        for (base in probeIntents) {
+            resolveActivities(base, packageName).forEach { add(it, false) }
+        }
+        return out.values.toList()
+    }
+
+    /** `ACTION_MAIN`/`CATEGORY_LAUNCHER` activities, optionally for one package. */
+    private fun queryLauncherActivities(packageName: String?): List<ResolveInfo> =
+        resolveActivities(
+            Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),
+            packageName,
+        )
+
+    /**
+     * Extra entry intents worth probing beyond the desktop icons. On some ROMs
+     * the dialer has no icon of its own and is only reachable through the
+     * standard "place a call" intent, so it never shows up in a launcher query.
+     */
+    private val probeIntents = listOf(Intent(Intent.ACTION_DIAL, Uri.parse("tel:")))
+
+    /** Resolves [intent] (optionally limited to one package), version-safely. */
+    private fun resolveActivities(
+        intent: Intent,
+        packageName: String? = null,
+    ): List<ResolveInfo> {
+        val pm = context.packageManager
+        val probe = Intent(intent)
+        if (packageName != null) probe.setPackage(packageName)
+        // MATCH_DISABLED_UNTIL_USED_COMPONENTS: the ROM launchers show icons for
+        // preinstalled-but-never-opened apps, which are hidden from a plain
+        // query. Matching them keeps our list in step with the desktop, and lets
+        // us start an entry the default lookup would miss.
+        var flags = 0
+        if (Build.VERSION.SDK_INT >= 24) {
+            flags = flags or PackageManager.MATCH_DISABLED_UNTIL_USED_COMPONENTS
+        }
         return runCatching {
-            context.startActivity(intent)
-            true
-        }.getOrDefault(false)
+            if (Build.VERSION.SDK_INT >= 33) {
+                pm.queryIntentActivities(
+                    probe,
+                    PackageManager.ResolveInfoFlags.of(flags.toLong()),
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                pm.queryIntentActivities(probe, flags)
+            }
+        }.getOrDefault(emptyList())
+    }
+
+    /**
+     * Starts [packageName]. Returns null when it worked, otherwise a reason
+     * code (`missing` / `disabled` / `no_entry` / `blocked`) so the UI can say
+     * what actually went wrong instead of a generic failure.
+     *
+     * [activity] pins one of the package's desktop entries; without it the
+     * system's default entry is used.
+     */
+    private fun launchApp(packageName: String, activity: String? = null): String? {
+        val pm = context.packageManager
+        val app = runCatching { pm.getApplicationInfo(packageName, 0) }.getOrNull()
+            ?: return "missing"
+        if (!app.enabled) return "disabled"
+
+        // A few ROMs ship components the plain lookup misses; fall back to the
+        // explicit launcher activity, then to a probe intent (the dialer often
+        // has no icon of its own), before giving up.
+        val base = if (!activity.isNullOrEmpty()) {
+            Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(ComponentName(packageName, activity))
+        } else {
+            pm.getLaunchIntentForPackage(packageName)
+                ?: explicitLaunchIntent(packageName)
+                ?: probeLaunchIntent(packageName)
+        }
+        val intent = base ?: return "no_entry"
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        return if (runCatching { context.startActivity(intent) }.isSuccess) {
+            null
+        } else {
+            "blocked"
+        }
+    }
+
+    private fun explicitLaunchIntent(packageName: String): Intent? {
+        val info = queryLauncherActivities(packageName).firstOrNull()?.activityInfo
+            ?: return null
+        return Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+            .setComponent(ComponentName(info.packageName, info.name))
+    }
+
+    /** Starts whatever a probe intent resolves to inside [packageName]. */
+    private fun probeLaunchIntent(packageName: String): Intent? {
+        for (base in probeIntents) {
+            val info = resolveActivities(base, packageName).firstOrNull()?.activityInfo
+                ?: continue
+            return Intent(base).setComponent(ComponentName(info.packageName, info.name))
+        }
+        return null
     }
 
     private fun openAppInfo(packageName: String): Boolean {

@@ -31,6 +31,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _uninstallSheetVisible = false;
   bool _navOpen = false;
 
+  /// The startup scan is requested at most once per app run: a failed scan
+  /// leaves the app list empty, and retriggering on every frame would spin
+  /// forever.
+  bool _autoScanRequested = false;
+
   @override
   void initState() {
     super.initState();
@@ -92,8 +97,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       _NavItem(Icons.settings_outlined, Icons.settings, s.t('设置')),
     ];
 
-    // First launch: nothing scanned yet -> kick off a scan automatically.
-    if (state.initialized && state.apps.isEmpty && !state.scanning) {
+    // First launch: nothing scanned yet -> kick off a scan automatically. Only
+    // requested once per run: a failed scan leaves the list empty, and retrying
+    // on every frame would spin forever.
+    if (state.initialized &&
+        state.apps.isEmpty &&
+        !state.scanning &&
+        !_autoScanRequested) {
+      _autoScanRequested = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && state.apps.isEmpty && !state.scanning) state.scan();
       });

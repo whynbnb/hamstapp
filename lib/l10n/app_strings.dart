@@ -817,6 +817,37 @@ const Map<String, String> _en = <String, String>{
   '每个应用的未读数：': 'Unread per app:',
   '最近通知事件：': 'Recent notification events:',
   '（暂无）': '(none)',
+  '启动入口': 'Launch entry',
+  '启动「{name}」的哪个入口？': 'Which entry of "{name}" should start?',
+  '每次询问': 'Ask every time',
+  '该应用只有一个启动入口': 'This app has only one entry',
+  '该应用没有可启动的入口': 'This app has no startable entry',
+  '系统默认': 'System default',
+  '当前：{entry}': 'Current: {entry}',
+  '清除通知角标': 'Clear notification badge',
+  '当前 {n} 条未读；滑动通知不会自动清除':
+      '{n} unread; swiping the notification away does not clear it',
+  '已清除该应用的通知角标': 'Notification badge cleared for this app',
+  '清除全部角标': 'Clear all badges',
+  '{apps} 个应用共 {total} 条未读；滑动通知不会自动清除':
+      '{apps} apps with {total} unread; swiping notifications away does not '
+      'clear them',
+  '已清除全部通知角标': 'All notification badges cleared',
+  '已停用': 'Disabled',
+  '无法启动「{app}」：它没有可启动的入口':
+      'Cannot start "{app}": it has no startable entry',
+  '无法启动「{app}」：它已被停用，请先在系统设置中启用':
+      'Cannot start "{app}": it is disabled — enable it in system settings first',
+  '无法启动「{app}」：未找到该应用': 'Cannot start "{app}": app not found',
+  '无法启动「{app}」：系统拒绝了启动请求':
+      'Cannot start "{app}": the system refused the request',
+  '这个包没有桌面图标，桌面上那个同名应用是另一个包':
+      'This package has no desktop icon; the app with the same name on your '
+      'desktop is a different package',
+  '这个应用已被停用，需要先在系统设置里启用':
+      'This app is disabled — enable it in system settings first',
+  '这个包没有可启动的入口（可能是系统组件）':
+      'This package has no startable entry (it may be a system component)',
   '日志': 'Log',
   '启用日志': 'Enable logging',
   '记录运行日志，便于排查问题（默认关闭）':

@@ -57,6 +57,7 @@ class AppListTile extends StatelessWidget {
     final subtitleParts = <String>[
       if (app.versionName.isNotEmpty) 'v${app.versionName}',
       if (app.isSystem) context.strings.t('系统'),
+      if (!app.enabled) context.strings.t('已停用'),
     ];
 
     return ListTile(

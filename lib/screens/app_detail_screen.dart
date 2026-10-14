@@ -7,6 +7,7 @@ import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
 import '../models/category.dart';
 import '../services/native_apps.dart';
+import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/format.dart';
@@ -39,6 +40,11 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
   Timer? _debounce;
   bool _exporting = false;
 
+  /// The entries this package can be started through, as the system reports
+  /// them; null while unknown. Fetched live (never cached) because a package
+  /// can change its entries with an update.
+  List<LaunchEntry>? _entries;
+
   @override
   void initState() {
     super.initState();
@@ -48,6 +54,45 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     final meta = _appState.metaFor(widget.packageName);
     _reason = TextEditingController(text: meta.reason);
     _note = TextEditingController(text: meta.note);
+    _loadEntries();
+  }
+
+  Future<void> _loadEntries() async {
+    // refresh: true -> opening the page always shows the live picture, even if
+    // a launch earlier in this session filled the cache.
+    final list = await NativeApps.launchActivities(
+      widget.packageName,
+      refresh: true,
+    );
+    if (!mounted) return;
+    setState(() => _entries = list);
+  }
+
+  /// What the 启动入口 row shows for the current choice.
+  String _currentEntry() {
+    final s = context.strings;
+    final entries = _entries ?? const <LaunchEntry>[];
+    final chosen = _appState.metaFor(widget.packageName).launchActivity;
+    if (chosen.isEmpty) {
+      return entries.isEmpty ? s.t('系统默认') : entries.first.label;
+    }
+    for (final entry in entries) {
+      if (entry.name == chosen) return entry.label;
+    }
+    return chosen.split('.').last;
+  }
+
+  /// Warning to show above the launch button, or null when nothing is off.
+  String? _entryNotice(BuildContext context, AppInfo app) {
+    final s = context.strings;
+    if (!app.enabled) return s.t('这个应用已被停用，需要先在系统设置里启用');
+    final entries = _entries;
+    if (entries == null) return null; // Still loading.
+    if (entries.isEmpty) return s.t('这个包没有可启动的入口（可能是系统组件）');
+    if (!entries.any((e) => e.fromLauncher)) {
+      return s.t('这个包没有桌面图标，桌面上那个同名应用是另一个包');
+    }
+    return null;
   }
 
   @override
@@ -189,6 +234,33 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         children: [
           _Header(app: app, packageName: widget.packageName, name: name),
           const SizedBox(height: 16),
+          if (app != null && _entryNotice(context, app) != null)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(
+                  context,
+                ).colorScheme.errorContainer.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    size: 18,
+                    color: Theme.of(context).colorScheme.error,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _entryNotice(context, app)!,
+                      style: const TextStyle(fontSize: 12.5, height: 1.35),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (app != null)
             Row(
               children: [
@@ -213,6 +285,44 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                   ),
                 ),
               ],
+            ),
+          if (app != null &&
+              _entries != null &&
+              (_entries!.length >= 2 || meta.launchActivity.isNotEmpty))
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.apps_outlined),
+              title: Text(context.strings.t('启动入口')),
+              subtitle: Text(
+                context.strings.t('当前：{entry}', {'entry': _currentEntry()}),
+              ),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () async {
+                await pickLaunchEntry(context, widget.packageName);
+                await _loadEntries();
+              },
+            ),
+          if (app != null)
+            ListenableBuilder(
+              listenable: NotificationBadges.instance,
+              builder: (context, _) {
+                final unread =
+                    NotificationBadges.instance.counts[widget.packageName] ?? 0;
+                if (unread <= 0) return const SizedBox.shrink();
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.notifications_off_outlined),
+                  title: Text(context.strings.t('清除通知角标')),
+                  subtitle: Text(
+                    context.strings.t('当前 {n} 条未读；滑动通知不会自动清除', {
+                      'n': unread,
+                    }),
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () =>
+                      clearNotificationBadge(context, widget.packageName),
+                );
+              },
             ),
           const SizedBox(height: 8),
           _SectionTitle(context.strings.t('固定到磁贴')),

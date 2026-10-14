@@ -309,6 +309,24 @@ class SettingsScreen extends StatelessWidget {
               items: _badgeModeItems(context),
             ),
           ),
+          ListenableBuilder(
+            listenable: NotificationBadges.instance,
+            builder: (context, _) {
+              final total = NotificationBadges.instance.total;
+              if (total <= 0) return const SizedBox.shrink();
+              return ListTile(
+                leading: const Icon(Icons.notifications_off_outlined),
+                title: Text(context.strings.t('清除全部角标')),
+                subtitle: Text(
+                  context.strings.t('{apps} 个应用共 {total} 条未读；滑动通知不会自动清除', {
+                    'apps': NotificationBadges.instance.appCount,
+                    'total': total,
+                  }),
+                ),
+                onTap: () => _clearAllBadges(context),
+              );
+            },
+          ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('日志')),
           SwitchListTile(
@@ -474,6 +492,19 @@ List<DropdownMenuItem<NotificationBadgeMode>> _badgeModeItems(
       child: Text(s.t('不显示')),
     ),
   ];
+}
+
+/// Forgets every unread mark. Unread survives the user swiping a notification
+/// away (that is how chat totals keep working), so a badge can outlive the
+/// notification itself — this is the escape hatch for those.
+Future<void> _clearAllBadges(BuildContext context) async {
+  final state = context.read<AppState>();
+  await NativeApps.clearAllNotificationMarks();
+  await state.refreshNotificationCounts();
+  if (!context.mounted) return;
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(context.strings.t('已清除全部通知角标'))),
+  );
 }
 
 /// Turns notification capture on/off, guiding the user to the system

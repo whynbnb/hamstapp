@@ -505,6 +505,8 @@ class AppState extends ChangeNotifier {
       apps = result;
       await storage.writeJson(_kAppsCache, apps.map((e) => e.toMap()).toList());
       await _persistMeta();
+      // Installs/updates may have changed which entries packages expose.
+      NativeApps.clearLaunchEntryCache();
 
       sw.stop();
       lastScanMs = sw.elapsedMilliseconds;
@@ -572,6 +574,7 @@ class AppState extends ChangeNotifier {
     bool? favorite,
     List<String>? categoryIds,
     String? uninstallReason,
+    String? launchActivity,
   }) async {
     final m = metaFor(packageName);
     if (reason != null) m.reason = reason;
@@ -579,6 +582,7 @@ class AppState extends ChangeNotifier {
     if (favorite != null) m.favorite = favorite;
     if (categoryIds != null) m.categoryIds = categoryIds;
     if (uninstallReason != null) m.uninstallReason = uninstallReason;
+    if (launchActivity != null) m.launchActivity = launchActivity;
     await _persistMeta();
     notifyListeners();
   }

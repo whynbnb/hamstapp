@@ -8,6 +8,66 @@ import '../models/apk_analysis.dart';
 import 'app_log.dart';
 
 /// Thin wrapper over the native `hamstapp/apps` MethodChannel.
+/// One desktop entry of a package: something the system can start, with its own
+/// label (a package like the AOSP Contacts app owns both 联系人 and 电话).
+class LaunchEntry {
+  const LaunchEntry({
+    required this.name,
+    required this.label,
+    this.fromLauncher = true,
+  });
+
+  /// Activity class name, e.g. `com.android.dialer.DialtactsActivity`.
+  final String name;
+
+  /// The entry's own label, which can differ from the app's, e.g. 电话.
+  final String label;
+
+  /// Whether the system desktop shows this entry as an icon of its own.
+  final bool fromLauncher;
+
+  factory LaunchEntry.fromMap(Map<dynamic, dynamic> map) => LaunchEntry(
+    name: map['name'] as String? ?? '',
+    label: map['label'] as String? ?? '',
+    fromLauncher: map['launcher'] as bool? ?? true,
+  );
+}
+
+/// Result of asking the system to start an app.
+///
+/// Packages without a desktop entry look just like apps in the scan, so the
+/// reason matters: telling the user "the system refused" is useless when the
+/// real problem is that the package they picked is not the app on their
+/// desktop.
+enum LaunchOutcome {
+  ok,
+
+  /// No `MAIN`/`LAUNCHER` activity: a system component with no desktop icon.
+  noEntry,
+
+  /// Installed but disabled by the user or the ROM.
+  disabled,
+
+  /// Not installed any more (or hidden from us).
+  missing,
+
+  /// The activity exists but the system refused to start it.
+  blocked,
+
+  /// Could not be classified.
+  unknown;
+
+  bool get isOk => this == LaunchOutcome.ok;
+
+  static LaunchOutcome byName(String? name) => switch (name) {
+    'no_entry' => LaunchOutcome.noEntry,
+    'disabled' => LaunchOutcome.disabled,
+    'missing' => LaunchOutcome.missing,
+    'blocked' => LaunchOutcome.blocked,
+    _ => LaunchOutcome.unknown,
+  };
+}
+
 class NativeApps {
   static const MethodChannel _channel = MethodChannel('hamstapp/apps');
 
@@ -128,17 +188,90 @@ class NativeApps {
     return bytes;
   }
 
-  static Future<bool> launchApp(String packageName) async {
-    final ok = await _channel.invokeMethod<bool>(
-      'launchApp',
-      {'packageName': packageName},
-    );
+  /// Starts an app, optionally pinning one of its desktop entries ([activity]
+  /// as reported by [launchActivities]). [LaunchOutcome.ok] means it worked;
+  /// every other value carries the reason so the UI can explain the failure.
+  static Future<LaunchOutcome> launchApp(
+    String packageName, {
+    String? activity,
+  }) async {
+    final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('launchApp', {
+      'packageName': packageName,
+      if (activity != null && activity.isNotEmpty) 'activity': activity,
+    });
+    final m = r?.cast<dynamic, dynamic>();
+    final outcome = m?['ok'] == true
+        ? LaunchOutcome.ok
+        : LaunchOutcome.byName(m?['reason'] as String?);
     AppLog.instance.log(
       LogModule.launch,
-      ok == true ? '启动 $packageName' : '启动失败 $packageName',
-      level: ok == true ? LogLevel.info : LogLevel.warn,
+      outcome.isOk
+          ? '启动 $packageName${activity == null ? '' : ' · $activity'}'
+          : '启动失败 · ${outcome.name} · $packageName',
+      level: outcome.isOk ? LogLevel.info : LogLevel.warn,
     );
-    return ok ?? false;
+    return outcome;
+  }
+
+  /// The entries a package can be started through — its desktop icons plus any
+  /// activity reachable through a standard intent (the dialer sometimes has no
+  /// icon of its own). Each carries its own label.
+  ///
+  /// Results are cached in memory for the session: a package's entries only
+  /// change when it is installed or updated (which triggers a rescan that drops
+  /// the cache), so the two package-manager queries are paid once per app
+  /// instead of once per launch. Pass [refresh] to bypass the cache — the app
+  /// detail page does, so opening it always shows the live picture. Empty when
+  /// the native side cannot answer, in which case callers fall back to a plain
+  /// launch.
+  static Future<List<LaunchEntry>> launchActivities(
+    String packageName, {
+    bool refresh = false,
+  }) async {
+    if (!refresh) {
+      final cached = _entryCache[packageName];
+      if (cached != null) return cached;
+    }
+    List<dynamic>? raw;
+    try {
+      raw = await _channel.invokeMethod<List<dynamic>>(
+        'getLaunchActivities',
+        {'packageName': packageName},
+      );
+    } catch (_) {
+      // No native side (e.g. widget tests): callers fall back.
+      return const <LaunchEntry>[];
+    }
+    if (raw == null) return const <LaunchEntry>[];
+    final entries = raw
+        .map((e) => LaunchEntry.fromMap((e as Map).cast<dynamic, dynamic>()))
+        .where((e) => e.name.isNotEmpty)
+        .toList(growable: false);
+    _entryCache[packageName] = entries;
+    AppLog.instance.log(
+      LogModule.launch,
+      '桌面入口 · $packageName · ${entries.length} 个'
+          '${entries.isEmpty ? '' : ' · ${entries.map((e) => e.label).join(' / ')}'}',
+    );
+    return entries;
+  }
+
+  /// Forgets the cached entry lists (after a scan, which sees installs and
+  /// updates).
+  static void clearLaunchEntryCache() => _entryCache.clear();
+
+  static final Map<String, List<LaunchEntry>> _entryCache = {};
+
+  /// Forgets every unread mark of one package, clearing its badge.
+  static Future<void> clearNotificationMark(String packageName) async {
+    await _channel.invokeMethod<bool>('clearNotificationMark', {
+      'packageName': packageName,
+    });
+  }
+
+  /// Forgets every unread mark, clearing all badges.
+  static Future<void> clearAllNotificationMarks() async {
+    await _channel.invokeMethod<bool>('clearAllNotificationMarks');
   }
 
   static Future<bool> openAppInfo(String packageName) async {

@@ -23,6 +23,10 @@ class AppMeta {
   /// How many times the app was launched from this app.
   int launchCount;
 
+  /// Which of the package's desktop entries to start ('' = the default one,
+  /// asking the user first when there are several).
+  String launchActivity;
+
   /// Which tile page this pinned app lives on ('' = default/first page).
   String tilePageId;
 
@@ -45,6 +49,7 @@ class AppMeta {
     this.uninstalledAt = 0,
     this.lastLaunchedAt = 0,
     this.launchCount = 0,
+    this.launchActivity = '',
     this.tilePageId = '',
     this.tileCol = -1,
     this.tileRow = -1,
@@ -67,6 +72,7 @@ class AppMeta {
         uninstalledAt: map['uninstalledAt'] as int? ?? 0,
         lastLaunchedAt: map['lastLaunchedAt'] as int? ?? 0,
         launchCount: map['launchCount'] as int? ?? 0,
+        launchActivity: map['launchActivity'] as String? ?? '',
         tilePageId: map['tilePageId'] as String? ?? '',
         tileCol: map['tileCol'] as int? ?? -1,
         tileRow: map['tileRow'] as int? ?? -1,
@@ -87,6 +93,7 @@ class AppMeta {
         'uninstalledAt': uninstalledAt,
         'lastLaunchedAt': lastLaunchedAt,
         'launchCount': launchCount,
+        'launchActivity': launchActivity,
         'tilePageId': tilePageId,
         'tileCol': tileCol,
         'tileRow': tileRow,

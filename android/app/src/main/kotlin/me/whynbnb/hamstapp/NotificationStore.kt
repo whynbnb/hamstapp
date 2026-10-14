@@ -179,6 +179,14 @@ object NotificationStore {
         if (unread.remove(pkg) != null) persist()
     }
 
+    /** Drops every unread mark (the user asked to clear all badges). */
+    @Synchronized
+    fun clearAll() {
+        if (unread.isEmpty()) return
+        unread.clear()
+        persist()
+    }
+
     /** Pushes the current counts to Dart (no-op when no engine is attached). */
     fun emit() {
         sink?.invoke(counts())
