@@ -53,6 +53,9 @@ class AppListTile extends StatelessWidget {
         .where((c) => meta.categoryIds.contains(c.id))
         .toList();
     final fact = _sortFact(context);
+    // A pinned launcher entry can have its own name (联系人 vs 电话), and the
+    // icon follows the same choice, so both come from the state.
+    final name = state.displayNameFor(app.packageName);
 
     final subtitleParts = <String>[
       if (app.versionName.isNotEmpty) 'v${app.versionName}',
@@ -64,14 +67,14 @@ class AppListTile extends StatelessWidget {
       onTap: onTap,
       leading: AppIcon(
         packageName: app.packageName,
-        label: app.appName,
+        label: name,
         size: 46,
       ),
       title: Row(
         children: [
           Expanded(
             child: Text(
-              app.appName,
+              name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(fontWeight: FontWeight.w600),

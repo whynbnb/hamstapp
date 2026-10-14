@@ -2,13 +2,16 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-/// Process-wide app-icon cache (package name -> PNG bytes).
+/// Process-wide app-icon cache (icon slot -> PNG bytes).
 ///
-/// Kept outside the widget tree so a widget can paint a cached icon without a
-/// [BuildContext] or a provider lookup. [AppState] hydrates it from disk at
-/// startup and persists additions; a bulk replace (e.g. the settings "refresh
-/// icon cache" action or a data import) notifies listeners so every visible
-/// icon repaints with the new bytes.
+/// A slot is a package name, or `package|activity` when the user pinned one of
+/// the package's several launcher entries (its entries can have their own
+/// icons). Kept outside the widget tree so a widget can paint a cached icon
+/// without a [BuildContext] or a provider lookup. [AppState] hydrates it from
+/// disk at startup, mirrors each app's pinned entry, and persists additions; a
+/// bulk replace (e.g. the settings "refresh icon cache" action or a data
+/// import) notifies listeners so every visible icon repaints with the new
+/// bytes.
 class IconCache extends ChangeNotifier {
   IconCache._();
 
@@ -19,9 +22,44 @@ class IconCache extends ChangeNotifier {
 
   final Map<String, Uint8List> _bytes = <String, Uint8List>{};
 
-  Uint8List? operator [](String packageName) => _bytes[packageName];
+  /// Which launcher entry's icon to show per package, when the user pinned one
+  /// of several. Owned by [AppState] (it mirrors each app's pinned entry), kept
+  /// here so leaf widgets can resolve an icon without a provider lookup.
+  final Map<String, String> _activities = <String, String>{};
 
-  bool containsKey(String packageName) => _bytes.containsKey(packageName);
+  /// Cache slot for a package: its own icon, or — when an entry is pinned (or
+  /// passed explicitly) — that entry's icon, which can differ (the dialer and
+  /// contacts tabs of one package each have their own).
+  String slotFor(String packageName, [String? activity]) {
+    final chosen = (activity ?? _activities[packageName] ?? '').trim();
+    return chosen.isEmpty ? packageName : '$packageName|$chosen';
+  }
+
+  /// The entry whose icon [packageName] shows; '' for the app's own icon.
+  String activityFor(String packageName) => _activities[packageName] ?? '';
+
+  /// Replaces the package -> entry map (entries with no pinned choice are
+  /// absent). Notifies so visible icons re-resolve.
+  void setActivities(Map<String, String> next) {
+    if (mapEquals(_activities, next)) return;
+    _activities
+      ..clear()
+      ..addAll(next);
+    notifyListeners();
+  }
+
+  /// The entry part of a slot key (`package|activity`), or null for a plain
+  /// package slot. Used to fetch the icon that matches the slot.
+  static String? slotActivity(String slotKey) {
+    final i = slotKey.indexOf('|');
+    if (i < 0) return null;
+    final activity = slotKey.substring(i + 1);
+    return activity.isEmpty ? null : activity;
+  }
+
+  Uint8List? operator [](String slotKey) => _bytes[slotKey];
+
+  bool containsKey(String slotKey) => _bytes.containsKey(slotKey);
 
   int get length => _bytes.length;
 
@@ -35,9 +73,9 @@ class IconCache extends ChangeNotifier {
 
   /// Store one icon without notifying: the widget that fetched it repaints
   /// itself, so the rest of the tree does not need to rebuild.
-  void put(String packageName, Uint8List bytes) {
+  void put(String slotKey, Uint8List bytes) {
     if (bytes.isEmpty) return;
-    _bytes[packageName] = bytes;
+    _bytes[slotKey] = bytes;
     _schedulePersist();
   }
 

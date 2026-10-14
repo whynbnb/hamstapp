@@ -167,8 +167,10 @@ class CategoryAppsScreen extends StatelessWidget {
             )
             .toList()
           ..sort(
-            (a, b) =>
-                a.appName.toLowerCase().compareTo(b.appName.toLowerCase()),
+            (a, b) => s
+                .displayNameFor(a.packageName)
+                .toLowerCase()
+                .compareTo(s.displayNameFor(b.packageName).toLowerCase()),
           );
 
     return Scaffold(
@@ -197,12 +199,13 @@ class CategoryAppsScreen extends StatelessWidget {
               itemCount: apps.length,
               itemBuilder: (context, i) {
                 final app = apps[i];
+                final name = state.displayNameFor(app.packageName);
                 return ListTile(
                   leading: AppIcon(
                     packageName: app.packageName,
-                    label: app.appName,
+                    label: name,
                   ),
-                  title: Text(app.appName),
+                  title: Text(name),
                   subtitle: Text(
                     app.packageName,
                     maxLines: 1,
@@ -368,12 +371,13 @@ class _CategoryPickerSheetState extends State<_CategoryPickerSheet> {
                       .metaFor(app.packageName)
                       .categoryIds
                       .contains(category.id);
+                  final name = state.displayNameFor(app.packageName);
                   return ListTile(
                     leading: AppIcon(
                       packageName: app.packageName,
-                      label: app.appName,
+                      label: name,
                     ),
-                    title: Text(app.appName),
+                    title: Text(name),
                     subtitle: Text(
                       app.packageName,
                       maxLines: 1,
@@ -510,12 +514,13 @@ class _PinSheetState extends State<_PinSheet> {
                 final app = apps[i];
                 final count = state.pinCountOnCurrentPage(app.packageName);
                 final pinned = count > 0;
+                final name = state.displayNameFor(app.packageName);
                 return ListTile(
                   leading: AppIcon(
                     packageName: app.packageName,
-                    label: app.appName,
+                    label: name,
                   ),
-                  title: Text(app.appName),
+                  title: Text(name),
                   subtitle: Text(
                     app.packageName,
                     maxLines: 1,

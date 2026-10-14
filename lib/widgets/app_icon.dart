@@ -20,6 +20,7 @@ class AppIcon extends StatefulWidget {
     required this.label,
     this.size = 44,
     this.bytes,
+    this.activity,
     this.showNotificationBadge = true,
   });
 
@@ -30,6 +31,10 @@ class AppIcon extends StatefulWidget {
   /// Pre-decoded icon bytes (e.g. read from a downloaded APK). When set the
   /// icon is not fetched from the native side.
   final Uint8List? bytes;
+
+  /// Show the icon of this launcher entry instead of the app's own. Null uses
+  /// whichever entry the app has pinned ([IconCache.activityFor]).
+  final String? activity;
 
   /// When false no badge is drawn here. The launch screen's tiles use this and
   /// draw the bubble on the tile's own corner instead.
@@ -62,6 +67,7 @@ class _AppIconState extends State<AppIcon> {
   void didUpdateWidget(covariant AppIcon oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.packageName != widget.packageName ||
+        oldWidget.activity != widget.activity ||
         oldWidget.bytes != widget.bytes) {
       _bytes = widget.bytes;
       _loading = widget.bytes == null;
@@ -79,13 +85,22 @@ class _AppIconState extends State<AppIcon> {
 
   void _onCacheChanged() {
     if (!mounted) return;
-    setState(_resolve);
+    setState(() {
+      // The cache was replaced or the pinned entry changed: re-resolve, and
+      // allow a fetch when the new slot has nothing yet.
+      _requested = false;
+      _resolve();
+    });
   }
 
   void _onBadgesChanged() {
     if (!mounted) return;
     setState(() {});
   }
+
+  /// Cache slot this widget paints: the app's own icon, or a pinned entry's.
+  String get _slot =>
+      IconCache.instance.slotFor(widget.packageName, widget.activity);
 
   /// Decide what to paint for the current package. Called outside build, so it
   /// assigns fields directly.
@@ -96,7 +111,7 @@ class _AppIconState extends State<AppIcon> {
       _requested = false;
       return;
     }
-    final cached = IconCache.instance[widget.packageName];
+    final cached = IconCache.instance[_slot];
     if (cached != null) {
       _bytes = cached;
       _loading = false;
@@ -110,18 +125,21 @@ class _AppIconState extends State<AppIcon> {
   }
 
   Future<void> _fetch() async {
+    final slot = _slot;
+    final activity = IconCache.slotActivity(slot);
     Uint8List? bytes;
     try {
       bytes = await NativeApps.getAppIcon(
         widget.packageName,
         size: IconCache.fetchSize,
+        activity: activity,
       );
     } catch (_) {
       bytes = null;
     }
     if (!mounted) return;
     if (bytes != null && bytes.isNotEmpty) {
-      IconCache.instance.put(widget.packageName, bytes);
+      IconCache.instance.put(slot, bytes);
     }
     setState(() {
       _bytes = bytes;

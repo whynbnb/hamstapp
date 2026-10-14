@@ -27,6 +27,15 @@ class AppMeta {
   /// asking the user first when there are several).
   String launchActivity;
 
+  /// The pinned entry's own name, which can differ from the package's label
+  /// (联系人 and 电话 are two entries of one package). '' when nothing is pinned.
+  String launchEntryLabel;
+
+  /// Whether the app shows [launchEntryLabel] instead of its own name. Turned
+  /// off to keep the name the user knows while still starting the pinned entry
+  /// (and showing its icon).
+  bool nameFollowsEntry;
+
   /// Which tile page this pinned app lives on ('' = default/first page).
   String tilePageId;
 
@@ -50,6 +59,8 @@ class AppMeta {
     this.lastLaunchedAt = 0,
     this.launchCount = 0,
     this.launchActivity = '',
+    this.launchEntryLabel = '',
+    this.nameFollowsEntry = true,
     this.tilePageId = '',
     this.tileCol = -1,
     this.tileRow = -1,
@@ -73,6 +84,8 @@ class AppMeta {
         lastLaunchedAt: map['lastLaunchedAt'] as int? ?? 0,
         launchCount: map['launchCount'] as int? ?? 0,
         launchActivity: map['launchActivity'] as String? ?? '',
+        launchEntryLabel: map['launchEntryLabel'] as String? ?? '',
+        nameFollowsEntry: map['nameFollowsEntry'] as bool? ?? true,
         tilePageId: map['tilePageId'] as String? ?? '',
         tileCol: map['tileCol'] as int? ?? -1,
         tileRow: map['tileRow'] as int? ?? -1,
@@ -94,6 +107,8 @@ class AppMeta {
         'lastLaunchedAt': lastLaunchedAt,
         'launchCount': launchCount,
         'launchActivity': launchActivity,
+        'launchEntryLabel': launchEntryLabel,
+        'nameFollowsEntry': nameFollowsEntry,
         'tilePageId': tilePageId,
         'tileCol': tileCol,
         'tileRow': tileRow,

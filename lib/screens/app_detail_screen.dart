@@ -66,6 +66,23 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     );
     if (!mounted) return;
     setState(() => _entries = list);
+
+    // Self-heal the stored name of a pinned entry: it may be missing (a choice
+    // made before names were stored) or stale (the app was updated), and lists
+    // and tiles read it to label the app.
+    final meta = _appState.metaFor(widget.packageName);
+    if (meta.launchActivity.isEmpty) return;
+    for (final entry in list) {
+      if (entry.name != meta.launchActivity) continue;
+      if (entry.label != meta.launchEntryLabel) {
+        await _appState.updateMeta(
+          widget.packageName,
+          launchActivity: meta.launchActivity,
+          launchEntryLabel: entry.label,
+        );
+      }
+      return;
+    }
   }
 
   /// What the 启动入口 row shows for the current choice.
@@ -148,7 +165,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     final state = context.watch<AppState>();
     final meta = state.metaFor(widget.packageName);
     final app = state.appByPackage(widget.packageName);
-    final name = app?.appName ?? widget.packageName;
+    final name = state.displayNameFor(widget.packageName);
     final pinLocations = state.pinLocationsFor(widget.packageName);
     final currentPinCount = state.pinCountOnCurrentPage(widget.packageName);
 
@@ -291,7 +308,15 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               (_entries!.length >= 2 || meta.launchActivity.isNotEmpty))
             ListTile(
               contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.apps_outlined),
+              leading: AppIcon(
+                packageName: widget.packageName,
+                label: name,
+                size: 36,
+                activity: meta.launchActivity.isEmpty
+                    ? null
+                    : meta.launchActivity,
+                showNotificationBadge: false,
+              ),
               title: Text(context.strings.t('启动入口')),
               subtitle: Text(
                 context.strings.t('当前：{entry}', {'entry': _currentEntry()}),
@@ -301,6 +326,23 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                 await pickLaunchEntry(context, widget.packageName);
                 await _loadEntries();
               },
+            ),
+          if (app != null &&
+              _entries != null &&
+              (_entries!.length >= 2 || meta.launchActivity.isNotEmpty))
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: meta.nameFollowsEntry,
+              onChanged: (v) => state.updateMeta(
+                widget.packageName,
+                nameFollowsEntry: v,
+              ),
+              title: Text(context.strings.t('名称跟随入口')),
+              subtitle: Text(
+                meta.nameFollowsEntry
+                    ? context.strings.t('用所选入口的名称（如「电话」）')
+                    : context.strings.t('固定用应用原来的名称，图标仍跟随入口'),
+              ),
             ),
           if (app != null)
             ListenableBuilder(

@@ -819,6 +819,12 @@ const Map<String, String> _en = <String, String>{
   '（暂无）': '(none)',
   '启动入口': 'Launch entry',
   '启动「{name}」的哪个入口？': 'Which entry of "{name}" should start?',
+  '每个入口有各自的图标，选哪个就用哪个的图标':
+      'Each entry has its own icon — the one you pick is the one shown',
+  '名称跟随入口': 'Name follows the entry',
+  '用所选入口的名称（如「电话」）': 'Use the chosen entry\'s name (e.g. "电话")',
+  '固定用应用原来的名称，图标仍跟随入口':
+      'Keep the app\'s original name; the icon still follows the entry',
   '每次询问': 'Ask every time',
   '该应用只有一个启动入口': 'This app has only one entry',
   '该应用没有可启动的入口': 'This app has no startable entry',

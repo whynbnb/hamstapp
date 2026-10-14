@@ -180,11 +180,19 @@ class NativeApps {
         .toList(growable: false);
   }
 
-  static Future<Uint8List?> getAppIcon(String packageName, {int size = 144}) async {
-    final bytes = await _channel.invokeMethod<Uint8List>(
-      'getAppIcon',
-      {'packageName': packageName, 'size': size},
-    );
+  /// Icon bytes for a package. When [activity] is given, the icon of that
+  /// launcher entry is returned instead of the application's own (entries of
+  /// one package can look different — the dialer and contacts tabs, say).
+  static Future<Uint8List?> getAppIcon(
+    String packageName, {
+    int size = 144,
+    String? activity,
+  }) async {
+    final bytes = await _channel.invokeMethod<Uint8List>('getAppIcon', {
+      'packageName': packageName,
+      'size': size,
+      if (activity != null && activity.isNotEmpty) 'activity': activity,
+    });
     return bytes;
   }
 

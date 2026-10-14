@@ -386,12 +386,13 @@ class BackupListDetailScreen extends StatelessWidget {
                       itemCount: apps.length,
                       itemBuilder: (context, i) {
                         final app = apps[i];
+                        final name = state.displayNameFor(app.packageName);
                         return ListTile(
                           leading: AppIcon(
                             packageName: app.packageName,
-                            label: app.appName,
+                            label: name,
                           ),
-                          title: Text(app.appName),
+                          title: Text(name),
                           subtitle: Text(
                             app.packageName,
                             maxLines: 1,

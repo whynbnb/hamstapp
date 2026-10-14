@@ -1891,6 +1891,9 @@ class _Tile extends StatelessWidget {
     required bool frameless,
   }) {
     final scheme = Theme.of(context).colorScheme;
+    // A pinned launcher entry can rename the app (联系人 and 电话 are the same
+    // package), and its icon follows the same choice.
+    final name = state.displayNameFor(app.packageName);
     // Without a backdrop the label sits on the page background, so use the
     // theme's on-surface color instead of the solid style's white.
     final labelColor =
@@ -1918,7 +1921,7 @@ class _Tile extends StatelessWidget {
             child: Center(
               child: AppIcon(
                 packageName: app.packageName,
-                label: app.appName,
+                label: name,
                 showNotificationBadge: false,
                 size: (shortest - pad * 2)
                     .clamp(8.0, double.infinity)
@@ -1944,7 +1947,7 @@ class _Tile extends StatelessWidget {
                     return Center(
                       child: AppIcon(
                         packageName: app.packageName,
-                        label: app.appName,
+                        label: name,
                         showNotificationBadge: false,
                         size: side.clamp(8.0, double.infinity).toDouble(),
                       ),
@@ -1954,7 +1957,7 @@ class _Tile extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                app.appName,
+                name,
                 maxLines: maxLines,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
@@ -2148,12 +2151,13 @@ class _FavoriteSheetState extends State<_FavoriteSheet> {
               itemBuilder: (context, i) {
                 final app = apps[i];
                 final fav = state.metaFor(app.packageName).favorite;
+                final name = state.displayNameFor(app.packageName);
                 return ListTile(
                   leading: AppIcon(
                     packageName: app.packageName,
-                    label: app.appName,
+                    label: name,
                   ),
-                  title: Text(app.appName),
+                  title: Text(name),
                   subtitle: Text(
                     app.packageName,
                     maxLines: 1,
@@ -2202,6 +2206,7 @@ class _FavoritesTab extends StatelessWidget {
       itemCount: favorites.length,
       itemBuilder: (context, i) {
         final app = favorites[i];
+        final name = state.displayNameFor(app.packageName);
         return InkWell(
           borderRadius: BorderRadius.circular(16),
           onTap: () => launchApp(context, app.packageName),
@@ -2215,12 +2220,12 @@ class _FavoritesTab extends StatelessWidget {
             children: [
               AppIcon(
                 packageName: app.packageName,
-                label: app.appName,
+                label: name,
                 size: 56,
               ),
               const SizedBox(height: 8),
               Text(
-                app.appName,
+                name,
                 maxLines: 2,
                 textAlign: TextAlign.center,
                 overflow: TextOverflow.ellipsis,
@@ -2290,9 +2295,10 @@ class _RecentTab extends StatelessWidget {
 
   Widget _recentTile(BuildContext context, AppInfo app) {
     final meta = state.metaFor(app.packageName);
+    final name = state.displayNameFor(app.packageName);
     return ListTile(
-      leading: AppIcon(packageName: app.packageName, label: app.appName),
-      title: Text(app.appName),
+      leading: AppIcon(packageName: app.packageName, label: name),
+      title: Text(name),
       subtitle: Text(
         context.strings.t('启动 {count} 次 · 上次 {ago}', {
           'count': meta.launchCount,
@@ -2405,7 +2411,7 @@ class _RecommendationItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final name =
-        state.appByPackage(rec.packageName)?.appName ?? rec.packageName;
+        state.displayNameFor(rec.packageName);
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => launchApp(context, rec.packageName),

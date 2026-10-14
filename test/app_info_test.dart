@@ -13,10 +13,21 @@ void main() {
 
     test('is persisted', () {
       final meta = AppMeta(packageName: 'com.android.contacts')
-        ..launchActivity = 'com.android.dialer.DialtactsActivity';
+        ..launchActivity = 'com.android.dialer.DialtactsActivity'
+        ..launchEntryLabel = '电话'
+        ..nameFollowsEntry = false;
+      final back = AppMeta.fromMap(meta.toMap());
+      expect(back.launchActivity, 'com.android.dialer.DialtactsActivity');
+      expect(back.launchEntryLabel, '电话');
+      expect(back.nameFollowsEntry, isFalse);
+    });
+
+    test('follows the entry name by default', () {
+      expect(AppMeta(packageName: 'a.b').nameFollowsEntry, isTrue);
       expect(
-        AppMeta.fromMap(meta.toMap()).launchActivity,
-        'com.android.dialer.DialtactsActivity',
+        AppMeta.fromMap(<String, dynamic>{'packageName': 'a.b'})
+            .nameFollowsEntry,
+        isTrue,
       );
     });
   });

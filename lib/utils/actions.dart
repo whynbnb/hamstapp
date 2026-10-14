@@ -4,10 +4,10 @@ import 'package:provider/provider.dart';
 import '../l10n/app_strings.dart';
 import '../services/native_apps.dart';
 import '../state/app_state.dart';
+import '../widgets/app_icon.dart';
 
 Future<void> launchApp(BuildContext context, String packageName) async {
   final state = context.read<AppState>();
-  final app = state.appByPackage(packageName);
   final remembered = state.metaFor(packageName).launchActivity;
 
   // Resolved live rather than from the scanned app list: a package can own
@@ -23,13 +23,18 @@ Future<void> launchApp(BuildContext context, String packageName) async {
       if (!context.mounted) return;
       final choice = await _showEntrySheet(
         context,
-        app?.appName ?? packageName,
+        packageName,
+        state.displayNameFor(packageName),
         entries,
       );
       // Dismissed the sheet: do not launch anything.
       if (choice == null) return;
       activity = choice;
-      await state.updateMeta(packageName, launchActivity: choice);
+      await state.updateMeta(
+        packageName,
+        launchActivity: choice,
+        launchEntryLabel: _entryNamed(entries, choice)?.label ?? '',
+      );
     }
     // No entries reported (or none we can see): fall through to a plain launch
     // and let the native side report why it cannot work.
@@ -62,10 +67,8 @@ Future<void> _reportLaunchFailure(
 ) async {
   final state = context.read<AppState>();
   final s = context.strings;
-  final name = state.appByPackage(packageName)?.appName;
-  final label = (name == null || name.isEmpty)
-      ? packageName
-      : '$name（$packageName）';
+  final name = state.displayNameFor(packageName);
+  final label = name == packageName ? packageName : '$name（$packageName）';
   final message = switch (outcome) {
     LaunchOutcome.noEntry => s.t('无法启动「{app}」：它没有可启动的入口', {'app': label}),
     LaunchOutcome.disabled => s.t('无法启动「{app}」：它已被停用，请先在系统设置中启用', {
@@ -80,10 +83,11 @@ Future<void> _reportLaunchFailure(
   );
 }
 
-/// Sheet listing the desktop entries of a package. Resolves to the chosen
-/// activity name, `''`/`-` sentinels, or null when it was dismissed.
+/// Sheet listing the entries of a package. Resolves to the chosen activity
+/// name, `''`/`-` sentinels, or null when it was dismissed.
 Future<String?> _showEntrySheet(
   BuildContext context,
+  String packageName,
   String appName,
   List<LaunchEntry> entries, {
   bool allowAsk = false,
@@ -96,20 +100,36 @@ Future<String?> _showEntrySheet(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                ctx.strings.t('启动「{name}」的哪个入口？', {'name': appName}),
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ctx.strings.t('启动「{name}」的哪个入口？', {'name': appName}),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 2),
+                Text(
+                  ctx.strings.t('每个入口有各自的图标，选哪个就用哪个的图标'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(ctx).colorScheme.outline,
+                  ),
+                ),
+              ],
             ),
           ),
           for (final entry in entries)
             ListTile(
-              leading: const Icon(Icons.apps_outlined),
+              leading: AppIcon(
+                packageName: packageName,
+                label: entry.label,
+                size: 36,
+                activity: entry.name,
+                showNotificationBadge: false,
+              ),
               title: Text(entry.label),
               subtitle: Text(
                 entry.name,
@@ -136,7 +156,7 @@ const String _kAskEveryTime = '-';
 /// Picks and remembers which desktop entry of [packageName] to start.
 Future<void> pickLaunchEntry(BuildContext context, String packageName) async {
   final state = context.read<AppState>();
-  final name = state.appByPackage(packageName)?.appName ?? packageName;
+  final name = state.displayNameFor(packageName);
   final entries = await NativeApps.launchActivities(packageName);
   if (!context.mounted) return;
   if (entries.length < 2) {
@@ -153,15 +173,29 @@ Future<void> pickLaunchEntry(BuildContext context, String packageName) async {
   }
   final choice = await _showEntrySheet(
     context,
+    packageName,
     name,
     entries,
     allowAsk: true,
   );
   if (choice == null) return;
+  if (choice == _kAskEveryTime) {
+    await state.updateMeta(packageName, launchActivity: '');
+    return;
+  }
   await state.updateMeta(
     packageName,
-    launchActivity: choice == _kAskEveryTime ? '' : choice,
+    launchActivity: choice,
+    launchEntryLabel: _entryNamed(entries, choice)?.label ?? '',
   );
+}
+
+/// The entry named [activityName] in [entries], or null.
+LaunchEntry? _entryNamed(List<LaunchEntry> entries, String activityName) {
+  for (final entry in entries) {
+    if (entry.name == activityName) return entry;
+  }
+  return null;
 }
 
 /// Forgets an app's unread marks, clearing its badge. Unread marks survive the

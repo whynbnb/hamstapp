@@ -125,7 +125,19 @@ class AppState extends ChangeNotifier {
     IconCache.instance.onDirty = _persistIcons;
   }
 
-  List<AppInfo> apps = <AppInfo>[];
+  List<AppInfo> _apps = <AppInfo>[];
+
+  /// Installed apps, sorted as the last scan left them.
+  List<AppInfo> get apps => _apps;
+
+  set apps(List<AppInfo> value) {
+    _apps = value;
+    // The lookup index below is derived from this list.
+    _appIndex = null;
+  }
+
+  Map<String, AppInfo>? _appIndex;
+
   Map<String, AppMeta> meta = <String, AppMeta>{};
   List<AppCategory> categories = <AppCategory>[];
   List<Snapshot> snapshots = <Snapshot>[];
@@ -213,6 +225,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> init() async {
     meta = await _loadMeta();
+    _syncIconActivities();
     categories = await _loadCategories();
     snapshots = await _loadSnapshots();
     backupLists = await _loadBackupLists();
@@ -575,6 +588,8 @@ class AppState extends ChangeNotifier {
     List<String>? categoryIds,
     String? uninstallReason,
     String? launchActivity,
+    String? launchEntryLabel,
+    bool? nameFollowsEntry,
   }) async {
     final m = metaFor(packageName);
     if (reason != null) m.reason = reason;
@@ -582,7 +597,13 @@ class AppState extends ChangeNotifier {
     if (favorite != null) m.favorite = favorite;
     if (categoryIds != null) m.categoryIds = categoryIds;
     if (uninstallReason != null) m.uninstallReason = uninstallReason;
-    if (launchActivity != null) m.launchActivity = launchActivity;
+    if (launchActivity != null) {
+      m.launchActivity = launchActivity;
+      m.launchEntryLabel = launchEntryLabel ?? '';
+      // The icon follows the chosen entry.
+      _syncIconActivities();
+    }
+    if (nameFollowsEntry != null) m.nameFollowsEntry = nameFollowsEntry;
     await _persistMeta();
     notifyListeners();
   }
@@ -879,12 +900,23 @@ class AppState extends ChangeNotifier {
 
   // ------------------------------------------------------------------- icons
 
-  /// Cached icon bytes for [packageName], or null when never fetched.
-  Uint8List? iconFor(String packageName) => IconCache.instance[packageName];
+  /// Cached icon bytes for [packageName], accounting for a pinned entry, or
+  /// null when never fetched.
+  Uint8List? iconFor(String packageName) =>
+      IconCache.instance[IconCache.instance.slotFor(packageName)];
 
   /// Store a freshly fetched icon; [IconCache] persists it (coalesced).
   void rememberIcon(String packageName, Uint8List bytes) {
-    IconCache.instance.put(packageName, bytes);
+    IconCache.instance.put(IconCache.instance.slotFor(packageName), bytes);
+  }
+
+  /// Mirrors each app's pinned desktop entry into [IconCache], so icons paint
+  /// the entry the user chose (entries can have their own icons).
+  void _syncIconActivities() {
+    IconCache.instance.setActivities({
+      for (final m in meta.values)
+        if (m.launchActivity.isNotEmpty) m.packageName: m.launchActivity,
+    });
   }
 
   Future<void> _persistIcons() async {
@@ -912,11 +944,17 @@ class AppState extends ChangeNotifier {
       final next = <String, Uint8List>{};
       for (final a in apps) {
         try {
+          // Fetch the icon of the entry this app launches, not blindly the
+          // application's own: they can differ.
+          final activity = IconCache.instance.activityFor(a.packageName);
           final bytes = await NativeApps.getAppIcon(
             a.packageName,
             size: IconCache.fetchSize,
+            activity: activity.isEmpty ? null : activity,
           );
-          if (bytes != null && bytes.isNotEmpty) next[a.packageName] = bytes;
+          if (bytes != null && bytes.isNotEmpty) {
+            next[IconCache.instance.slotFor(a.packageName)] = bytes;
+          }
         } catch (_) {
           // Keep going: one unreadable icon must not abort the refresh.
         }
@@ -2104,6 +2142,7 @@ class AppState extends ChangeNotifier {
     settings = newSettings;
     launchLog = newLaunchLog;
     IconCache.instance.replaceAll(newIcons);
+    _syncIconActivities();
     _pruneLaunchLog();
     // Don't carry the exporter's position memory into this device.
     settings.remove('last_home_index');
@@ -2255,7 +2294,15 @@ class AppState extends ChangeNotifier {
           return false;
         }
       }
-      final score = AppSearch.score(app.packageName, app.appName, q);
+      // Match either name: the package's own label, or the name of a pinned
+      // launcher entry (which is what the row shows).
+      var score = AppSearch.score(app.packageName, app.appName, q);
+      if (score == null) {
+        final display = displayNameFor(app.packageName);
+        if (display != app.appName) {
+          score = AppSearch.score(app.packageName, display, q);
+        }
+      }
       if (score == null) return false;
       if (q.isNotEmpty) scores[app.packageName] = score;
       return true;
@@ -2268,7 +2315,7 @@ class AppState extends ChangeNotifier {
           scores[a.packageName] ?? 0,
         );
         if (c != 0) return c;
-        return a.appName.toLowerCase().compareTo(b.appName.toLowerCase());
+        return _sortName(a).compareTo(_sortName(b));
       });
       return list;
     }
@@ -2276,8 +2323,7 @@ class AppState extends ChangeNotifier {
     late final Comparator<AppInfo> cmp;
     switch (sort) {
       case AppSort.name:
-        cmp = (a, b) =>
-            a.appName.toLowerCase().compareTo(b.appName.toLowerCase());
+        cmp = (a, b) => _sortName(a).compareTo(_sortName(b));
         break;
       case AppSort.installTime:
         cmp = (a, b) => a.firstInstallTime.compareTo(b.firstInstallTime);
@@ -2293,9 +2339,14 @@ class AppState extends ChangeNotifier {
     return list;
   }
 
+  /// Sort/compare key: the name shown to the user, which can come from a pinned
+  /// launcher entry (联系人 vs 电话) instead of the package's own label.
+  String _sortName(AppInfo app) =>
+      displayNameFor(app.packageName).toLowerCase();
+
   List<AppInfo> get favorites =>
       apps.where((a) => metaFor(a.packageName).favorite).toList()..sort(
-        (a, b) => a.appName.toLowerCase().compareTo(b.appName.toLowerCase()),
+        (a, b) => _sortName(a).compareTo(_sortName(b)),
       );
 
   /// Apps launched from this app, most recent first.
@@ -2480,10 +2531,34 @@ class AppState extends ChangeNotifier {
   }
 
   AppInfo? appByPackage(String packageName) {
-    for (final a in apps) {
-      if (a.packageName == packageName) return a;
+    // Indexed: this is called from list rows and sort/filter paths, where a
+    // linear scan over every installed app would add up.
+    final index = _appIndex ??= {
+      for (final a in _apps) a.packageName: a,
+    };
+    return index[packageName];
+  }
+
+  /// Name to show for an app.
+  ///
+  /// A package can own several launcher entries with their own names (联系人
+  /// and 电话 are two entries of one package), so when the user pinned one of
+  /// them, that name wins — matching the icon, which follows the same choice.
+  /// Apps can opt out ([AppMeta.nameFollowsEntry]) to keep the name they know.
+  /// Falls back to the package's own label, then to the last known name (so an
+  /// uninstalled app still shows something).
+  String displayNameFor(String packageName) {
+    final m = meta[packageName];
+    if (m != null &&
+        m.launchActivity.isNotEmpty &&
+        m.nameFollowsEntry &&
+        m.launchEntryLabel.isNotEmpty) {
+      return m.launchEntryLabel;
     }
-    return null;
+    final a = appByPackage(packageName);
+    if (a != null && a.appName.isNotEmpty) return a.appName;
+    if (m != null && m.lastKnownName.isNotEmpty) return m.lastKnownName;
+    return packageName;
   }
 
   int get userAppCount => apps.where((a) => !a.isSystem).length;

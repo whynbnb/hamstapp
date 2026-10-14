@@ -97,18 +97,19 @@ class PackageScannerPlugin(
             "getAppIcon" -> {
                 val pkg = call.argument<String>("packageName")
                 val size = call.argument<Int>("size") ?: 144
+                val activity = call.argument<String>("activity")
                 if (pkg == null) {
                     result.error("BAD_ARGS", "packageName is required", null)
                     return
                 }
-                val cacheKey = "$pkg@$size"
+                val cacheKey = "$pkg|${activity ?: ""}@$size"
                 iconCache[cacheKey]?.let {
                     result.success(it)
                     return
                 }
                 executor.execute {
                     try {
-                        val bytes = loadIcon(pkg, size)
+                        val bytes = loadIcon(pkg, size, activity)
                         if (bytes != null) iconCache[cacheKey] = bytes
                         mainHandler.post { result.success(bytes) }
                     } catch (t: Throwable) {
@@ -374,9 +375,24 @@ class PackageScannerPlugin(
         return out
     }
 
-    private fun loadIcon(packageName: String, sizePx: Int): ByteArray? {
+    /**
+     * Icon of one launcher entry, falling back to the application icon. A
+     * package's entries can have different icons — the dialer and the contacts
+     * tabs of the same package carry their own — so [activity] picks which one.
+     */
+    private fun loadIcon(
+        packageName: String,
+        sizePx: Int,
+        activity: String? = null,
+    ): ByteArray? {
         val pm = context.packageManager
-        val drawable: Drawable = runCatching {
+        val drawable: Drawable = (if (activity.isNullOrEmpty()) {
+            null
+        } else {
+            runCatching {
+                pm.getActivityIcon(ComponentName(packageName, activity))
+            }.getOrNull()
+        }) ?: runCatching {
             pm.getApplicationIcon(packageName)
         }.getOrNull() ?: return null
         val bitmap = drawableToBitmap(drawable, sizePx)

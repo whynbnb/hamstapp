@@ -92,4 +92,74 @@ void main() {
     expect(calls, 0);
     expect(find.byType(Image), findsOneWidget);
   });
+
+  test('icon slots follow the pinned entry', () {
+    final cache = IconCache.instance;
+    cache.setActivities(<String, String>{});
+    addTearDown(() => cache.setActivities(<String, String>{}));
+
+    expect(cache.slotFor('com.a'), 'com.a');
+    expect(cache.activityFor('com.a'), '');
+    expect(cache.slotFor('com.a', 'com.a.Dialer'), 'com.a|com.a.Dialer');
+    expect(IconCache.slotActivity('com.a'), isNull);
+    expect(IconCache.slotActivity('com.a|com.a.Dialer'), 'com.a.Dialer');
+
+    // Pinning one of the package's entries redirects its slot.
+    cache.setActivities(<String, String>{'com.a': 'com.a.Dialer'});
+    expect(cache.activityFor('com.a'), 'com.a.Dialer');
+    expect(cache.slotFor('com.a'), 'com.a|com.a.Dialer');
+    // An explicit activity still wins over the pinned one.
+    expect(cache.slotFor('com.a', 'com.a.People'), 'com.a|com.a.People');
+  });
+
+  testWidgets('pinning an entry swaps the icon for that entry\'s', (
+    tester,
+  ) async {
+    IconCache.instance
+      ..replaceAll(<String, Uint8List>{})
+      ..setActivities(<String, String>{});
+    addTearDown(() {
+      IconCache.instance
+        ..replaceAll(<String, Uint8List>{})
+        ..setActivities(<String, String>{});
+    });
+
+    const channel = MethodChannel('hamstapp/apps');
+    final requested = <Object?>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getAppIcon') {
+        requested.add(call.arguments['activity']);
+        return _png;
+      }
+      return null;
+    });
+    addTearDown(
+      () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null),
+    );
+
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: Center(child: AppIcon(packageName: 'com.a', label: 'A')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Nothing pinned: the application icon.
+    expect(requested, <Object?>[null]);
+    expect(IconCache.instance.containsKey('com.a'), isTrue);
+
+    // Pin one of the two entries: the icon is re-resolved from that entry.
+    IconCache.instance.setActivities(<String, String>{
+      'com.a': 'com.a.Dialer',
+    });
+    await tester.pumpAndSettle();
+
+    expect(requested, <Object?>[null, 'com.a.Dialer']);
+    expect(IconCache.instance.containsKey('com.a|com.a.Dialer'), isTrue);
+    expect(find.byType(Image), findsOneWidget);
+  });
 }

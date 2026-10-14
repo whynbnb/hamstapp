@@ -184,8 +184,7 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   }
 
   Widget _usedRow(AppState state, UsageEntry e) {
-    final app = state.appByPackage(e.packageName);
-    final name = app?.appName ?? e.packageName;
+    final name = state.displayNameFor(e.packageName);
     return ListTile(
       leading: AppIcon(packageName: e.packageName, label: name),
       title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -203,8 +202,7 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   }
 
   Widget _neglectedRow(AppState state, NeglectedEntry e) {
-    final app = state.appByPackage(e.packageName);
-    final name = app?.appName ?? e.packageName;
+    final name = state.displayNameFor(e.packageName);
     return ListTile(
       leading: AppIcon(packageName: e.packageName, label: name),
       title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
@@ -270,9 +268,10 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
   }
 
   Widget _neverRow(AppState state, AppInfo app) {
+    final name = state.displayNameFor(app.packageName);
     return ListTile(
-      leading: AppIcon(packageName: app.packageName, label: app.appName),
-      title: Text(app.appName, maxLines: 1, overflow: TextOverflow.ellipsis),
+      leading: AppIcon(packageName: app.packageName, label: name),
+      title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: Text(
         [
           if (app.firstInstallTime > 0)
