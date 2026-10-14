@@ -1779,15 +1779,25 @@ class _Tile extends StatelessWidget {
     final frameless = !tile.border;
 
     final ink = InkWell(
-      // Outside edit mode a tap launches the app and a long press does nothing
-      // (the tile options live in the edit-mode menu); in edit mode a tap opens
-      // the tile menu and a long press drags the tile.
+      // Outside edit mode a tap launches the app and a long press opens the
+      // app's details (same gesture as the favourites/recent lists); in edit
+      // mode a tap opens the tile menu and a long press drags the tile.
       onTap: editable
           ? () => _showTileMenu(context)
           : () => launchApp(context, app.packageName),
-      // Consume the long press so the blank-area long-press gesture (switching
-      // the launch sub-tab) stays limited to the empty board, not the tiles.
-      onLongPress: editable ? null : () {},
+      // Handled here rather than left to the board, so the blank-area long
+      // press (switching the launch sub-tab) stays limited to the empty board.
+      onLongPress: editable
+          ? null
+          : () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => AppDetailScreen(
+                  packageName: app.packageName,
+                  fromTileBoard: true,
+                ),
+              ),
+            ),
       child: _inner(context, glass: glass, frameless: frameless),
     );
 
