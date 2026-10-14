@@ -344,8 +344,60 @@ void main() {
       expect(entry.themeColor, 0xff112233);
     });
 
-    test('entries saved before the window host existed default to it', () {
-      // No openMode key: whatever an older build stored.
+    test('the status bar is shown unless the manifest asks for fullscreen', () {
+      // standalone: the status bar stays, and the window keeps the page clear
+      // of it — that is the strategy the entry starts with.
+      final plain = WebApp(id: WebApp.newId(), name: 'x', url: 'https://a.example/')
+        ..applySite(
+          PwaSite(
+            url: 'https://a.example/',
+            title: '',
+            secure: true,
+            manifest: PwaManifest.parse(_manifestJson(), _manifestUrl),
+          ),
+        );
+      expect(plain.hideStatusBar, isFalse);
+
+      // display: fullscreen asks for the whole screen, so it hides the bar.
+      final full = WebApp(id: WebApp.newId(), name: 'x', url: 'https://a.example/')
+        ..applySite(
+          PwaSite(
+            url: 'https://a.example/',
+            title: '',
+            secure: true,
+            manifest: PwaManifest.parse(
+              _manifestJson(display: 'fullscreen'),
+              _manifestUrl,
+            ),
+          ),
+        );
+      expect(full.hideStatusBar, isTrue);
+
+      // And the choice survives a refresh of a standalone site: re-reading a
+      // manifest must not undo what the user set.
+      final kept = WebApp(id: WebApp.newId(), name: 'x', url: 'https://a.example/')
+        ..hideStatusBar = true
+        ..applySite(
+          PwaSite(
+            url: 'https://a.example/',
+            title: '',
+            secure: true,
+            manifest: PwaManifest.parse(_manifestJson(), _manifestUrl),
+          ),
+        );
+      expect(kept.hideStatusBar, isTrue);
+
+      final back = WebApp.fromMap(full.toMap());
+      expect(back.hideStatusBar, isTrue);
+      expect(
+        WebApp.fromMap(
+          <String, dynamic>{'id': 'web:1', 'name': 'a', 'url': 'https://a.example/'},
+        ).hideStatusBar,
+        isFalse,
+      );
+    });
+
+    test('entries saved before the window host existed default to it', () {      // No openMode key: whatever an older build stored.
       final back = WebApp.fromMap(<String, dynamic>{
         'id': 'web:1',
         'name': 'Photos',
@@ -445,6 +497,100 @@ void main() {
       expect(args['themeColor'], 0xff123456);
       expect(args['backgroundColor'], 0xffffffff);
       expect(args['scope'], 'https://photos.example/app/');
+      expect(state.metaFor(id).launchCount, 1);
+    });
+
+    testWidgets('the status-bar strategy reaches the window host', (
+      tester,
+    ) async {
+      const channel = MethodChannel('hamstapp/apps');
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        calls.add(call);
+        return true;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+
+      final state = await stateWith(tester, _manifestJson());
+      final id = state.webApps.single.id;
+      await state.updateWebApp(id, hideStatusBar: true);
+
+      late BuildContext ctx;
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: MaterialApp(
+            home: Builder(
+              builder: (c) {
+                ctx = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      await launchApp(ctx, id);
+
+      final open = calls.singleWhere((c) => c.method == 'openWebApp');
+      expect((open.arguments as Map)['hideStatusBar'], isTrue);
+    });
+
+    testWidgets('a browser that cannot take the link falls back to the system', (
+      tester,
+    ) async {
+      const channel = MethodChannel('hamstapp/apps');
+      final calls = <MethodCall>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+        call,
+      ) async {
+        calls.add(call);
+        // The chosen browser refuses the address; the plain intent works.
+        final args = (call.arguments as Map?)?.cast<String, dynamic>() ?? {};
+        return args['package'] == null;
+      });
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          channel,
+          null,
+        ),
+      );
+
+      final state = await stateWith(tester, null);
+      final id = state.webApps.single.id;
+      await state.updateWebApp(
+        id,
+        openMode: WebApp.openBrowser,
+        browserPackage: 'com.example.browser',
+        browserName: 'Example',
+      );
+
+      late BuildContext ctx;
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: MaterialApp(
+            home: Builder(
+              builder: (c) {
+                ctx = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      );
+      await launchApp(ctx, id);
+
+      final opens = calls.where((c) => c.method == 'openUrl').toList();
+      expect(opens.length, 2);
+      expect((opens.first.arguments as Map)['package'], 'com.example.browser');
+      expect((opens.last.arguments as Map).containsKey('package'), isFalse);
       expect(state.metaFor(id).launchCount, 1);
     });
 

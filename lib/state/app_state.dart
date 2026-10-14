@@ -540,6 +540,7 @@ class AppState extends ChangeNotifier {
     String? name,
     String? url,
     String? openMode,
+    bool? hideStatusBar,
     String? browserPackage,
     String? browserName,
   }) async {
@@ -548,6 +549,7 @@ class AppState extends ChangeNotifier {
     final entry = webApps[index];
     if (name != null && name.trim().isNotEmpty) entry.name = name.trim();
     if (openMode != null) entry.openMode = openMode;
+    if (hideStatusBar != null) entry.hideStatusBar = hideStatusBar;
     if (browserPackage != null) entry.browserPackage = browserPackage;
     if (browserName != null) entry.browserName = browserName;
     if (url != null && url.trim().isNotEmpty && url.trim() != entry.url) {

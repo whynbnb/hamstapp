@@ -191,6 +191,7 @@ class NativeApps {
     required String scope,
     required int themeColor,
     required int backgroundColor,
+    bool hideStatusBar = false,
     String browserPackage = '',
     Uint8List? icon,
   }) async {
@@ -202,6 +203,7 @@ class NativeApps {
         'scope': scope,
         'themeColor': themeColor,
         'backgroundColor': backgroundColor,
+        'hideStatusBar': hideStatusBar,
         if (browserPackage.isNotEmpty) 'browserPackage': browserPackage,
         if (icon != null && icon.isNotEmpty) 'icon': icon,
       });

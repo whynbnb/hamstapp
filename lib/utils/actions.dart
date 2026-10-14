@@ -95,6 +95,7 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
       scope: web.scope,
       themeColor: web.themeColor,
       backgroundColor: web.backgroundColor,
+      hideStatusBar: web.hideStatusBar,
       browserPackage: web.browserPackage,
       icon: IconCache.instance[web.id],
     );
@@ -113,6 +114,11 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
     }
   } else {
     opened = await NativeApps.openUrl(target, package: web.browserPackage);
+    if (!opened && web.browserPackage.isNotEmpty) {
+      // The chosen browser may simply not handle this address; the system's
+      // own choice is better than refusing to open it at all.
+      opened = await NativeApps.openUrl(target);
+    }
   }
 
   if (!opened) {

@@ -796,6 +796,7 @@ class PackageScannerPlugin(
         val display = call.argument<String>("display") ?: "standalone"
         val theme = intArgument(call, "themeColor")
         val background = intArgument(call, "backgroundColor")
+        val hideStatusBar = call.argument<Boolean>("hideStatusBar") ?: false
         val icon = call.argument<ByteArray>("icon")
         val intent = Intent(context, WebAppActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -807,6 +808,7 @@ class PackageScannerPlugin(
                 WebAppActivity.EXTRA_BROWSER,
                 call.argument<String>("browserPackage") ?: "",
             )
+            putExtra(WebAppActivity.EXTRA_HIDE_STATUS_BAR, hideStatusBar)
             putExtra(WebAppActivity.EXTRA_THEME_COLOR, theme)
             putExtra(WebAppActivity.EXTRA_BACKGROUND_COLOR, background)
             if (icon != null && icon.isNotEmpty()) {
@@ -816,7 +818,8 @@ class PackageScannerPlugin(
         val started = runCatching { context.startActivity(intent) }.isSuccess
         NotificationStore.addEvent(
             "网页应用 · 打开 · $name · $url · display=$display · " +
-                "theme=${Integer.toHexString(theme)} · 图标=${icon?.size ?: 0}B · " +
+                "theme=${Integer.toHexString(theme)} · 状态栏=${if (hideStatusBar) "隐藏" else "显示"} · " +
+                "图标=${icon?.size ?: 0}B · " +
                 (if (started) "已启动窗口" else "启动窗口失败（改用浏览器）")
         )
         return started

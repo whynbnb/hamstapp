@@ -172,78 +172,122 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              SwitchListTile(
-                secondary: const Icon(Icons.open_in_full),
-                title: Text(s.t('独立窗口（没有地址栏）')),
-                subtitle: Text(s.t('用囤囤自己的窗口打开，像应用一样')),
-                value: entry.opensStandalone,
-                onChanged: (v) {
-                  state.updateWebApp(
-                    entry.id,
-                    openMode: v ? WebApp.openStandalone : WebApp.openBrowser,
-                  );
-                  setState(() {});
-                },
-              ),
-              const Divider(height: 1),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Text(
-                    entry.opensStandalone
-                        ? s.t('窗口外的链接用哪个浏览器')
-                        : s.t('用哪个浏览器打开'),
-                    style: const TextStyle(fontWeight: FontWeight.w700),
+                    s.t('打开方式'),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
+              // Two strategies, spelled out: an own window, or the browser.
               ListTile(
-                leading: const Icon(Icons.public),
-                title: Text(s.t('系统默认')),
-                trailing: entry.browserPackage.isEmpty
-                    ? const Icon(Icons.check)
-                    : null,
+                leading: const Icon(Icons.open_in_full),
+                title: Text(s.t('独立窗口（没有地址栏）')),
+                subtitle: Text(s.t('用囤囤自己的窗口打开，像应用一样')),
+                trailing: entry.opensStandalone ? const Icon(Icons.check) : null,
                 onTap: () async {
                   await state.updateWebApp(
                     entry.id,
-                    browserPackage: '',
-                    browserName: '',
+                    openMode: WebApp.openStandalone,
                   );
                   if (ctx.mounted) Navigator.pop(ctx);
                   setState(() {});
                 },
               ),
-              for (final browser in browsers)
-                ListTile(
-                  leading: const Icon(Icons.language),
-                  title: Text(browser.label),
-                  subtitle: Text(
-                    browser.packageName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+              ListTile(
+                leading: const Icon(Icons.public),
+                title: Text(s.t('用浏览器打开')),
+                subtitle: Text(s.t('交给浏览器；若系统里已装该网页应用，会交给它')),
+                trailing: entry.opensStandalone
+                    ? null
+                    : const Icon(Icons.check),
+                onTap: () async {
+                  await state.updateWebApp(
+                    entry.id,
+                    openMode: WebApp.openBrowser,
+                  );
+                  setState(() {});
+                },
+              ),
+              if (entry.opensStandalone)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Text(
+                    s.t('窗口里点开站外链接时，会交给系统默认浏览器。'),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                   ),
-                  trailing: entry.browserPackage == browser.packageName
+                )
+              else ...[
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      s.t('用哪个浏览器'),
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.public),
+                  title: Text(s.t('系统默认')),
+                  trailing: entry.browserPackage.isEmpty
                       ? const Icon(Icons.check)
                       : null,
                   onTap: () async {
                     await state.updateWebApp(
                       entry.id,
-                      browserPackage: browser.packageName,
-                      browserName: browser.label,
+                      browserPackage: '',
+                      browserName: '',
                     );
                     if (ctx.mounted) Navigator.pop(ctx);
                     setState(() {});
                   },
                 ),
-              if (browsers.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Text(
-                    s.t('没有找到能打开网页的应用'),
-                    style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                for (final browser in browsers)
+                  ListTile(
+                    leading: const Icon(Icons.language),
+                    title: Text(browser.label),
+                    subtitle: Text(
+                      browser.packageName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: entry.browserPackage == browser.packageName
+                        ? const Icon(Icons.check)
+                        : null,
+                    onTap: () async {
+                      // Choosing a browser also switches the entry to browser
+                      // mode: picking one has to take effect, not sit unused.
+                      await state.updateWebApp(
+                        entry.id,
+                        openMode: WebApp.openBrowser,
+                        browserPackage: browser.packageName,
+                        browserName: browser.label,
+                      );
+                      if (ctx.mounted) Navigator.pop(ctx);
+                      setState(() {});
+                    },
                   ),
-                ),
+                if (browsers.isEmpty)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      s.t('没有找到能打开网页的应用'),
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        color: Colors.grey.shade700,
+                      ),
+                    ),
+                  ),
+              ],
               const SizedBox(height: 8),
             ],
           ),
@@ -603,6 +647,22 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => _pickOpenMode(state, webEntry),
+            ),
+          if (webEntry != null && webEntry.opensStandalone)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              secondary: const Icon(Icons.fullscreen),
+              value: webEntry.hideStatusBar,
+              onChanged: (v) => state.updateWebApp(
+                webEntry.id,
+                hideStatusBar: v,
+              ),
+              title: Text(context.strings.t('隐藏状态栏')),
+              subtitle: Text(
+                webEntry.hideStatusBar
+                    ? context.strings.t('全屏显示，状态栏不占位置')
+                    : context.strings.t('显示状态栏，网页内容不会与它重叠'),
+              ),
             ),
           if (app != null &&
               _entries != null &&

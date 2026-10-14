@@ -831,8 +831,16 @@ const Map<String, String> _en = <String, String>{
   '用独立窗口打开': 'Open in its own window',
   '用囤囤自己的窗口打开，像应用一样': 'Opens in this app’s own window, like an app',
   '用浏览器打开：{name}': 'Open in browser: {name}',
-  '用哪个浏览器打开': 'Which browser opens it',
-  '窗口外的链接用哪个浏览器': 'Which browser takes over links outside it',
+  '用浏览器打开': 'Open in browser',
+  '隐藏状态栏': 'Hide the status bar',
+  '全屏显示，状态栏不占位置': 'Full screen — the status bar takes no room',
+  '显示状态栏，网页内容不会与它重叠':
+      'Status bar shown — the page is kept clear of it',
+  '交给浏览器；若系统里已装该网页应用，会交给它':
+      'Hands the address to a browser — or to the installed web app, if there is one',
+  '窗口里点开站外链接时，会交给系统默认浏览器。':
+      'Links that leave the site open in the system default browser.',
+  '用哪个浏览器': 'Which browser',
   '没有找到能打开网页的应用': 'No app found that can open web pages',
   '站点清单建议：{mode}': 'The site’s manifest asks for: {mode}',
   '重新识别': 'Detect again',
@@ -902,7 +910,6 @@ const Map<String, String> _en = <String, String>{
           'shows up in the list above.',
   '这是把网站装成应用的 PWA，可以像普通应用一样打开、加磁贴或收藏。':
       'This is a website installed as an app (PWA). It opens, pins and favorites like any other app.',
-  '用浏览器打开': 'Open in browser',
   '网址不可用': 'Address unavailable',
   '名称跟随入口': 'Name follows the entry',
   '用所选入口的名称（如「电话」）': 'Use the chosen entry\'s name (e.g. "电话")',

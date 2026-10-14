@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.webkit.CookieManager
@@ -26,6 +27,9 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 
 /**
  * Hosts one installed web app (PWA), following the web app manifest.
@@ -60,6 +64,10 @@ class WebAppActivity : Activity() {
     private var startUrl = ""
     private var appName = ""
     private var browserPackage = ""
+    private var hideStatusBar = false
+
+    /** The view the page lives in; its background paints the status-bar strip. */
+    private var rootView: View? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -89,6 +97,7 @@ class WebAppActivity : Activity() {
         display = intent.getStringExtra(EXTRA_DISPLAY) ?: "standalone"
         scope = intent.getStringExtra(EXTRA_SCOPE) ?: ""
         browserPackage = intent.getStringExtra(EXTRA_BROWSER) ?: ""
+        hideStatusBar = intent.getBooleanExtra(EXTRA_HIDE_STATUS_BAR, false)
         themeColor = intent.getIntExtra(EXTRA_THEME_COLOR, 0)
         backgroundColor = intent.getIntExtra(EXTRA_BACKGROUND_COLOR, 0)
         val iconBytes = intent.getByteArrayExtra(EXTRA_ICON)
@@ -99,15 +108,42 @@ class WebAppActivity : Activity() {
         }
         NotificationStore.addEvent(
             "网页应用 · 窗口创建 · $appName · $startUrl · display=$display · " +
+                "状态栏=${if (hideStatusBar) "隐藏" else "显示"} · " +
                 "theme=${Integer.toHexString(themeColor)} · 图标=${iconBytes?.size ?: 0}B"
         )
+
+        // This app targets a recent SDK, so on Android 15+ the window is drawn
+        // under the system bars whether we ask for it or not; older versions are
+        // told to do the same so both behave identically, and the insets are
+        // applied by hand below.
+        WindowCompat.setDecorFitsSystemWindows(window, false)
 
         if (display == "fullscreen") {
             window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN)
         }
 
         val root = FrameLayout(this)
-        root.setBackgroundColor(if (backgroundColor != 0) backgroundColor else Color.WHITE)
+        rootView = root
+        // With the bar hidden the page owns the screen and the window's own
+        // background only shows while the page loads; with it visible the root's
+        // background is the status-bar strip (see [tintStatusBar]).
+        root.setBackgroundColor(
+            if (hideStatusBar) {
+                if (backgroundColor != 0) backgroundColor else Color.WHITE
+            } else {
+                Color.WHITE
+            }
+        )
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            view.setPadding(
+                bars.left,
+                if (hideStatusBar) 0 else bars.top,
+                bars.right,
+                bars.bottom,
+            )
+            insets
+        }
 
         webView = WebView(this)
         configure(webView)
@@ -159,9 +195,107 @@ class WebAppActivity : Activity() {
         setContentView(root)
         // Only now does the decor view exist: reading it earlier (which
         // getWindowInsetsController() does) throws a NullPointerException.
-        window.statusBarColor = if (themeColor != 0) themeColor else Color.BLACK
-        setLightStatusBar(themeColor != 0 && luminance(themeColor) > 0.6)
+        applyStatusBar()
         webView.loadUrl(startUrl)
+    }
+
+    /**
+     * The status bar, in one of the two strategies the entry can pick: hidden so
+     * the page owns the whole screen, or visible — in which case the insets
+     * above keep the page from running into it and its strip is tinted to match
+     * the page.
+     */
+    private fun applyStatusBar() {
+        if (hideStatusBar) {
+            if (Build.VERSION.SDK_INT >= 30) {
+                window.insetsController?.hide(WindowInsets.Type.statusBars())
+            } else {
+                @Suppress("DEPRECATION")
+                window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_FULLSCREEN
+            }
+            return
+        }
+        tintStatusBar(themeColor)
+    }
+
+    /**
+     * Paints the strip behind a visible status bar and picks icon colours that
+     * can actually be read on it.
+     *
+     * The icon style follows the *resulting* colour, not the source of it: a
+     * page with no theme colour leaves a white strip, and white-on-white is
+     * exactly how the clock became unreadable.
+     */
+    private fun tintStatusBar(color: Int) {
+        val bar = if (color != 0) color else Color.WHITE
+        rootView?.setBackgroundColor(bar)
+        // From API 35 the bar is drawn over the window and its colour is
+        // ignored; there the root's background is what shows through.
+        if (Build.VERSION.SDK_INT < 35) window.statusBarColor = bar
+        setLightStatusBar(luminance(bar) > 0.6)
+    }
+
+    /**
+     * Asks the page what colour the strip above it should be.
+     *
+     * The sample is taken from the top of the page — the element sitting right
+     * under the status bar, walking up until something actually paints — because
+     * that is what the eye compares the bar with. A page's `theme-color` (when
+     * it applies to the current colour scheme) and the manifest's colour are the
+     * fallbacks, since `body`'s own background often belongs to a container the
+     * page never shows at the top.
+     */
+    private fun tintFromPage(view: WebView) {
+        if (hideStatusBar) return
+        view.evaluateJavascript(SAMPLE_COLOR_JS) { value ->
+            val parsed = parseCssColor(unquoteJs(value))
+            if (parsed != 0) tintStatusBar(parsed)
+        }
+    }
+
+    /** A JS string result as plain text (`null` and quotes removed). */
+    private fun unquoteJs(value: String?): String {
+        val text = value ?: return ""
+        if (text.isEmpty() || text == "null") return ""
+        return text.trim().trim('"').trim()
+    }
+
+    /** CSS colour → ARGB, or 0 when it cannot be read. */
+    private fun parseCssColor(raw: String): Int {
+        val text = raw.trim().lowercase()
+        if (text.isEmpty() || text == "transparent") return 0
+        if (text.startsWith("#")) {
+            var hex = text.substring(1)
+            if (hex.length == 3 || hex.length == 4) {
+                hex = hex.map { "$it$it" }.joinToString("")
+            }
+            if (hex.length == 6) hex = "ff$hex"
+            if (hex.length != 8 || !hex.all { it in "0123456789abcdef" }) return 0
+            val value = hex.toLongOrNull(16) ?: return 0
+            // #rrggbbaa → 0xaarrggbb
+            return (((value and 0xff) shl 24) or (value shr 8)).toInt()
+        }
+        val match = Regex("^rgba?\\(([^)]*)\\)$").find(text) ?: return 0
+        val parts = match.groupValues[1].split(',').map { it.trim() }
+        if (parts.size < 3) return 0
+        fun channel(s: String): Int? = if (s.endsWith("%")) {
+            s.dropLast(1).toDoubleOrNull()?.let { (it * 255 / 100).toInt().coerceIn(0, 255) }
+        } else {
+            s.toDoubleOrNull()?.toInt()?.coerceIn(0, 255)
+        }
+
+        val r = channel(parts[0]) ?: return 0
+        val g = channel(parts[1]) ?: return 0
+        val b = channel(parts[2]) ?: return 0
+        val a = if (parts.size >= 4) {
+            (parts[3].toDoubleOrNull() ?: 1.0).let { (it * 255).toInt().coerceIn(0, 255) }
+        } else {
+            255
+        }
+        // A nearly transparent colour paints nothing: treat it as unusable so
+        // the next source is tried.
+        if (a < 128) return 0
+        return (a shl 24) or (r shl 16) or (g shl 8) or b
     }
 
     /** The launch screen: manifest icon on the manifest's background colour. */
@@ -305,6 +439,18 @@ class WebAppActivity : Activity() {
 
             override fun onPageFinished(view: WebView, url: String) {
                 if (splash.visibility == View.VISIBLE) splash.visibility = View.GONE
+                // The page may declare (or change) the colour it wants the
+                // browser UI in; ask it now that there is a document.
+                tintFromPage(view)
+            }
+
+            override fun doUpdateVisitedHistory(
+                view: WebView,
+                url: String?,
+                isReload: Boolean,
+            ) {
+                // Single-page apps change views without a page load.
+                tintFromPage(view)
             }
 
             override fun onReceivedError(
@@ -509,12 +655,54 @@ class WebAppActivity : Activity() {
         const val EXTRA_DISPLAY = "display"
         const val EXTRA_SCOPE = "scope"
         const val EXTRA_BROWSER = "browserPackage"
+        const val EXTRA_HIDE_STATUS_BAR = "hideStatusBar"
         const val EXTRA_THEME_COLOR = "themeColor"
         const val EXTRA_BACKGROUND_COLOR = "backgroundColor"
         const val EXTRA_ICON = "icon"
 
         /** Beyond this an icon is refused outright; the splash does without. */
         const val MAX_ICON_BYTES = 512 * 1024
+
+        /**
+         * What colour the strip under the status bar should be.
+         *
+         * 1. the element at the very top of the page that actually paints — what
+         *    sits directly below the bar, so the two line up;
+         * 2. the page's `theme-color`, but only the entry that matches the
+         *    current colour scheme (sites ship one per scheme);
+         * 3. nothing, leaving the manifest colour (or white) in place.
+         */
+        val SAMPLE_COLOR_JS = """
+            (function () {
+              function painted(color) {
+                if (!color) return false;
+                if (color === 'transparent' || color === 'rgba(0, 0, 0, 0)') return false;
+                var m = color.match(/rgba?\(([^)]+)\)/);
+                if (!m) return true;
+                var parts = m[1].split(',');
+                return parts.length < 4 || parseFloat(parts[3]) >= 0.5;
+              }
+              try {
+                var x = Math.floor(window.innerWidth / 2);
+                var el = document.elementFromPoint(x, 1) ||
+                  document.body || document.documentElement;
+                while (el) {
+                  var bg = getComputedStyle(el).backgroundColor || '';
+                  if (painted(bg)) return bg;
+                  el = el.parentElement;
+                }
+              } catch (e) {}
+              try {
+                var metas = document.querySelectorAll('meta[name="theme-color"]');
+                for (var i = 0; i < metas.length; i++) {
+                  var media = metas[i].getAttribute('media');
+                  if (media && !window.matchMedia(media).matches) continue;
+                  if (metas[i].content) return metas[i].content;
+                }
+              } catch (e) {}
+              return '';
+            })();
+        """.trimIndent()
 
         /** `WindowInsets` is only touched where it exists. */
         const val TAG = "WebAppActivity"

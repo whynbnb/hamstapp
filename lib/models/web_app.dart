@@ -64,6 +64,14 @@ class WebApp {
   /// How it opens: [openStandalone] (default) or [openBrowser].
   String openMode;
 
+  /// Whether the app window hides the system status bar.
+  ///
+  /// Two strategies, because "standalone" only promises the absence of *browser*
+  /// UI: the status bar can stay (content kept clear of it) or be hidden so the
+  /// page owns the whole screen. The manifest's `fullscreen` asks for the
+  /// latter; everything else leaves the choice to the user.
+  bool hideStatusBar;
+
   /// Which app opens it when [openMode] is [openBrowser], or which app takes
   /// over links that leave the scope while running standalone. '' = whichever
   /// one the system would pick.
@@ -86,6 +94,7 @@ class WebApp {
     this.manifestUrl = '',
     this.iconUrl = '',
     this.openMode = openStandalone,
+    this.hideStatusBar = false,
     this.browserPackage = '',
     this.browserName = '',
     this.createdAt = 0,
@@ -134,6 +143,9 @@ class WebApp {
     themeColor = site.manifest?.themeColor ?? site.themeColor;
     backgroundColor = site.manifest?.backgroundColor ?? 0;
     iconUrl = site.icon?.url ?? '';
+    // Only `fullscreen` overrules the status-bar choice: it explicitly asks for
+    // the whole screen. Anything else leaves the user's own setting alone.
+    if (site.display == displayFullscreen) hideStatusBar = true;
     final siteName = site.name.trim();
     if (name.trim().isEmpty && siteName.isNotEmpty) name = siteName;
   }
@@ -154,6 +166,7 @@ class WebApp {
       // Entries added before the window host existed have no mode stored; they
       // open in their own window too, which is what a launcher should do.
       openMode: map['openMode'] as String? ?? openStandalone,
+      hideStatusBar: map['hideStatusBar'] as bool? ?? false,
       browserPackage: map['browserPackage'] as String? ?? '',
       browserName: map['browserName'] as String? ?? '',
       createdAt: (map['createdAt'] as num?)?.toInt() ?? 0,
@@ -181,6 +194,7 @@ class WebApp {
         'manifestUrl': manifestUrl,
         'iconUrl': iconUrl,
         'openMode': openMode,
+        'hideStatusBar': hideStatusBar,
         'browserPackage': browserPackage,
         'browserName': browserName,
         'createdAt': createdAt,
