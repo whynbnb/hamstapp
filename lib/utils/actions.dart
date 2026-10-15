@@ -117,8 +117,21 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
     if (!opened && web.browserPackage.isNotEmpty) {
       // The chosen browser may simply not handle this address; the system's
       // own choice is better than refusing to open it at all.
+      AppLog.instance.warn(
+        LogModule.apps,
+        '网页入口 · 指定浏览器打不开，改用系统默认 · ${web.name} · '
+            '${web.browserName.isEmpty ? web.browserPackage : web.browserName}',
+      );
       opened = await NativeApps.openUrl(target);
     }
+    final browserLabel = web.browserPackage.isEmpty
+        ? AppStrings.current.t('系统默认')
+        : (web.browserName.isEmpty ? web.browserPackage : web.browserName);
+    AppLog.instance.log(
+      LogModule.apps,
+      '网页入口 · 浏览器打开 · ${web.name} · $target · 浏览器=$browserLabel'
+          ' · ${opened ? '已启动' : '失败'}',
+    );
   }
 
   if (!opened) {

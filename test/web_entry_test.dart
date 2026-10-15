@@ -258,4 +258,96 @@ void main() {
     expect(find.text(s.t('导出 APK（分享）')), findsNothing);
     expect(find.text(s.t('卸载')), findsNothing);
   });
+
+  testWidgets('the detail page says where a tap will actually go', (
+    tester,
+  ) async {
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      switch (call.method) {
+        case 'getLaunchActivities':
+          return <dynamic>[];
+        case 'webAppHandler':
+          return <String, dynamic>{
+            'packageName': 'org.chromium.webapk.abc',
+            'label': '大盘云图',
+            'browser': false,
+          };
+      }
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final state = AppState(_MemStorage())..initialized = true;
+    await state.addWebApp(url: 'https://52etf.site/', name: '大盘云图');
+    final id = state.webApps.single.id;
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(home: AppDetailScreen(packageName: id)),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    final s = AppStrings.current;
+    expect(find.text(s.t('已安装的网页应用')), findsOneWidget);
+    // An installed web app is named, so the user knows taps land there.
+    expect(find.textContaining('大盘云图 · 点开会交给它'), findsOneWidget);
+  });
+
+  testWidgets('the detail page explains when only a browser would take it', (
+    tester,
+  ) async {
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      switch (call.method) {
+        case 'getLaunchActivities':
+          return <dynamic>[];
+        case 'webAppHandler':
+          return <String, dynamic>{
+            'packageName': 'com.android.chrome',
+            'label': 'Chrome',
+            'browser': true,
+          };
+      }
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final state = AppState(_MemStorage())..initialized = true;
+    await state.addWebApp(url: 'https://52etf.site/', name: '大盘云图');
+    final id = state.webApps.single.id;
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(home: AppDetailScreen(packageName: id)),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(
+      find.textContaining(
+        AppStrings.current.t('没有安装：点开只会交给浏览器开一个标签页'),
+      ),
+      findsOneWidget,
+    );
+  });
 }

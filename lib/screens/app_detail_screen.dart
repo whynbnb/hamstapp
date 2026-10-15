@@ -43,6 +43,10 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
   bool _exporting = false;
   bool _identifying = false;
 
+  /// Who would open this entry's address (an installed web app, or a browser).
+  WebAppHandler? _handler;
+  bool _handlerLoaded = false;
+
   /// The entries this package can be started through, as the system reports
   /// them; null while unknown. Fetched live (never cached) because a package
   /// can change its entries with an update.
@@ -58,6 +62,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     _reason = TextEditingController(text: meta.reason);
     _note = TextEditingController(text: meta.note);
     _loadEntries();
+    _loadHandler();
   }
 
   Future<void> _loadEntries() async {
@@ -219,7 +224,9 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: Text(
-                    s.t('窗口里点开站外链接时，会交给系统默认浏览器。'),
+                    s.t(
+                      '窗口里点开站外链接时，会交给系统默认浏览器。想让这个入口本身就用某个浏览器打开（比如它已经在该浏览器里装成了网页应用），选上面的「用浏览器打开」再选浏览器。',
+                    ),
                     style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                   ),
                 )
@@ -294,6 +301,20 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         ),
       ),
     );
+  }
+
+  /// Finds out what a tap on this entry actually does: an installed web app for
+  /// the site (browser-hosted standalone window) or a browser tab.
+  Future<void> _loadHandler() async {
+    final web = _appState.webAppById(widget.packageName);
+    if (web == null) return;
+    final url = web.startUrl.isEmpty ? web.url : web.startUrl;
+    final handler = await NativeApps.webAppHandler(url);
+    if (!mounted) return;
+    setState(() {
+      _handler = handler;
+      _handlerLoaded = true;
+    });
   }
 
   /// Removes a hand-added web entry, with its tiles and metadata.
@@ -647,6 +668,26 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               ),
               trailing: const Icon(Icons.chevron_right),
               onTap: () => _pickOpenMode(state, webEntry),
+            ),
+          if (webEntry != null && _handlerLoaded)
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                _handler != null && !_handler!.browser
+                    ? Icons.install_mobile
+                    : Icons.public,
+              ),
+              title: Text(context.strings.t('已安装的网页应用')),
+              subtitle: Text(
+                _handler != null && !_handler!.browser
+                    ? context.strings.t(
+                        '{label} · 点开会交给它，按浏览器的独立窗口显示（无地址栏）',
+                        {'label': _handler!.label},
+                      )
+                    : context.strings.t(
+                        '没有安装：点开只会交给浏览器开一个标签页。想要浏览器自己的独立窗口，请在 Chrome 里用「安装应用」把它装成网页应用（「添加到主屏幕」只是快捷方式，任何第三方都读不到）。',
+                      ),
+              ),
             ),
           if (webEntry != null && webEntry.opensStandalone)
             SwitchListTile(

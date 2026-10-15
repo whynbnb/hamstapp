@@ -56,6 +56,9 @@ class WebAppActivity : Activity() {
     private lateinit var progress: ProgressBar
     private lateinit var splash: View
     private var topBar: View? = null
+    private var urlBar: View? = null
+    private var urlText: TextView? = null
+    private var currentUrl = ""
 
     private var display = "standalone"
     private var themeColor = 0
@@ -170,6 +173,23 @@ class WebAppActivity : Activity() {
             (webView.layoutParams as FrameLayout.LayoutParams).topMargin = dp(44)
         }
 
+        // The address bar appears whenever the page leaves the app's scope — the
+        // standard's own rule for sign-in pages on another host: they stay in the
+        // app window (so the session survives) but the user can see where they are.
+        if (display != "minimal-ui") {
+            val bar = buildUrlBar()
+            urlBar = bar
+            root.addView(
+                bar,
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP,
+                ),
+            )
+            bar.visibility = View.GONE
+        }
+
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             visibility = View.GONE
@@ -196,7 +216,28 @@ class WebAppActivity : Activity() {
         // Only now does the decor view exist: reading it earlier (which
         // getWindowInsetsController() does) throws a NullPointerException.
         applyStatusBar()
+        applyTaskDescription(iconBytes)
         webView.loadUrl(startUrl)
+    }
+
+    /**
+     * Names this window for the task switcher: the web app's own label and icon,
+     * so it reads as that site rather than as this app.
+     */
+    private fun applyTaskDescription(iconBytes: ByteArray?) {
+        val label = appName.ifEmpty { startUrl }
+        setTitle(label)
+        runCatching {
+            val icon = iconBytes?.let { decodeSampled(it, dp(96)) }
+            @Suppress("DEPRECATION")
+            setTaskDescription(
+                if (icon != null) {
+                    android.app.ActivityManager.TaskDescription(label, icon, themeColor)
+                } else {
+                    android.app.ActivityManager.TaskDescription(label)
+                }
+            )
+        }
     }
 
     /**
@@ -389,6 +430,77 @@ class WebAppActivity : Activity() {
         return bar
     }
 
+    /**
+     * Address bar shown while the page is outside the app's scope: where the
+     * user is, and a way out to a real browser. Kept minimal on purpose — it is
+     * a context signal, not browser chrome.
+     */
+    private fun buildUrlBar(): View {
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(if (themeColor != 0) themeColor else Color.BLACK)
+            setPadding(dp(12), dp(6), dp(8), dp(6))
+        }
+        bar.addView(
+            TextView(this).apply {
+                text = "🌐"
+                textSize = 14f
+                setPadding(0, 0, dp(8), 0)
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        val urlView = TextView(this).apply {
+            textSize = 12.5f
+            maxLines = 1
+            setTextColor(Color.WHITE)
+            ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+            alpha = 0.9f
+        }
+        urlText = urlView
+        bar.addView(
+            urlView,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        bar.addView(
+            TextView(this).apply {
+                text = "浏览器"
+                textSize = 13f
+                setTextColor(Color.WHITE)
+                setPadding(dp(10), dp(2), dp(10), dp(2))
+                setOnClickListener { if (currentUrl.isNotEmpty()) openInBrowser(currentUrl) }
+            },
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        return bar
+    }
+
+    /**
+     * Shows or hides the address bar for [url]: visible when the page is outside
+     * the manifest scope (a sign-in host, an external page), hidden when it is
+     * back inside the app.
+     */
+    private fun updateChrome(url: String) {
+        currentUrl = url
+        urlText?.text = Uri.parse(url).let { uri ->
+            listOf(uri.host ?: "", uri.path ?: "").joinToString("")
+        }
+        val bar = urlBar ?: return
+        val visible = !inScope(url)
+        if (visible == (bar.visibility == View.VISIBLE)) return
+        bar.visibility = if (visible) View.VISIBLE else View.GONE
+        // Keep the page below the bar while it is shown.
+        val params = webView.layoutParams as? FrameLayout.LayoutParams ?: return
+        params.topMargin = if (visible) dp(38) else 0
+        webView.requestLayout()
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     private fun configure(view: WebView) {
         val settings = view.settings
@@ -423,10 +535,16 @@ class WebAppActivity : Activity() {
                 request: WebResourceRequest,
             ): Boolean {
                 val target = request.url.toString()
-                if (inScope(target)) return false
-                // Out-of-scope navigation is where the browser takes over, the
-                // same way an installed web app shows browser UI there.
-                openInBrowser(target)
+                if (target.startsWith("http://") || target.startsWith("https://")) {
+                    // Web pages stay in this window — sign-in hosts included: a
+                    // login only works if it happens in the same cookie jar, and
+                    // leaving the scope merely shows the address bar (the
+                    // standard's rule for out-of-scope pages).
+                    return false
+                }
+                // Anything that is not a web page belongs to its own app: mail,
+                // phone numbers, a site's own app, an intent:// link.
+                openExternal(target)
                 return true
             }
 
@@ -435,6 +553,7 @@ class WebAppActivity : Activity() {
                 // "browser", and sites that ask for standalone would otherwise
                 // render their browser layout.
                 view.evaluateJavascript(displayModeShim(), null)
+                updateChrome(url)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
@@ -442,6 +561,10 @@ class WebAppActivity : Activity() {
                 // The page may declare (or change) the colour it wants the
                 // browser UI in; ask it now that there is a document.
                 tintFromPage(view)
+                // Recents is snapshotted when the task is first shown, which can
+                // happen before the page is up: name it again now.
+                applyTaskDescription(null)
+                updateChrome(url)
             }
 
             override fun doUpdateVisitedHistory(
@@ -451,6 +574,7 @@ class WebAppActivity : Activity() {
             ) {
                 // Single-page apps change views without a page load.
                 tintFromPage(view)
+                if (!url.isNullOrEmpty()) updateChrome(url)
             }
 
             override fun onReceivedError(
@@ -477,7 +601,9 @@ class WebAppActivity : Activity() {
                 callback.invoke(origin, true, false)
             }
 
-            // Links opened with target="_blank" belong to the browser.
+            // Links opened with target="_blank" — a sign-in popup, typically —
+            // load in this window instead of elsewhere: they must stay in the
+            // same session, and the back button brings the user back.
             override fun onCreateWindow(
                 view: WebView,
                 isDialog: Boolean,
@@ -491,13 +617,23 @@ class WebAppActivity : Activity() {
                         v: WebView,
                         request: WebResourceRequest,
                     ): Boolean {
-                        openInBrowser(request.url.toString())
+                        NotificationStore.addEvent(
+                            "网页应用 · 新窗口链接改在本窗口打开 · ${request.url}"
+                        )
+                        v.stopLoading()
+                        webView.loadUrl(request.url.toString())
                         return true
                     }
                 }
                 transport.webView = popup
                 resultMsg.sendToTarget()
                 return true
+            }
+
+            override fun onCloseWindow(window: WebView) {
+                // A popup that closes itself: back to whatever opened it.
+                if (window !== webView) window.destroy()
+                if (webView.canGoBack()) webView.goBack()
             }
         }
         settings.setSupportMultipleWindows(true)
@@ -549,14 +685,27 @@ class WebAppActivity : Activity() {
             }
             if (runCatching { startActivity(targeted) }.isSuccess) return
         }
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        }
+        openExternal(url)
+    }
+
+    /**
+     * Hands a link to whoever handles it: the browser for a web address, the
+     * matching app for anything else (`mailto:`, `tel:`, a site's own app, an
+     * `intent://` URL).
+     */
+    private fun openExternal(url: String) {
+        val intent = if (url.startsWith("intent:")) {
+            runCatching { Intent.parseUri(url, Intent.URI_INTENT_SCHEME) }.getOrNull()
+        } else {
+            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        } ?: return
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         try {
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            // Nothing to hand it to; keep it in this window instead.
-            webView.loadUrl(url)
+            NotificationStore.addEvent("网页应用 · 没人能处理这个链接 · $url")
+            // Nothing to hand it to; keep it in this window when it is a page.
+            if (url.startsWith("http")) webView.loadUrl(url)
         }
     }
 

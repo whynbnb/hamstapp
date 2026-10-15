@@ -827,6 +827,11 @@ const Map<String, String> _en = <String, String>{
   '编辑网页应用': 'Edit web app',
   '识别': 'Detect',
   '打开方式': 'How it opens',
+  '已安装的网页应用': 'Installed web app',
+  '{label} · 点开会交给它，按浏览器的独立窗口显示（无地址栏）':
+      '{label} · taps go to it, which shows the site in the browser’s own window (no address bar)',
+  '没有安装：点开只会交给浏览器开一个标签页。想要浏览器自己的独立窗口，请在 Chrome 里用「安装应用」把它装成网页应用（「添加到主屏幕」只是快捷方式，任何第三方都读不到）。':
+      'Not installed: a tap just opens a browser tab. For the browser’s own window, use "Install app" in Chrome to install it as a web app ("Add to Home screen" only makes a shortcut, which nothing outside the launcher can read).',
   '独立窗口（没有地址栏）': 'Own window (no address bar)',
   '用独立窗口打开': 'Open in its own window',
   '用囤囤自己的窗口打开，像应用一样': 'Opens in this app’s own window, like an app',
@@ -838,8 +843,8 @@ const Map<String, String> _en = <String, String>{
       'Status bar shown — the page is kept clear of it',
   '交给浏览器；若系统里已装该网页应用，会交给它':
       'Hands the address to a browser — or to the installed web app, if there is one',
-  '窗口里点开站外链接时，会交给系统默认浏览器。':
-      'Links that leave the site open in the system default browser.',
+  '窗口里点开站外链接时，会交给系统默认浏览器。想让这个入口本身就用某个浏览器打开（比如它已经在该浏览器里装成了网页应用），选上面的「用浏览器打开」再选浏览器。':
+      'Links that leave the site open in the system default browser. To open this entry itself in a browser — say it is already installed as a web app there — pick "Open in browser" above and choose it.',
   '用哪个浏览器': 'Which browser',
   '没有找到能打开网页的应用': 'No app found that can open web pages',
   '站点清单建议：{mode}': 'The site’s manifest asks for: {mode}',

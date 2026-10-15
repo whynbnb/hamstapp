@@ -164,8 +164,14 @@ class WebApp {
       manifestUrl: map['manifestUrl'] as String? ?? '',
       iconUrl: map['iconUrl'] as String? ?? '',
       // Entries added before the window host existed have no mode stored; they
-      // open in their own window too, which is what a launcher should do.
-      openMode: map['openMode'] as String? ?? openStandalone,
+      // open in their own window too, which is what a launcher should do — but
+      // an entry that already named a browser is honoured as browser mode, since
+      // that choice was made to *use* it and its absence is why picking a
+      // browser appeared to do nothing.
+      openMode: map['openMode'] as String? ??
+          ((map['browserPackage'] as String? ?? '').isEmpty
+              ? openStandalone
+              : openBrowser),
       hideStatusBar: map['hideStatusBar'] as bool? ?? false,
       browserPackage: map['browserPackage'] as String? ?? '',
       browserName: map['browserName'] as String? ?? '',

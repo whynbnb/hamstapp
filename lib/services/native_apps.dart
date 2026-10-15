@@ -364,6 +364,28 @@ class NativeApps {
     }
   }
 
+  /// Who would open [url] on this device, or null when nothing would. Used to
+  /// tell whether a site has a real web app installed (which opens in the
+  /// browser's own standalone window) or would just become a browser tab.
+  static Future<WebAppHandler?> webAppHandler(String url) async {
+    try {
+      final raw = await _channel.invokeMethod<Map>('webAppHandler', {
+        'url': url,
+      });
+      if (raw == null) return null;
+      final map = raw.cast<String, dynamic>();
+      final packageName = '${map['packageName']}';
+      if (packageName.isEmpty) return null;
+      return WebAppHandler(
+        packageName: packageName,
+        label: '${map['label']}',
+        browser: map['browser'] == true,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Keeps the system status bar hidden (`hidden: true`) or visible.
   ///
   /// The native side re-applies this whenever the window regains focus, so the
@@ -615,4 +637,21 @@ class BrowserApp {
 
   final String packageName;
   final String label;
+}
+
+/// Who would open a web address on this device.
+///
+/// [browser] true means a general-purpose browser (so the site opens as a tab);
+/// false means an app installed for that site — a real web app — which shows it
+/// in the browser's own standalone window.
+class WebAppHandler {
+  const WebAppHandler({
+    required this.packageName,
+    required this.label,
+    required this.browser,
+  });
+
+  final String packageName;
+  final String label;
+  final bool browser;
 }

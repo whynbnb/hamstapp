@@ -58,11 +58,19 @@
             </intent-filter>
         </service>
         <!-- Hosts one installed web app (PWA) in its own window, driven by the
-             site's manifest display mode. Started from the app only. -->
+             site's manifest display mode. Started from the app only.
+
+             Its own task (empty affinity + document launch) so a web app is a
+             window of its own: it shows up separately in Recents and can be used
+             beside the app instead of covering it. `intoExisting` makes
+             re-opening the same site bring that window forward, the way an
+             installed web app behaves, while each site gets its own. -->
         <activity
             android:name=".WebAppActivity"
             android:exported="false"
             android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:documentLaunchMode="intoExisting"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"

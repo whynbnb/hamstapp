@@ -178,6 +178,15 @@ class PackageScannerPlugin(
                     mainHandler.post { result.success(list) }
                 }
             }
+            "webAppHandler" -> {
+                val url = call.argument<String>("url")
+                executor.execute {
+                    val info = runCatching {
+                        if (url.isNullOrEmpty()) null else webAppHandler(url)
+                    }.getOrNull()
+                    mainHandler.post { result.success(info) }
+                }
+            }
             "openWebApp" -> {
                 val url = call.argument<String>("url")
                 if (url.isNullOrEmpty()) {
@@ -799,7 +808,12 @@ class PackageScannerPlugin(
         val hideStatusBar = call.argument<Boolean>("hideStatusBar") ?: false
         val icon = call.argument<ByteArray>("icon")
         val intent = Intent(context, WebAppActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            // A window of its own: its own task, so it appears separately in
+            // Recents and can be used beside the app. The address doubles as the
+            // document identity, which is what makes re-opening the same site
+            // bring the same window forward instead of stacking a second one.
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NEW_DOCUMENT)
+            data = Uri.parse(url)
             putExtra(WebAppActivity.EXTRA_URL, url)
             putExtra(WebAppActivity.EXTRA_NAME, name)
             putExtra(WebAppActivity.EXTRA_DISPLAY, display)
@@ -829,11 +843,46 @@ class PackageScannerPlugin(
     private fun intArgument(call: MethodCall, key: String, def: Int = 0): Int =
         (call.argument<Any>(key) as? Number)?.toInt() ?: def
 
-    /** Open an http(s) link (e.g. the project's GitHub page) in a browser. */
-      private fun openUrl(url: String, packageName: String? = null): Boolean {
+    /**
+     * Opens a link: in the chosen browser, or in whatever claims the address.
+     *
+     * An https link for a site that is *installed* as a web app is routed by
+     * Android itself to that app (App Links), and that app opens the site in the
+     * browser's own standalone window — which is what "open in browser" usually
+     * means. Pinning the intent to a browser would defeat that routing, so a
+     * handler that is not a browser wins over the choice.
+     *
+     * Chrome's shortcuts (what "add to home screen" leaves behind) cannot be
+     * launched this way: Chromium only opens its standalone web app window for a
+     * verified WebAPK, a MAC-signed shortcut, or an intent from Chrome itself, so
+     * those end up in a browser tab, as Chromium's own code says.
+     */
+    private fun openUrl(url: String, packageName: String? = null): Boolean {
+        val handler = handlerPackage(url)
+        val installedWebApp = handler != null &&
+            handler != packageName &&
+            !isBrowserPackage(handler)
+        if (installedWebApp) {
+            NotificationStore.addEvent(
+                "网页应用 · 交给已安装的网页应用 · $url · $handler"
+            )
+            if (startView(url, null)) return true
+        }
+        val ok = startView(url, packageName)
+        if (!ok && !packageName.isNullOrEmpty()) {
+            NotificationStore.addEvent(
+                "网页应用 · 指定浏览器打不开，改用系统默认 · $packageName"
+            )
+            return startView(url, null)
+        }
+        return ok
+    }
+
+    private fun startView(url: String, packageName: String?): Boolean {
         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-            // A chosen browser: only it may handle the link. When it cannot, the
-            // caller falls back to the unqualified intent (the system's choice).
+            // No package when nobody specific was asked for: the system then
+            // hands the link to an installed web app for that site if there is
+            // one, which is the only way into a browser's standalone window.
             if (!packageName.isNullOrEmpty()) setPackage(packageName)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -841,6 +890,52 @@ class PackageScannerPlugin(
             context.startActivity(intent)
             true
         }.getOrDefault(false)
+    }
+
+    /** Who would open [url] by default, or null when nobody claims it. */
+    private fun handlerPackage(url: String): String? = runCatching {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        val resolved = if (Build.VERSION.SDK_INT >= 33) {
+            context.packageManager.resolveActivity(
+                intent,
+                PackageManager.ResolveInfoFlags.of(0L),
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.resolveActivity(intent, 0)
+        }
+        resolved?.activityInfo?.packageName
+    }.getOrNull()
+
+    /** A general-purpose browser, as opposed to a web app for one site. */
+    private fun isBrowserPackage(packageName: String): Boolean = runCatching {
+        browserApps().any { (it["packageName"] as? String) == packageName }
+    }.getOrDefault(false)
+
+    /**
+     * Who would open [url]: an app installed for that site (a WebAPK or TWA,
+     * which shows it in the browser's own standalone window), a general browser
+     * (a tab), or nobody. Lets the app say what a tap will do — and makes
+     * visible whether a site has been installed as a real web app rather than
+     * left as a home-screen shortcut, which nothing outside the launcher can use.
+     */
+    private fun webAppHandler(url: String): Map<String, Any?>? {
+        val pm = context.packageManager
+        val handler = handlerPackage(url) ?: return null
+        val label = runCatching {
+            val info = if (Build.VERSION.SDK_INT >= 33) {
+                pm.getApplicationInfo(handler, PackageManager.ApplicationInfoFlags.of(0L))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getApplicationInfo(handler, 0)
+            }
+            pm.getApplicationLabel(info).toString()
+        }.getOrDefault(handler)
+        return mapOf(
+            "packageName" to handler,
+            "label" to label,
+            "browser" to isBrowserPackage(handler),
+        )
     }
 
     /**

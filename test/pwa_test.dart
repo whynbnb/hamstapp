@@ -397,6 +397,29 @@ void main() {
       );
     });
 
+    test('an entry that named a browser opens in it', () {
+      // Stored before the open mode existed: no `openMode` key, but a browser
+      // was chosen — that choice has to be honoured, or it looks ignored.
+      final withBrowser = WebApp.fromMap(<String, dynamic>{
+        'id': 'web:1',
+        'name': 'Photos',
+        'url': 'https://photos.example/',
+        'browserPackage': 'com.android.chrome',
+        'browserName': 'Chrome',
+      });
+      expect(withBrowser.openMode, WebApp.openBrowser);
+      expect(withBrowser.opensStandalone, isFalse);
+
+      // A stored mode always wins.
+      final explicit = WebApp.fromMap(<String, dynamic>{
+        'id': 'web:2',
+        'url': 'https://photos.example/',
+        'openMode': WebApp.openStandalone,
+        'browserPackage': 'com.android.chrome',
+      });
+      expect(explicit.openMode, WebApp.openStandalone);
+    });
+
     test('entries saved before the window host existed default to it', () {      // No openMode key: whatever an older build stored.
       final back = WebApp.fromMap(<String, dynamic>{
         'id': 'web:1',
