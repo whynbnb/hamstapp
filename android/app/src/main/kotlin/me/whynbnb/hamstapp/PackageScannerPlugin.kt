@@ -1,5 +1,8 @@
 package me.whynbnb.hamstapp
 
+import android.app.AppOpsManager
+import android.app.usage.StorageStats
+import android.app.usage.StorageStatsManager
 import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
@@ -7,6 +10,7 @@ import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.content.pm.PermissionInfo
 import android.content.pm.ResolveInfo
 import android.content.pm.Signature
 import android.content.pm.SigningInfo
@@ -15,13 +19,18 @@ import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.Uri
+import android.os.BatteryManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
+import android.os.Process
+import android.os.StatFs
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.os.storage.StorageManager
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.util.Base64
@@ -223,6 +232,79 @@ class PackageScannerPlugin(
                     )
                     mainHandler.post { result.success(info) }
                 }
+            }
+            // ---------------- storage, privacy, signature, device status -----
+            "usageAccess" -> executor.execute {
+                val granted = hasUsageAccess()
+                mainHandler.post { result.success(mapOf("granted" to granted)) }
+            }
+            "openUsageAccessSettings" -> mainHandler.post {
+                result.success(openUsageAccessSettings())
+            }
+            "appStorage" -> {
+                val pkg = call.argument<String>("packageName")
+                executor.execute {
+                    val info = runCatching {
+                        if (pkg.isNullOrEmpty()) {
+                            mapOf("ok" to false, "reason" to "args")
+                        } else {
+                            appStorage(pkg)
+                        }
+                    }.getOrElse { mapOf("ok" to false, "reason" to describe(it)) }
+                    mainHandler.post { result.success(info) }
+                }
+            }
+            "storageRanking" -> executor.execute {
+                val ranking = runCatching { storageRanking() }.getOrElse {
+                    mapOf(
+                        "entries" to emptyList<Map<String, Any?>>(),
+                        "permission" to hasUsageAccess(),
+                        "error" to describe(it)
+                    )
+                }
+                mainHandler.post { result.success(ranking) }
+            }
+            "appPermissions" -> {
+                val pkg = call.argument<String>("packageName")
+                executor.execute {
+                    val list = runCatching {
+                        if (pkg.isNullOrEmpty()) {
+                            emptyList<Map<String, Any?>>()
+                        } else {
+                            appPermissions(pkg)
+                        }
+                    }.getOrDefault(emptyList())
+                    mainHandler.post { result.success(list) }
+                }
+            }
+            "appSignature" -> {
+                val pkg = call.argument<String>("packageName")
+                executor.execute {
+                    val info = runCatching {
+                        if (pkg.isNullOrEmpty()) null else appSignature(pkg)
+                    }.getOrNull()
+                    mainHandler.post { result.success(info) }
+                }
+            }
+            "permissionAudit" -> executor.execute {
+                val audit = runCatching { permissionAudit() }.getOrElse {
+                    mapOf(
+                        "capabilities" to emptyList<Map<String, Any?>>(),
+                        "error" to describe(it)
+                    )
+                }
+                mainHandler.post { result.success(audit) }
+            }
+            "deviceStatus" -> executor.execute {
+                val status = runCatching { deviceStatus() }.getOrElse {
+                    mapOf(
+                        "level" to -1,
+                        "charging" to false,
+                        "freeBytes" to 0L,
+                        "totalBytes" to 0L
+                    )
+                }
+                mainHandler.post { result.success(status) }
             }
             "remoteTest" -> {
                 val config = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
@@ -2221,8 +2303,7 @@ class PackageScannerPlugin(
      * system share sheet. The installed APK lives under /data/app, which is
      * outside the FileProvider roots, so it has to be copied first.
      */
-    private fun shareApk(sourcePath: String, displayName: String): Boolean {
-        val src = File(sourcePath)
+    private fun shareApk(sourcePath: String, displayName: String): Boolean {        val src = File(sourcePath)
         if (!src.exists() || !src.isFile) return false
         return try {
             val dir = File(context.cacheDir, "share")
@@ -2256,5 +2337,505 @@ class PackageScannerPlugin(
         } catch (t: Throwable) {
             false
         }
+    }
+
+    // --------------------------------- storage / privacy / signature / status
+
+    /**
+     * Whether the user granted 囤囤 "usage access". The storage sizes of other
+     * apps (and our own) are only readable with it, so every storage feature
+     * asks first and guides the user there instead of showing wrong numbers.
+     */
+    private fun hasUsageAccess(): Boolean =
+        opAllowed(AppOpsManager.OPSTR_GET_USAGE_STATS, context.packageName)
+
+    private fun openUsageAccessSettings(): Boolean {
+        val base = Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        // Android 10+ can open our own row directly; ROMs that do not handle
+        // the package-qualified form fall back to the plain list.
+        if (Build.VERSION.SDK_INT >= 29) {
+            val targeted = Intent(base).setData(
+                Uri.fromParts("package", context.packageName, null)
+            )
+            if (startExternal(targeted)) return true
+        }
+        return startExternal(base)
+    }
+
+    private fun opAllowed(op: String, packageName: String): Boolean = runCatching {
+        val ops = context.getSystemService(Context.APP_OPS_SERVICE) as? AppOpsManager
+            ?: return false
+        val uid = context.packageManager
+            .getApplicationInfo(packageName, 0).uid
+        val mode = if (Build.VERSION.SDK_INT >= 29) {
+            ops.unsafeCheckOpNoThrow(op, uid, packageName)
+        } else {
+            @Suppress("DEPRECATION")
+            ops.checkOpNoThrow(op, uid, packageName)
+        }
+        mode == AppOpsManager.MODE_ALLOWED
+    }.getOrDefault(false)
+
+    private fun storageStats(): StorageStatsManager? =
+        if (Build.VERSION.SDK_INT >= 26) {
+            context.getSystemService(Context.STORAGE_STATS_SERVICE)
+                as? StorageStatsManager
+        } else {
+            null
+        }
+
+    /** Per-app storage of one package, or a reason why it cannot be read. */
+    private fun statsFor(packageName: String): StorageStats? = runCatching {
+        storageStats()?.queryStatsForPackage(
+            StorageManager.UUID_DEFAULT,
+            packageName,
+            Process.myUserHandle()
+        )
+    }.getOrNull()
+
+    private fun appStorage(packageName: String): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < 26) {
+            return mapOf("ok" to false, "reason" to "unsupported")
+        }
+        if (!hasUsageAccess()) {
+            return mapOf("ok" to false, "reason" to "permission")
+        }
+        val stats = statsFor(packageName)
+            ?: return mapOf("ok" to false, "reason" to "unavailable")
+        val apk = stats.appBytes
+        val data = stats.dataBytes
+        val cache = stats.cacheBytes
+        return mapOf(
+            "ok" to true,
+            "apkBytes" to apk,
+            "dataBytes" to data,
+            "cacheBytes" to cache,
+            "totalBytes" to (apk + data + cache)
+        )
+    }
+
+    /**
+     * Every visible app's storage, biggest first. Only meaningful with usage
+     * access; without it the list comes back empty and `permission` is false so
+     * the screen can ask for it instead of showing a blank list.
+     */
+    private fun storageRanking(): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < 26) {
+            return mapOf(
+                "entries" to emptyList<Map<String, Any?>>(),
+                "permission" to true,
+                "unsupported" to true
+            )
+        }
+        if (!hasUsageAccess()) {
+            return mapOf(
+                "entries" to emptyList<Map<String, Any?>>(),
+                "permission" to false
+            )
+        }
+        val pm = context.packageManager
+        val entries = ArrayList<Map<String, Any?>>()
+        for (info in visibleAppInfos()) {
+            val stats = statsFor(info.packageName) ?: continue
+            val apk = stats.appBytes
+            val data = stats.dataBytes
+            val cache = stats.cacheBytes
+            val total = apk + data + cache
+            if (total <= 0) continue
+            entries.add(
+                mapOf(
+                    "packageName" to info.packageName,
+                    "appName" to runCatching { info.loadLabel(pm).toString() }
+                        .getOrDefault(info.packageName),
+                    "isSystem" to ((info.flags and ApplicationInfo.FLAG_SYSTEM) != 0),
+                    "apkBytes" to apk,
+                    "dataBytes" to data,
+                    "cacheBytes" to cache,
+                    "totalBytes" to total
+                )
+            )
+        }
+        entries.sortByDescending { (it["totalBytes"] as? Long) ?: 0L }
+        return mapOf("entries" to entries, "permission" to true)
+    }
+
+    /** Requested permissions of one package, dangerous and granted first. */
+    private fun appPermissions(packageName: String): List<Map<String, Any?>> {
+        val pm = context.packageManager
+        val info = packageInfo(packageName, PackageManager.GET_PERMISSIONS)
+            ?: return emptyList()
+        val names = info.requestedPermissions ?: return emptyList()
+        val flags = info.requestedPermissionsFlags
+        val out = ArrayList<Map<String, Any?>>()
+        for (i in names.indices) {
+            val name = names[i]
+            val granted = flags != null && i < flags.size &&
+                (flags[i] and PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
+            var dangerous = false
+            var group = ""
+            runCatching {
+                val pi = pm.getPermissionInfo(name, 0)
+                dangerous =
+                    (pi.protectionLevel and PermissionInfo.PROTECTION_DANGEROUS) != 0
+                @Suppress("DEPRECATION")
+                group = pi.group ?: ""
+            }
+            out.add(
+                mapOf(
+                    "name" to name,
+                    "granted" to granted,
+                    "dangerous" to dangerous,
+                    "group" to group
+                )
+            )
+        }
+        out.sortWith(
+            compareByDescending<Map<String, Any?>> {
+                (it["dangerous"] as? Boolean) ?: false
+            }.thenByDescending { (it["granted"] as? Boolean) ?: false }
+                .thenBy { (it["name"] as? String) ?: "" }
+        )
+        return out
+    }
+
+    /**
+     * The certificate the installed app is actually signed with. Certificate
+     * rotation is reported separately, so a rotated key is not mistaken for a
+     * different (re-packaged) app.
+     */
+    private fun appSignature(packageName: String): Map<String, Any?>? {
+        val pm = context.packageManager
+        val base = packageInfo(packageName, 0) ?: return null
+        val app = base.applicationInfo
+        val certs = ArrayList<Map<String, Any?>>()
+        var multipleSigners = false
+        var rotated = false
+        if (Build.VERSION.SDK_INT >= 28) {
+            val signing = packageInfo(
+                packageName,
+                PackageManager.GET_SIGNING_CERTIFICATES
+            )?.signingInfo
+            if (signing != null) {
+                multipleSigners = signing.hasMultipleSigners()
+                rotated = signing.hasPastSigningCertificates()
+                signing.apkContentsSigners?.forEach { certs.add(certInfo(it)) }
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            val info = packageInfo(packageName, PackageManager.GET_SIGNATURES)
+            @Suppress("DEPRECATION")
+            info?.signatures?.forEach { certs.add(certInfo(it)) }
+        }
+        if (certs.isEmpty()) return null
+        val current = certs.first()
+        return mapOf(
+            "packageName" to packageName,
+            "appName" to runCatching { app?.loadLabel(pm)?.toString() ?: "" }
+                .getOrDefault(""),
+            "system" to (((app?.flags ?: 0) and ApplicationInfo.FLAG_SYSTEM) != 0),
+            "count" to certs.size,
+            "multipleSigners" to multipleSigners,
+            "rotated" to rotated,
+            "sha256" to (current["sha256"] ?: ""),
+            "sha1" to (current["sha1"] ?: ""),
+            "subject" to (current["subject"] ?: ""),
+            "issuer" to (current["issuer"] ?: ""),
+            "selfSigned" to (current["selfSigned"] ?: false),
+            "notBefore" to (current["notBefore"] ?: 0L),
+            "notAfter" to (current["notAfter"] ?: 0L),
+            "certs" to certs
+        )
+    }
+
+    private class AuditCandidate(
+        val packageName: String,
+        val appName: String,
+        val isSystem: Boolean,
+        val granted: Set<String>
+    )
+
+    private val auditPermissionGroups: List<Pair<String, List<String>>> = listOf(
+        "microphone" to listOf("android.permission.RECORD_AUDIO"),
+        "camera" to listOf("android.permission.CAMERA"),
+        "location" to listOf(
+            "android.permission.ACCESS_FINE_LOCATION",
+            "android.permission.ACCESS_COARSE_LOCATION"
+        ),
+        "backgroundLocation" to listOf(
+            "android.permission.ACCESS_BACKGROUND_LOCATION"
+        ),
+        "contacts" to listOf(
+            "android.permission.READ_CONTACTS",
+            "android.permission.WRITE_CONTACTS",
+            "android.permission.GET_ACCOUNTS"
+        ),
+        "phone" to listOf(
+            "android.permission.CALL_PHONE",
+            "android.permission.READ_CALL_LOG",
+            "android.permission.WRITE_CALL_LOG",
+            "android.permission.READ_PHONE_STATE",
+            "android.permission.ANSWER_PHONE_CALLS"
+        ),
+        "sms" to listOf(
+            "android.permission.READ_SMS",
+            "android.permission.RECEIVE_SMS",
+            "android.permission.SEND_SMS",
+            "android.permission.RECEIVE_MMS"
+        ),
+        "media" to listOf(
+            "android.permission.READ_EXTERNAL_STORAGE",
+            "android.permission.WRITE_EXTERNAL_STORAGE",
+            "android.permission.READ_MEDIA_IMAGES",
+            "android.permission.READ_MEDIA_VIDEO",
+            "android.permission.READ_MEDIA_AUDIO",
+            "android.permission.MANAGE_EXTERNAL_STORAGE"
+        ),
+        "calendar" to listOf(
+            "android.permission.READ_CALENDAR",
+            "android.permission.WRITE_CALENDAR"
+        ),
+        "sensors" to listOf("android.permission.BODY_SENSORS"),
+        "notifications" to listOf("android.permission.POST_NOTIFICATIONS")
+    )
+
+    private val auditOps: List<Pair<String, String>> = listOf(
+        "overlay" to AppOpsManager.OPSTR_SYSTEM_ALERT_WINDOW,
+        // "android:request_install_packages" has no public constant, but app-ops
+        // are addressed by name, so the literal selects the same op.
+        "installPackages" to "android:request_install_packages",
+        "writeSettings" to AppOpsManager.OPSTR_WRITE_SETTINGS,
+        "usageAccess" to AppOpsManager.OPSTR_GET_USAGE_STATS
+    )
+
+    /**
+     * Who can do the sensitive things: apps holding each dangerous permission,
+     * apps with a special app-op granted, the enabled notification listeners
+     * and accessibility services, and apps exempt from battery optimisation.
+     *
+     * One flat list of capabilities, in a fixed order; the screen supplies the
+     * localized names so the ids stay stable.
+     */
+    private fun permissionAudit(): Map<String, Any?> {
+        val candidates = auditCandidates()
+        val capabilities = ArrayList<Map<String, Any?>>()
+
+        for ((id, permissions) in auditPermissionGroups) {
+            val hits = candidates.filter { c ->
+                permissions.any { c.granted.contains(it) }
+            }
+            if (hits.isEmpty()) continue
+            capabilities.add(
+                mapOf("id" to id, "apps" to hits.map { auditEntry(it, "") })
+            )
+        }
+
+        for ((id, op) in auditOps) {
+            val hits = candidates.filter { opAllowed(op, it.packageName) }
+            if (hits.isEmpty()) continue
+            capabilities.add(
+                mapOf("id" to id, "apps" to hits.map { auditEntry(it, "") })
+            )
+        }
+
+        secureComponentHits(
+            // Settings.Secure.ENABLED_NOTIFICATION_LISTENERS is hidden API; the
+            // setting itself is a plain string.
+            "enabled_notification_listeners",
+            candidates
+        )?.let {
+            if (it.isNotEmpty()) {
+                capabilities.add(mapOf("id" to "notificationAccess", "apps" to it))
+            }
+        }
+        secureComponentHits(
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+            candidates
+        )?.let {
+            if (it.isNotEmpty()) {
+                capabilities.add(mapOf("id" to "accessibility", "apps" to it))
+            }
+        }
+
+        val power = context.getSystemService(Context.POWER_SERVICE) as? PowerManager
+        if (power != null) {
+            val hits = candidates.filter {
+                runCatching { power.isIgnoringBatteryOptimizations(it.packageName) }
+                    .getOrDefault(false)
+            }
+            if (hits.isNotEmpty()) {
+                capabilities.add(
+                    mapOf(
+                        "id" to "batteryUnrestricted",
+                        "apps" to hits.map { auditEntry(it, "") }
+                    )
+                )
+            }
+        }
+
+        return mapOf("capabilities" to capabilities)
+    }
+
+    private fun auditEntry(c: AuditCandidate, note: String): Map<String, Any?> =
+        mapOf(
+            "packageName" to c.packageName,
+            "appName" to c.appName,
+            "isSystem" to c.isSystem,
+            "note" to note
+        )
+
+    /**
+     * Apps worth auditing: every non-system package, plus system packages that
+     * have a launcher entry. Names come along so the screen needs no lookups.
+     */
+    private fun auditCandidates(): List<AuditCandidate> {
+        val pm = context.packageManager
+        val flags = PackageManager.GET_PERMISSIONS
+        val infos = if (Build.VERSION.SDK_INT >= 33) {
+            pm.getInstalledPackages(PackageManager.PackageInfoFlags.of(flags.toLong()))
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getInstalledPackages(flags)
+        }
+        val launchers = launcherPackages()
+        val out = ArrayList<AuditCandidate>()
+        for (info in infos) {
+            val app = info.applicationInfo ?: continue
+            val isSystem = (app.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            if (isSystem && !launchers.contains(info.packageName)) continue
+            val granted = HashSet<String>()
+            val names = info.requestedPermissions
+            val permFlags = info.requestedPermissionsFlags
+            if (names != null) {
+                for (i in names.indices) {
+                    if (permFlags != null && i < permFlags.size &&
+                        (permFlags[i] and PackageInfo.REQUESTED_PERMISSION_GRANTED) != 0
+                    ) {
+                        granted.add(names[i])
+                    }
+                }
+            }
+            out.add(
+                AuditCandidate(
+                    info.packageName,
+                    runCatching { app.loadLabel(pm).toString() }
+                        .getOrDefault(info.packageName),
+                    isSystem,
+                    granted
+                )
+            )
+        }
+        out.sortBy { it.appName.lowercase(Locale.getDefault()) }
+        return out
+    }
+
+    /**
+     * Enabled components from a `Settings.Secure` colon-separated list, as
+     * audit entries. Returns null when the setting is unset.
+     */
+    private fun secureComponentHits(
+        setting: String,
+        candidates: List<AuditCandidate>
+    ): List<Map<String, Any?>>? {
+        val raw = runCatching {
+            Settings.Secure.getString(context.contentResolver, setting)
+        }.getOrNull()
+        if (raw.isNullOrBlank()) return null
+        val byPackage = LinkedHashMap<String, MutableList<String>>()
+        for (part in raw.split(':')) {
+            val component = ComponentName.unflattenFromString(part.trim()) ?: continue
+            byPackage.getOrPut(component.packageName) { ArrayList() }
+                .add(component.className)
+        }
+        val out = ArrayList<Map<String, Any?>>()
+        for ((pkgName, classes) in byPackage) {
+            val known = candidates.firstOrNull { it.packageName == pkgName }
+            val label = known?.appName ?: runCatching {
+                context.packageManager
+                    .getApplicationLabel(
+                        context.packageManager.getApplicationInfo(pkgName, 0)
+                    ).toString()
+            }.getOrDefault(pkgName)
+            out.add(
+                mapOf(
+                    "packageName" to pkgName,
+                    "appName" to label,
+                    "isSystem" to (known?.isSystem ?: true),
+                    "note" to classes.joinToString(", ") { it.substringAfterLast('.') }
+                )
+            )
+        }
+        out.sortBy { (it["appName"] as? String)?.lowercase(Locale.getDefault()) }
+        return out
+    }
+
+    /** Installed apps the user would recognise (see [auditCandidates]). */
+    private fun visibleAppInfos(): List<ApplicationInfo> {
+        val pm = context.packageManager
+        val all = if (Build.VERSION.SDK_INT >= 33) {
+            pm.getInstalledApplications(
+                PackageManager.ApplicationInfoFlags.of(0L)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            pm.getInstalledApplications(0)
+        }
+        val launchers = launcherPackages()
+        return all.filter { info ->
+            val isSystem = (info.flags and ApplicationInfo.FLAG_SYSTEM) != 0
+            !isSystem || launchers.contains(info.packageName)
+        }
+    }
+
+    /** Packages that have a launcher entry, in one query. */
+    private fun launcherPackages(): Set<String> {
+        val pm = context.packageManager
+        val intent = Intent(Intent.ACTION_MAIN)
+            .addCategory(Intent.CATEGORY_LAUNCHER)
+        val resolved = if (Build.VERSION.SDK_INT >= 33) {
+            pm.queryIntentActivities(
+                intent,
+                PackageManager.ResolveInfoFlags.of(0L)
+            )
+        } else {
+            @Suppress("DEPRECATION")
+            pm.queryIntentActivities(intent, 0)
+        }
+        val out = HashSet<String>()
+        for (r in resolved) r.activityInfo?.packageName?.let { out.add(it) }
+        return out
+    }
+
+    private fun packageInfo(packageName: String, extraFlags: Int): PackageInfo? =
+        runCatching {
+            val pm = context.packageManager
+            if (Build.VERSION.SDK_INT >= 33) {
+                pm.getPackageInfo(
+                    packageName,
+                    PackageManager.PackageInfoFlags.of(extraFlags.toLong())
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(packageName, extraFlags)
+            }
+        }.getOrNull()
+
+    /** Battery level, charging state and free space of the data volume. */
+    private fun deviceStatus(): Map<String, Any?> {
+        val battery = context.getSystemService(Context.BATTERY_SERVICE)
+            as? BatteryManager
+        val level = runCatching {
+            battery?.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY) ?: -1
+        }.getOrDefault(-1)
+        val charging = runCatching { battery?.isCharging ?: false }
+            .getOrDefault(false)
+        val stat = runCatching { StatFs(context.filesDir.absolutePath) }
+            .getOrNull()
+        return mapOf(
+            "level" to level,
+            "charging" to charging,
+            "freeBytes" to (stat?.availableBytes ?: 0L),
+            "totalBytes" to (stat?.totalBytes ?: 0L)
+        )
     }
 }

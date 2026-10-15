@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Long-press shortcuts on 囤囤's own launcher icon (Android 7.1+).
+  Each intent carries a hamstapp.action extra that MainActivity forwards to
+  Dart, which then switches to the matching screen.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="scan"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_scan_short"
+        android:shortcutLongLabel="@string/shortcut_scan_long">
+        <intent
+            android:action="me.whynbnb.hamstapp.action.SHORTCUT"
+            android:targetPackage="me.whynbnb.hamstapp"
+            android:targetClass="me.whynbnb.hamstapp.MainActivity">
+            <extra
+                android:name="hamstapp.action"
+                android:value="scan" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="recent"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_recent_short"
+        android:shortcutLongLabel="@string/shortcut_recent_long">
+        <intent
+            android:action="me.whynbnb.hamstapp.action.SHORTCUT"
+            android:targetPackage="me.whynbnb.hamstapp"
+            android:targetClass="me.whynbnb.hamstapp.MainActivity">
+            <extra
+                android:name="hamstapp.action"
+                android:value="recent" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="tiles"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/shortcut_tiles_short"
+        android:shortcutLongLabel="@string/shortcut_tiles_long">
+        <intent
+            android:action="me.whynbnb.hamstapp.action.SHORTCUT"
+            android:targetPackage="me.whynbnb.hamstapp"
+            android:targetClass="me.whynbnb.hamstapp.MainActivity">
+            <extra
+                android:name="hamstapp.action"
+                android:value="tiles" />
+        </intent>
+    </shortcut>
+</shortcuts>

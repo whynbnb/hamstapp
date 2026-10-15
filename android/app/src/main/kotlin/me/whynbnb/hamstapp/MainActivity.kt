@@ -1,6 +1,8 @@
 package me.whynbnb.hamstapp
 
+import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.DragEvent
 import androidx.core.view.WindowInsetsCompat
@@ -18,6 +20,22 @@ class MainActivity : FlutterActivity() {
 
     /** When true the status bar is kept hidden; re-applied on every refocus. */
     private var statusBarHidden = false
+
+    /**
+     * Shortcut tapped before Dart was listening (cold start). Dart pulls it with
+     * `consumeShortcut` once it is up; while running the same action is pushed.
+     */
+    private var pendingShortcut: String? = null
+
+    /** Extra the static shortcuts carry; see res/xml/shortcuts.xml. */
+    private val shortcutExtra = "hamstapp.action"
+
+    /**
+     * Set once the engine is configured, so a shortcut tapped while the app is
+     * alive reaches Dart immediately; null before that (cold start), when the
+     * action waits in [pendingShortcut] for Dart to pull it.
+     */
+    private var shortcutSink: ((String) -> Unit)? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -38,6 +56,8 @@ class MainActivity : FlutterActivity() {
                 )
             }
         }
+        // A shortcut tapped while the app is already running: hand it to Dart.
+        shortcutSink = { id -> runCatching { ch.invokeMethod("shortcut", mapOf("id" to id)) } }
         ch.setMethodCallHandler { call, result ->
             when (call.method) {
                 "setStatusBarHidden" -> {
@@ -45,9 +65,33 @@ class MainActivity : FlutterActivity() {
                     applyStatusBarVisibility()
                     result.success(null)
                 }
+                // The action of the shortcut that started this process, if any.
+                "consumeShortcut" -> {
+                    val id = pendingShortcut
+                    pendingShortcut = null
+                    result.success(id)
+                }
                 else -> p.onMethodCall(call, result)
             }
         }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        pendingShortcut = shortcutFrom(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        val id = shortcutFrom(intent) ?: return
+        val sink = shortcutSink
+        if (sink != null) sink(id) else pendingShortcut = id
+    }
+
+    /** The shortcut id carried by [intent], if it is one of ours. */
+    private fun shortcutFrom(intent: Intent?): String? {
+        val id = intent?.getStringExtra(shortcutExtra) ?: return null
+        return id.takeIf { it.isNotEmpty() }
     }
 
     /**
@@ -150,6 +194,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         plugin = null
         channel = null
+        shortcutSink = null
         NotificationStore.sink = null
         NotificationStore.logSink = null
         super.onDestroy()

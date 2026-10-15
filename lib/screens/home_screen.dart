@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
+import '../services/native_apps.dart';
 import '../state/app_state.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/uninstall_reason.dart';
@@ -36,18 +37,50 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   /// forever.
   bool _autoScanRequested = false;
 
+  /// Launcher long-press shortcuts tapped while the app is running.
+  StreamSubscription<String>? _shortcutSub;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _index = context.read<AppState>().lastHomeIndex.clamp(0, 3);
     if (_index != _settingsTab) _lastContentIndex = _index;
+    // Launcher long-press shortcuts: one that started this process, plus any
+    // tapped while it is alive.
+    _shortcutSub = NativeApps.shortcuts.listen(_handleShortcut);
+    unawaited(_consumeStartupShortcut());
   }
 
   @override
   void dispose() {
+    _shortcutSub?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  Future<void> _consumeStartupShortcut() async {
+    final id = await NativeApps.consumeShortcut();
+    if (id == null || !mounted) return;
+    _handleShortcut(id);
+  }
+
+  /// Brings the matching screen forward for a launcher shortcut: `scan`,
+  /// `recent` or `tiles`.
+  void _handleShortcut(String id) {
+    if (!mounted) return;
+    final state = context.read<AppState>();
+    switch (id) {
+      case 'scan':
+        _select(state, 1);
+        unawaited(state.scan());
+      case 'recent':
+        state.requestLaunchTab(0);
+        _select(state, 0);
+      case 'tiles':
+        state.requestLaunchTab(1);
+        _select(state, 0);
+    }
   }
 
   @override

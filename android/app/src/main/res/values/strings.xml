@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Labels for the long-press shortcuts on the launcher icon. Resources, not
+     app strings: the launcher shows them in the device's language. -->
+<resources>
+    <string name="shortcut_scan_short">Scan apps</string>
+    <string name="shortcut_scan_long">Scan the installed apps again</string>
+    <string name="shortcut_recent_short">Recent</string>
+    <string name="shortcut_recent_long">Open the recently used apps</string>
+    <string name="shortcut_tiles_short">Tiles</string>
+    <string name="shortcut_tiles_long">Open the tile board</string>
+</resources>

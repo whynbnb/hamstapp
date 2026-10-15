@@ -12,6 +12,7 @@ import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/format.dart';
+import '../widgets/app_facts.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/app_tile.dart';
 import '../widgets/chip_scroller.dart';
@@ -911,6 +912,19 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
           const SizedBox(height: 24),
           if (app != null && !app.isWebEntry) _InfoTable(app: app),
+          // Storage, permissions and signature: the three things a system app
+          // manager shows and this app was missing.
+          if (app != null && !app.isWebEntry) ...[
+            const SizedBox(height: 12),
+            AppStorageCard(packageName: widget.packageName),
+            const SizedBox(height: 10),
+            AppPermissionsCard(packageName: widget.packageName),
+            const SizedBox(height: 10),
+            AppSignatureCard(
+              packageName: widget.packageName,
+              appName: name,
+            ),
+          ],
           const SizedBox(height: 24),
           _SectionTitle(context.strings.t('使用记录')),
           ListTile(

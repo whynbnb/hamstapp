@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="shortcut_scan_short">扫描应用</string>
+    <string name="shortcut_scan_long">重新扫描已安装的应用</string>
+    <string name="shortcut_recent_short">最近使用</string>
+    <string name="shortcut_recent_long">打开最近使用的应用</string>
+    <string name="shortcut_tiles_short">磁贴</string>
+    <string name="shortcut_tiles_long">打开磁贴板</string>
+</resources>

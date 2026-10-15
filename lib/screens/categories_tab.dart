@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
 import '../models/category.dart';
+import '../models/tile.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/search.dart';
@@ -422,6 +423,108 @@ void showPinSheet(BuildContext context, AppState state) {
   );
 }
 
+/// The kinds of live info tile, in the order the picker offers them.
+const List<TileKind> kInfoTileKinds = <TileKind>[
+  TileKind.clock,
+  TileKind.date,
+  TileKind.battery,
+  TileKind.storage,
+  TileKind.unread,
+];
+
+IconData infoTileIcon(TileKind kind) => switch (kind) {
+  TileKind.clock => Icons.schedule,
+  TileKind.date => Icons.calendar_today_outlined,
+  TileKind.battery => Icons.battery_charging_full,
+  TileKind.storage => Icons.storage_outlined,
+  TileKind.unread => Icons.mark_email_unread_outlined,
+  TileKind.app => Icons.apps,
+};
+
+/// Localizable name of an info tile kind (Chinese source string).
+String infoTileTitle(TileKind kind) => switch (kind) {
+  TileKind.clock => '时钟',
+  TileKind.date => '日期',
+  TileKind.battery => '电量',
+  TileKind.storage => '存储空间',
+  TileKind.unread => '未读汇总',
+  TileKind.app => '应用',
+};
+
+String infoTileSubtitle(TileKind kind) => switch (kind) {
+  TileKind.clock => '当前时间，按分钟更新',
+  TileKind.date => '今天几号、星期几',
+  TileKind.battery => '电量与充电状态，每分钟刷新',
+  TileKind.storage => '本机存储占用，每分钟刷新',
+  TileKind.unread => '所有应用的未读通知总数',
+  TileKind.app => '',
+};
+
+/// Picker for the live info tiles (clock, date, battery, storage, unread).
+void showInfoTileSheet(BuildContext context, AppState state) {
+  showModalBottomSheet(
+    context: context,
+    builder: (ctx) => SafeArea(
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      ctx.strings.t('添加信息磁贴'),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      ctx.strings.t('磁贴板上会实时显示的小卡片，不依赖任何应用'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            for (final kind in kInfoTileKinds)
+              ListTile(
+                leading: Icon(infoTileIcon(kind)),
+                title: Text(ctx.strings.t(infoTileTitle(kind))),
+                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await state.addInfoTile(kind);
+                  if (!context.mounted) return;
+                  final name = context.strings.t(infoTileTitle(kind));
+                  ScaffoldMessenger.of(context)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          context.strings.t('已添加「{name}」磁贴', {'name': name}),
+                        ),
+                        duration: const Duration(milliseconds: 1200),
+                      ),
+                    );
+                },
+              ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
 class _PinSheet extends StatefulWidget {
   const _PinSheet({required this.state});
 
@@ -504,6 +607,14 @@ class _PinSheetState extends State<_PinSheet> {
                     },
                     icon: const Icon(Icons.add_link, size: 18),
                     label: Text(ctx.strings.t('添加网页应用')),
+                  ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: () => showInfoTileSheet(context, state),
+                      icon: const Icon(Icons.schedule, size: 18),
+                      label: Text(ctx.strings.t('添加信息磁贴')),
+                    ),
                   ),
                 ],
               ),

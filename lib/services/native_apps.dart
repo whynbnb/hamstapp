@@ -68,9 +68,246 @@ enum LaunchOutcome {
   };
 }
 
+/// Battery level, charging state and free space of the data volume.
+class DeviceStatus {
+  const DeviceStatus({
+    required this.level,
+    required this.charging,
+    required this.freeBytes,
+    required this.totalBytes,
+  });
+
+  /// 0-100, or -1 when the system did not report one.
+  final int level;
+  final bool charging;
+  final int freeBytes;
+  final int totalBytes;
+
+  static const DeviceStatus unknown = DeviceStatus(
+    level: -1,
+    charging: false,
+    freeBytes: 0,
+    totalBytes: 0,
+  );
+
+  bool get hasLevel => level >= 0;
+  bool get hasStorage => totalBytes > 0;
+
+  /// Used fraction of the data volume, 0..1.
+  double get usedFraction =>
+      totalBytes <= 0 ? 0 : ((totalBytes - freeBytes) / totalBytes).clamp(0.0, 1.0);
+
+  factory DeviceStatus.fromMap(Map<dynamic, dynamic> map) => DeviceStatus(
+    level: (map['level'] as num?)?.toInt() ?? -1,
+    charging: map['charging'] as bool? ?? false,
+    freeBytes: (map['freeBytes'] as num?)?.toInt() ?? 0,
+    totalBytes: (map['totalBytes'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// APK / data / cache bytes of one installed app.
+class AppStorageInfo {
+  const AppStorageInfo({
+    required this.ok,
+    this.reason = '',
+    this.apkBytes = 0,
+    this.dataBytes = 0,
+    this.cacheBytes = 0,
+    this.totalBytes = 0,
+  });
+
+  final bool ok;
+
+  /// Why it could not be read: `permission` (no usage access), `unsupported`
+  /// (below API 26), `unavailable` (the system had no stats), `args`.
+  final String reason;
+  final int apkBytes;
+  final int dataBytes;
+  final int cacheBytes;
+  final int totalBytes;
+
+  bool get needsPermission => !ok && reason == 'permission';
+
+  factory AppStorageInfo.fromMap(Map<dynamic, dynamic> map) => AppStorageInfo(
+    ok: map['ok'] as bool? ?? false,
+    reason: map['reason'] as String? ?? '',
+    apkBytes: (map['apkBytes'] as num?)?.toInt() ?? 0,
+    dataBytes: (map['dataBytes'] as num?)?.toInt() ?? 0,
+    cacheBytes: (map['cacheBytes'] as num?)?.toInt() ?? 0,
+    totalBytes: (map['totalBytes'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// One row of the storage ranking.
+class StorageRankEntry {
+  const StorageRankEntry({
+    required this.packageName,
+    required this.appName,
+    required this.isSystem,
+    required this.apkBytes,
+    required this.dataBytes,
+    required this.cacheBytes,
+    required this.totalBytes,
+  });
+
+  final String packageName;
+  final String appName;
+  final bool isSystem;
+  final int apkBytes;
+  final int dataBytes;
+  final int cacheBytes;
+  final int totalBytes;
+
+  factory StorageRankEntry.fromMap(Map<dynamic, dynamic> map) => StorageRankEntry(
+    packageName: map['packageName'] as String? ?? '',
+    appName: map['appName'] as String? ?? '',
+    isSystem: map['isSystem'] as bool? ?? false,
+    apkBytes: (map['apkBytes'] as num?)?.toInt() ?? 0,
+    dataBytes: (map['dataBytes'] as num?)?.toInt() ?? 0,
+    cacheBytes: (map['cacheBytes'] as num?)?.toInt() ?? 0,
+    totalBytes: (map['totalBytes'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// Result of asking for the storage ranking; [permitted] is false when the
+/// usage-access grant is missing, so the screen can ask instead of showing an
+/// empty list.
+class StorageRanking {
+  const StorageRanking({
+    required this.entries,
+    required this.permitted,
+    this.unsupported = false,
+  });
+
+  final List<StorageRankEntry> entries;
+  final bool permitted;
+  final bool unsupported;
+
+  int get totalBytes =>
+      entries.fold<int>(0, (sum, e) => sum + e.totalBytes);
+}
+
+/// One permission an app requests.
+class PermissionEntry {
+  const PermissionEntry({
+    required this.name,
+    required this.granted,
+    required this.dangerous,
+    required this.group,
+  });
+
+  /// Full name, e.g. `android.permission.CAMERA`.
+  final String name;
+  final bool granted;
+
+  /// A dangerous (runtime) permission, i.e. one the user had to allow.
+  final bool dangerous;
+
+  /// Platform group, e.g. `android.permission-group.CAMERA`; may be empty.
+  final String group;
+
+  /// Short label for display: `CAMERA` for `android.permission.CAMERA`.
+  String get shortName {
+    final dot = name.lastIndexOf('.');
+    return dot < 0 ? name : name.substring(dot + 1);
+  }
+
+  factory PermissionEntry.fromMap(Map<dynamic, dynamic> map) => PermissionEntry(
+    name: map['name'] as String? ?? '',
+    granted: map['granted'] as bool? ?? false,
+    dangerous: map['dangerous'] as bool? ?? false,
+    group: map['group'] as String? ?? '',
+  );
+}
+
+/// The certificate the installed app is signed with.
+class SignatureInfo {
+  const SignatureInfo({
+    required this.packageName,
+    required this.appName,
+    required this.sha256,
+    required this.sha1,
+    required this.subject,
+    required this.issuer,
+    required this.system,
+    required this.selfSigned,
+    required this.multipleSigners,
+    required this.rotated,
+    required this.count,
+    required this.notBefore,
+    required this.notAfter,
+  });
+
+  final String packageName;
+  final String appName;
+  final String sha256;
+  final String sha1;
+  final String subject;
+  final String issuer;
+  final bool system;
+  final bool selfSigned;
+  final bool multipleSigners;
+
+  /// Signed with a key that has since been rotated (past signing certs exist).
+  final bool rotated;
+  final int count;
+  final int notBefore;
+  final int notAfter;
+
+  factory SignatureInfo.fromMap(Map<dynamic, dynamic> map) => SignatureInfo(
+    packageName: map['packageName'] as String? ?? '',
+    appName: map['appName'] as String? ?? '',
+    sha256: map['sha256'] as String? ?? '',
+    sha1: map['sha1'] as String? ?? '',
+    subject: map['subject'] as String? ?? '',
+    issuer: map['issuer'] as String? ?? '',
+    system: map['system'] as bool? ?? false,
+    selfSigned: map['selfSigned'] as bool? ?? false,
+    multipleSigners: map['multipleSigners'] as bool? ?? false,
+    rotated: map['rotated'] as bool? ?? false,
+    count: (map['count'] as num?)?.toInt() ?? 0,
+    notBefore: (map['notBefore'] as num?)?.toInt() ?? 0,
+    notAfter: (map['notAfter'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// One app holding a sensitive capability.
+class AuditEntry {
+  const AuditEntry({
+    required this.packageName,
+    required this.appName,
+    required this.isSystem,
+    this.note = '',
+  });
+
+  final String packageName;
+  final String appName;
+  final bool isSystem;
+
+  /// Extra detail: the enabled component's class name for the accessibility and
+  /// notification-listener lists.
+  final String note;
+
+  factory AuditEntry.fromMap(Map<dynamic, dynamic> map) => AuditEntry(
+    packageName: map['packageName'] as String? ?? '',
+    appName: map['appName'] as String? ?? '',
+    isSystem: map['isSystem'] as bool? ?? false,
+    note: map['note'] as String? ?? '',
+  );
+}
+
+/// One section of the permission audit: a capability and who holds it.
+class AuditCapability {
+  const AuditCapability({required this.id, required this.entries});
+
+  /// Stable id (see the native side): `microphone`, `camera`, `overlay`,
+  /// `accessibility`, `batteryUnrestricted`, ...
+  final String id;
+  final List<AuditEntry> entries;
+}
+
 class NativeApps {
   static const MethodChannel _channel = MethodChannel('hamstapp/apps');
-
   NativeApps._();
 
   static final Map<String, void Function(int received, int total)>
@@ -83,6 +320,8 @@ class NativeApps {
       StreamController<bool>.broadcast();
   static final StreamController<Map<String, int>> _notifCounts =
       StreamController<Map<String, int>>.broadcast();
+  static final StreamController<String> _shortcuts =
+      StreamController<String>.broadcast();
 
   /// Paths of APK files dragged onto the window (copied into the app cache).
   static Stream<String> get droppedApks => _dropped.stream;
@@ -93,6 +332,21 @@ class NativeApps {
   /// Active-notification counts per package pushed by the native listener.
   static Stream<Map<String, int>> get notificationCounts =>
       _notifCounts.stream;
+
+  /// Launcher long-press shortcuts tapped while the app is already running
+  /// (`scan`, `recent`, `tiles`).
+  static Stream<String> get shortcuts => _shortcuts.stream;
+
+  /// The shortcut that started this process, if the app was launched from one.
+  /// Pulled once at startup; later taps arrive on [shortcuts].
+  static Future<String?> consumeShortcut() async {
+    try {
+      final id = await _channel.invokeMethod<String>('consumeShortcut');
+      return (id == null || id.isEmpty) ? null : id;
+    } catch (_) {
+      return null;
+    }
+  }
 
   /// Registers the shared method-call handler. Safe to call multiple times and
   /// when no Flutter binding exists yet (e.g. pure-Dart tests); a later call
@@ -130,6 +384,12 @@ class NativeApps {
         case 'notificationsChanged':
           final m = (call.arguments as Map?)?.cast<dynamic, dynamic>();
           if (!_notifCounts.isClosed) _notifCounts.add(_countsFrom(m?['counts']));
+        case 'shortcut':
+          final m = (call.arguments as Map?)?.cast<dynamic, dynamic>();
+          final id = m?['id'] as String?;
+          if (id != null && id.isNotEmpty && !_shortcuts.isClosed) {
+            _shortcuts.add(id);
+          }
         case 'nativeLog':
           final m = (call.arguments as Map?)?.cast<dynamic, dynamic>();
           final text = m?['text'] as String?;
@@ -445,6 +705,125 @@ class NativeApps {
   static Future<Map<String, dynamic>> getDeviceInfo() async {
     final info = await _channel.invokeMethod<Map<dynamic, dynamic>>('getDeviceInfo');
     return (info ?? {}).cast<String, dynamic>();
+  }
+
+  /// Battery level, charging state and the data volume's free/total bytes.
+  static Future<DeviceStatus> deviceStatus() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('deviceStatus');
+      return DeviceStatus.fromMap((r ?? {}).cast<dynamic, dynamic>());
+    } catch (_) {
+      return DeviceStatus.unknown;
+    }
+  }
+
+  // -------------------------------------------------- storage / privacy / ...
+
+  /// Whether the user granted "usage access". Needed before any per-app size
+  /// can be read; the screens ask for it instead of showing wrong numbers.
+  static Future<bool> hasUsageAccess() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('usageAccess');
+      return (r?['granted'] as bool?) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens the system "usage access" screen (our own row when the ROM allows).
+  static Future<bool> openUsageAccessSettings() async {
+    try {
+      return await _channel.invokeMethod<bool>('openUsageAccessSettings') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// APK / data / cache bytes of one installed app.
+  static Future<AppStorageInfo> appStorage(String packageName) async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'appStorage',
+        {'packageName': packageName},
+      );
+      return AppStorageInfo.fromMap((r ?? {}).cast<dynamic, dynamic>());
+    } catch (_) {
+      return const AppStorageInfo(ok: false, reason: 'unavailable');
+    }
+  }
+
+  /// Every visible app's storage, biggest first.
+  static Future<StorageRanking> storageRanking() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('storageRanking');
+      final m = (r ?? {}).cast<dynamic, dynamic>();
+      final entries = <StorageRankEntry>[];
+      for (final e in (m['entries'] as List?) ?? const []) {
+        entries.add(
+          StorageRankEntry.fromMap((e as Map).cast<dynamic, dynamic>()),
+        );
+      }
+      return StorageRanking(
+        entries: entries,
+        permitted: (m['permission'] as bool?) ?? false,
+        unsupported: (m['unsupported'] as bool?) ?? false,
+      );
+    } catch (_) {
+      return const StorageRanking(entries: [], permitted: false);
+    }
+  }
+
+  /// Permissions the app requests, dangerous and granted ones first.
+  static Future<List<PermissionEntry>> appPermissions(String packageName) async {
+    try {
+      final list = await _channel.invokeMethod<List<dynamic>>(
+        'appPermissions',
+        {'packageName': packageName},
+      );
+      return [
+        for (final e in list ?? const [])
+          PermissionEntry.fromMap((e as Map).cast<dynamic, dynamic>()),
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// The certificate the installed app is signed with.
+  static Future<SignatureInfo?> appSignature(String packageName) async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'appSignature',
+        {'packageName': packageName},
+      );
+      if (r == null) return null;
+      return SignatureInfo.fromMap(r.cast<dynamic, dynamic>());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Who holds the sensitive permissions and special access.
+  static Future<List<AuditCapability>> permissionAudit() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('permissionAudit');
+      final caps = <AuditCapability>[];
+      for (final c in (r?['capabilities'] as List?) ?? const []) {
+        final m = (c as Map).cast<dynamic, dynamic>();
+        caps.add(
+          AuditCapability(
+            id: (m['id'] as String?) ?? '',
+            entries: [
+              for (final e in (m['apps'] as List?) ?? const [])
+                AuditEntry.fromMap((e as Map).cast<dynamic, dynamic>()),
+            ],
+          ),
+        );
+      }
+      return caps;
+    } catch (_) {
+      return const [];
+    }
   }
 
   /// Tests a remote APK source. Returns `{ok: bool, count: int, error: String?}`.

@@ -1023,4 +1023,137 @@ const Map<String, String> _en = <String, String>{
   'APK 缓存明细': 'APK cache details',
   '按应用查看、单独安装或删除已缓存的安装包':
       'Browse cached APKs by app, install one, or delete it',
+
+  // ---- storage, permissions, signature, device status
+  '应用占用': 'App storage',
+  '哪些应用最占空间（安装包/数据/缓存）':
+      'Which apps take the most space (APK / data / cache)',
+  '需要「使用情况访问」': '"Usage access" is required',
+  '系统只允许被授权的应用读取其它应用的数据与缓存占用。':
+      'Android only lets an authorised app read other apps\' data and cache '
+      'usage.',
+  '系统只允许被授权的应用读取其它应用的数据与缓存占用。在接下来的系统设置里找到「囤囤」，打开「允许使用情况访问」。':
+      'Android only lets an authorised app read other apps\' data and cache '
+      'usage. In the next screen find 囤囤 and turn on "Permit usage access".',
+  '开启后回到这里会自动重新读取':
+      'It is read again automatically when you come back',
+  '已开启，重新读取': 'Granted — read again',
+  '开启「使用情况访问」': 'Turn on "Usage access"',
+  '存储占用': 'Storage',
+  '安装包': 'APK',
+  '数据': 'Data',
+  '缓存': 'Cache',
+  '合计': 'Total',
+  '安装包 {apk} · 数据 {data} · 缓存 {cache}':
+      'APK {apk} · data {data} · cache {cache}',
+  '在系统设置里清理': 'Clear in system settings',
+  '去清理': 'Clear',
+  '这个应用没有可读取的占用数据（{reason}）':
+      'No readable storage data for this app ({reason})',
+  '没有读到任何应用的占用数据': 'No storage data could be read',
+  '{n} 个应用共 {size}（不含系统组件）':
+      '{n} apps, {size} in total (system components excluded)',
+  '申请 {total} 项 · 敏感 {dangerous} 项（已授予 {granted} 项）':
+      '{total} requested · {dangerous} sensitive ({granted} granted)',
+  '没有声明任何权限': 'Requests no permissions',
+  '已授予': 'Granted',
+  '未授予': 'Not granted',
+  '显示全部 {n} 项': 'Show all {n}',
+  '收起': 'Collapse',
+  '去系统设置里管理': 'Manage in system settings',
+  '签名': 'Signature',
+  '读不到签名信息': 'Signature information is unavailable',
+  '证书指纹': 'Certificate SHA-256',
+  '有效期至': 'Valid until',
+  '多重签名 {n}': '{n} signers',
+  '密钥轮换过': 'Signing key rotated',
+  '已复制证书指纹': 'Certificate fingerprint copied',
+  '与同步源的安装包比对': 'Compare with the sync source',
+  '与缓存安装包的比对': 'Comparison with the cached APK',
+  '缓存：{version}（{code}）': 'Cached: {version} ({code})',
+  '已安装：{version}（{code}）': 'Installed: {version} ({code})',
+  '同步源里没有这个应用的安装包': 'The sync source has no APK for this app',
+  '权限体检': 'Permission audit',
+  '反查谁有麦克风、定位、无障碍、通知使用权等':
+      'See who holds the microphone, location, accessibility, notification '
+      'access and more',
+  '按能力反查谁拿到了它。点某一项可以进应用详情。':
+      'Grouped by capability. Tap an app to open its details.',
+  '重新检测': 'Check again',
+  '没有查到任何敏感权限': 'No sensitive permission found',
+  '重新读取': 'Read again',
+  '{pkg} · {note}': '{pkg} · {note}',
+  // capability names
+  '麦克风': 'Microphone',
+  '相机': 'Camera',
+  '定位': 'Location',
+  '后台定位': 'Background location',
+  '通讯录': 'Contacts',
+  '电话与通话记录': 'Phone & call log',
+  '短信': 'SMS',
+  '照片、音乐与文件': 'Photos, music & files',
+  '日历': 'Calendar',
+  '身体传感器': 'Body sensors',
+  '发送通知': 'Post notifications',
+  '悬浮窗': 'Draw over other apps',
+  '安装未知应用': 'Install unknown apps',
+  '修改系统设置': 'Modify system settings',
+  '使用情况访问': 'Usage access',
+  '无障碍服务': 'Accessibility',
+  '电池优化白名单': 'Ignoring battery optimisation',
+  // capability explanations
+  '{n} 个应用可以随时录音': '{n} apps can record audio',
+  '{n} 个应用可以拍照或录像': '{n} apps can take photos or videos',
+  '{n} 个应用可以读取位置': '{n} apps can read the location',
+  '{n} 个应用可以在后台持续定位': '{n} apps can track location in the background',
+  '{n} 个应用可以读取或修改联系人': '{n} apps can read or change contacts',
+  '{n} 个应用可以打电话、读通话记录':
+      '{n} apps can place calls and read the call log',
+  '{n} 个应用可以收发或读取短信': '{n} apps can send or read SMS',
+  '{n} 个应用可以读取照片、音乐或文件':
+      '{n} apps can read photos, music or files',
+  '{n} 个应用可以读写日历': '{n} apps can read or write the calendar',
+  '{n} 个应用可以读取身体传感器': '{n} apps can read body sensors',
+  '{n} 个应用可以弹出通知': '{n} apps can post notifications',
+  '{n} 个应用可以在其它应用上悬浮显示':
+      '{n} apps can draw over other apps',
+  '{n} 个应用可以安装其它应用': '{n} apps can install other apps',
+  '{n} 个应用可以修改系统设置': '{n} apps can change system settings',
+  '{n} 个应用可以查看你的使用情况':
+      '{n} apps can see your usage statistics',
+  '{n} 个应用可以读取所有通知': '{n} apps can read all notifications',
+  '{n} 个应用可以读取屏幕内容并代替你操作':
+      '{n} apps can read the screen and act for you',
+  '{n} 个应用不受电池优化限制，可以长期在后台运行':
+      '{n} apps are exempt from battery optimisation and can run in the '
+      'background',
+  // info tiles
+  '添加信息磁贴': 'Add an info tile',
+  '磁贴板上会实时显示的小卡片，不依赖任何应用':
+      'Small live tiles that need no app behind them',
+  '时钟': 'Clock',
+  '日期': 'Date',
+  '电量': 'Battery',
+  '存储空间': 'Storage',
+  '未读汇总': 'Unread',
+  '当前时间，按分钟更新': 'Current time, updated every minute',
+  '今天几号、星期几': 'Today\'s date and weekday',
+  '电量与充电状态，每分钟刷新':
+      'Battery level and charging state, every minute',
+  '本机存储占用，每分钟刷新': 'Device storage usage, every minute',
+  '所有应用的未读通知总数': 'Total unread notifications across all apps',
+  '已添加「{name}」磁贴': 'Added the "{name}" tile',
+  '显示说明文字': 'Show the caption',
+  '关闭后只显示数值': 'Off shows the value only',
+  '存储 · 已用 {size}': 'Storage · {size} used',
+  '没有未读': 'Nothing unread',
+  '未读 · {n} 个应用': 'Unread · {n} apps',
+  '{day} {m}/{d}': '{day} {m}/{d}',
+  '周一': 'Mon',
+  '周二': 'Tue',
+  '周三': 'Wed',
+  '周四': 'Thu',
+  '周五': 'Fri',
+  '周六': 'Sat',
+  '周日': 'Sun',
 };

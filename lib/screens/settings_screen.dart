@@ -11,7 +11,9 @@ import '../widgets/collapsed_nav.dart';
 import '../widgets/theme_color_picker.dart';
 import 'haptics_settings_screen.dart';
 import 'log_screen.dart';
+import 'permission_audit_screen.dart';
 import 'storage_manager_screen.dart';
+import 'storage_usage_screen.dart';
 import 'sync_screen.dart';
 import 'web_app_check_screen.dart';
 
@@ -398,12 +400,38 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
           ListTile(
+            leading: const Icon(Icons.pie_chart_outline),
+            title: Text(context.strings.t('应用占用')),
+            subtitle: Text(context.strings.t('哪些应用最占空间（安装包/数据/缓存）')),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const StorageUsageScreen()),
+            ),
+          ),
+          ListTile(
             leading: const Icon(Icons.image_outlined),
             title: Text(context.strings.t('刷新图标缓存')),
             subtitle: Text(
               context.strings.t('重新读取所有应用的图标，修复缺失或过期的图标'),
             ),
             onTap: () => refreshIconCache(context, state),
+          ),
+          const Divider(height: 1),
+          _SectionHeader(context.strings.t('隐私')),
+          ListTile(
+            leading: const Icon(Icons.shield_outlined),
+            title: Text(context.strings.t('权限体检')),
+            subtitle: Text(
+              context.strings.t('反查谁有麦克风、定位、无障碍、通知使用权等'),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => const PermissionAuditScreen(),
+              ),
+            ),
           ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('数据备份')),

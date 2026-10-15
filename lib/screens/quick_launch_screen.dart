@@ -7,6 +7,7 @@ import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
 import '../models/tile.dart';
 import '../models/tile_page.dart';
+import '../services/device_status.dart';
 import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
@@ -18,9 +19,11 @@ import '../utils/tile_layout.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/category_editor.dart';
 import '../widgets/collapsed_nav.dart';
+import '../widgets/info_tile.dart';
 import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 import 'categories_tab.dart';
+import 'storage_manager_screen.dart';
 import 'tile_pages_screen.dart';
 import 'usage_stats_screen.dart';
 
@@ -183,6 +186,22 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     // 磁贴 is the second tab (最近 sits to its left).
     final editing = state.tileEditMode && _tabs.index == 1;
     final split = state.tileSwipeMode != TileSwipeMode.holdDrag;
+
+    // A sub-tab asked for from outside (a launcher shortcut) is applied after
+    // this frame, once the tab controller and pager are laid out.
+    if (state.pendingLaunchTab != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        final target = context.read<AppState>().consumePendingLaunchTab();
+        if (target == null) return;
+        final clamped = target.clamp(0, _tabCount - 1);
+        if (_tabs.index != clamped) {
+          _tabs.animateTo(clamped);
+        } else {
+          _animateLaunchPager(clamped);
+        }
+      });
+    }
 
     // The four sections live directly in the header (no title text) to save a
     // whole row of vertical space.
@@ -1040,8 +1059,14 @@ class _TileBoardState extends State<_TileBoard> {
                   for (final t in pageTiles)
                     Builder(
                       builder: (context) {
-                        final app = state.appByPackage(t.packageName);
-                        if (app == null) return const SizedBox.shrink();
+                        final app = t.isInfo
+                            ? null
+                            : state.appByPackage(t.packageName);
+                        // An app tile without its app (uninstalled) is skipped;
+                        // info tiles have no app by design.
+                        if (app == null && !t.isInfo) {
+                          return const SizedBox.shrink();
+                        }
                         final p = layout.placements[t.id]!;
                         return Positioned(
                           left: x(p.col),
@@ -1687,7 +1712,9 @@ class _Tile extends StatelessWidget {
   });
 
   final Tile tile;
-  final AppInfo app;
+
+  /// The app behind this tile; null for the live info tiles.
+  final AppInfo? app;
   final AppState state;
   final double cellW;
   final double gap;
@@ -1738,14 +1765,17 @@ class _Tile extends StatelessWidget {
   /// Draws the unread bubble in the tile's own top-right corner (not the
   /// icon's), scaled to the tile. Hidden while arranging tiles.
   Widget _withBadge(Widget child, double width, double height, bool editable) {
-    if (editable) return child;
+    // Info tiles carry their own numbers (the unread tile *is* the count).
+    if (editable || tile.isInfo) return child;
+    final packageName = app?.packageName ?? '';
+    if (packageName.isEmpty) return child;
     final shortest = width < height ? width : height;
     return ListenableBuilder(
       listenable: NotificationBadges.instance,
       builder: (context, _) {
         final badges = NotificationBadges.instance;
         final count = badges.countFor(
-          app.packageName,
+          packageName,
           surface: NotificationBadgeSurface.tile,
         );
         if (count <= 0) return child;
@@ -1772,11 +1802,18 @@ class _Tile extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final glass = state.tileStyle == TileStyle.glass;
-    final color = _tileColor(app.appName);
+    final color = tile.isInfo
+        ? infoTileColor(
+            context,
+            tile.kind,
+            status: DeviceStatusService.instance.status,
+          )
+        : _tileColor(app?.appName ?? '');
     final radius = BorderRadius.circular(glass ? 14 : 10);
     // Frameless mode is its own per-tile switch, independent of the label and
     // inner-margin options.
     final frameless = !tile.border;
+    final packageName = app?.packageName ?? '';
 
     final ink = InkWell(
       // Outside edit mode a tap launches the app and a long press opens the
@@ -1784,16 +1821,16 @@ class _Tile extends StatelessWidget {
       // mode a tap opens the tile menu and a long press drags the tile.
       onTap: editable
           ? () => _showTileMenu(context)
-          : () => launchApp(context, app.packageName),
+          : _browseTap(context, packageName),
       // Handled here rather than left to the board, so the blank-area long
       // press (switching the launch sub-tab) stays limited to the empty board.
-      onLongPress: editable
+      onLongPress: editable || packageName.isEmpty
           ? null
           : () => Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (_) => AppDetailScreen(
-                  packageName: app.packageName,
+                  packageName: packageName,
                   fromTileBoard: true,
                 ),
               ),
@@ -1901,9 +1938,18 @@ class _Tile extends StatelessWidget {
     required bool frameless,
   }) {
     final scheme = Theme.of(context).colorScheme;
+    // Live info tiles (clock, date, battery, storage, unread) have no app
+    // behind them: the board draws their content itself.
+    if (tile.isInfo) {
+      return InfoTileContent(
+        tile: tile,
+        foreground: (glass || frameless) ? scheme.onSurface : Colors.white,
+      );
+    }
+    final packageName = app?.packageName ?? '';
     // A pinned launcher entry can rename the app (联系人 and 电话 are the same
     // package), and its icon follows the same choice.
-    final name = state.displayNameFor(app.packageName);
+    final name = state.displayNameFor(packageName);
     // Without a backdrop the label sits on the page background, so use the
     // theme's on-surface color instead of the solid style's white.
     final labelColor =
@@ -1930,7 +1976,7 @@ class _Tile extends StatelessWidget {
             padding: EdgeInsets.all(pad),
             child: Center(
               child: AppIcon(
-                packageName: app.packageName,
+                packageName: packageName,
                 label: name,
                 showNotificationBadge: false,
                 size: (shortest - pad * 2)
@@ -1956,7 +2002,7 @@ class _Tile extends StatelessWidget {
                     side *= iconScale;
                     return Center(
                       child: AppIcon(
-                        packageName: app.packageName,
+                        packageName: packageName,
                         label: name,
                         showNotificationBadge: false,
                         size: side.clamp(8.0, double.infinity).toDouble(),
@@ -2001,6 +2047,21 @@ class _Tile extends StatelessWidget {
     );
   }
 
+  /// Browse-mode tap: an app tile launches its app; the storage tile opens the
+  /// storage screen; the purely informational tiles do nothing.
+  VoidCallback? _browseTap(BuildContext context, String packageName) {
+    if (packageName.isNotEmpty) {
+      return () => launchApp(context, packageName);
+    }
+    if (tile.kind == TileKind.storage) {
+      return () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const StorageManagerScreen()),
+      );
+    }
+    return null;
+  }
+
   void _showTileMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
@@ -2015,8 +2076,16 @@ class _Tile extends StatelessWidget {
               children: [
                 SwitchListTile(
                   secondary: const Icon(Icons.label_outline),
-                  title: Text(context.strings.t('显示应用名称')),
-                  subtitle: Text(context.strings.t('关闭后磁贴只显示图标')),
+                  title: Text(
+                    context.strings.t(
+                      tile.isInfo ? '显示说明文字' : '显示应用名称',
+                    ),
+                  ),
+                  subtitle: Text(
+                    context.strings.t(
+                      tile.isInfo ? '关闭后只显示数值' : '关闭后磁贴只显示图标',
+                    ),
+                  ),
                   value: state.tileById(tile.id)?.showLabel ?? true,
                   onChanged: (v) => state.setTileShowLabel(tile.id, v),
                 ),
@@ -2034,22 +2103,23 @@ class _Tile extends StatelessWidget {
                   value: state.tileById(tile.id)?.border ?? true,
                   onChanged: (v) => state.setTileBorder(tile.id, v),
                 ),
-                ListTile(
-                  leading: const Icon(Icons.info_outline),
-                  title: Text(context.strings.t('应用详情')),
-                  onTap: () {
-                    Navigator.pop(ctx);
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AppDetailScreen(
-                          packageName: app.packageName,
-                          fromTileBoard: true,
+                if (!tile.isInfo)
+                  ListTile(
+                    leading: const Icon(Icons.info_outline),
+                    title: Text(context.strings.t('应用详情')),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => AppDetailScreen(
+                            packageName: app?.packageName ?? '',
+                            fromTileBoard: true,
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                ),
+                      );
+                    },
+                  ),
                 ListTile(
                   leading: const Icon(Icons.push_pin_outlined),
                   title: Text(context.strings.t('移除该磁贴')),

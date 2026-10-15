@@ -1506,7 +1506,30 @@ class AppState extends ChangeNotifier {
 
   /// Sentinel spec id used to ask the layout engine where a new tile would go.
   static const String _kNewTileSpecId = '\u0000new-tile';
-
+  /// Adds one of the live info tiles (clock, date, battery, storage, unread),
+  /// sized by its kind. These have no app behind them, so no meta is touched.
+  Future<Tile> addInfoTile(TileKind kind, {String? pageId}) async {
+    final target =
+        pageId ??
+        currentTilePageId ??
+        (tilePages.isEmpty ? '' : tilePages.first.id);
+    final (w, h) = kind.defaultSize;
+    final (col, row) = _firstFreeSpot(target, w, h);
+    final tile = Tile(
+      id: _newId(),
+      packageName: '',
+      pageId: target,
+      kind: kind,
+      col: col,
+      row: row,
+      w: w,
+      h: h,
+    );
+    tiles.add(tile);
+    await _persistTiles();
+    notifyListeners();
+    return tile;
+  }
   /// Concrete (col,row) for a [w]x[h] tile on [pageId]: the first free cell
   /// when packing this page's current tiles.
   (int, int) _firstFreeSpot(String pageId, int w, int h) {
@@ -2020,6 +2043,25 @@ class AppState extends ChangeNotifier {
     if (!rememberPosition || lastLaunchTab == value) return;
     settings['last_launch_tab'] = value;
     await _persistSettings();
+  }
+
+  /// A launch sub-tab asked for from outside (the launcher shortcuts), waiting
+  /// for the launch screen to pick it up. Works even when position memory is
+  /// off, because it is a one-shot request rather than a stored preference.
+  int? _pendingLaunchTab;
+
+  int? get pendingLaunchTab => _pendingLaunchTab;
+
+  void requestLaunchTab(int index) {
+    _pendingLaunchTab = index;
+    notifyListeners();
+  }
+
+  /// Reads and clears the pending sub-tab request.
+  int? consumePendingLaunchTab() {
+    final value = _pendingLaunchTab;
+    _pendingLaunchTab = null;
+    return value;
   }
 
   void _rememberTilePage() {

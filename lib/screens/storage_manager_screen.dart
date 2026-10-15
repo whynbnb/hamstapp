@@ -8,6 +8,7 @@ import '../services/storage_manager.dart';
 import '../state/app_state.dart';
 import '../utils/format.dart';
 import 'orphan_cache_screen.dart';
+import 'storage_usage_screen.dart';
 
 /// Shows what 囤囤 is using on the device and lets the user drop the parts
 /// that are only caches.
@@ -248,6 +249,18 @@ class _StorageManagerScreenState extends State<StorageManagerScreen> {
                   ),
                 ),
                 const Divider(height: 28),
+                ListTile(
+                  leading: const Icon(Icons.pie_chart_outline),
+                  title: Text(s.t('应用占用')),
+                  subtitle: Text(s.t('哪些应用最占空间（安装包/数据/缓存）')),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const StorageUsageScreen(),
+                    ),
+                  ),
+                ),
                 ListTile(
                   leading: const Icon(Icons.inventory_2_outlined),
                   title: Text(s.t('APK 缓存明细')),
