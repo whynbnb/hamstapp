@@ -477,6 +477,18 @@ class _AppFilterSheet extends StatelessWidget {
                 selected: {state.sortAscending},
                 onSelectionChanged: (v) => state.setSortAscending(v.first),
               ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                secondary: const Icon(Icons.bookmark_outline),
+                title: Text(s.t('记忆筛选')),
+                subtitle: Text(
+                  s.t('退出后下次打开应用列表时，沿用现在的筛选与排序'),
+                ),
+                value: state.rememberAppFilters,
+                onChanged: state.setRememberAppFilters,
+              ),
             ],
           ),
         ),

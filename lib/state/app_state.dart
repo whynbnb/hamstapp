@@ -197,11 +197,80 @@ class AppState extends ChangeNotifier {
   bool sortAscending = true;
   String? filterCategoryId;
 
+  /// Whether the choices above survive a restart. The apps list is often used
+  /// the same way every time ("only user apps, newest first"), so remembering is
+  /// the default; the switch at the bottom of the filter sheet turns it off.
+  bool rememberAppFilters = true;
+
   final Random _rand = Random();
 
   /// Public wrapper so widgets can trigger a rebuild after mutating a
   /// filter/sort field directly.
-  void refresh() => notifyListeners();
+  void refresh() {
+    // The sheet mutates the fields directly and calls this, so this is where the
+    // remembered choice is kept up to date.
+    _saveAppFilters();
+    notifyListeners();
+  }
+
+  /// Applies the stored filter/sort choices, when remembering is on. Called at
+  /// startup; also callable on its own (tests, and anything that wants to undo
+  /// a session's changes).
+  void restoreAppFilters() {
+    rememberAppFilters = settings['app_filter_remember'] as bool? ?? true;
+    if (!rememberAppFilters) return;
+    scope = _enumByName(AppScope.values, settings['app_scope']) ?? AppScope.all;
+    filter =
+        _enumByName(AppFilter.values, settings['app_filter']) ?? AppFilter.all;
+    sort = _enumByName(AppSort.values, settings['app_sort']) ?? AppSort.name;
+    sortAscending = settings['app_sort_asc'] as bool? ?? true;
+    final category = settings['app_filter_category'];
+    filterCategoryId = (category is String && category.isNotEmpty)
+        ? category
+        : null;
+  }
+
+  /// Turns remembering on or off. Switching it on stores the current choices
+  /// straight away, so the next start opens exactly like this one.
+  Future<void> setRememberAppFilters(bool value) async {
+    rememberAppFilters = value;
+    settings['app_filter_remember'] = value;
+    if (value) _saveAppFilters(force: true);
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Stores the current choices, writing only when something actually changed.
+  void _saveAppFilters({bool force = false}) {
+    if (!rememberAppFilters) return;
+    final scopeName = scope.name;
+    final filterName = filter.name;
+    final sortName = sort.name;
+    final category = filterCategoryId ?? '';
+    final unchanged =
+        !force &&
+        settings['app_scope'] == scopeName &&
+        settings['app_filter'] == filterName &&
+        settings['app_filter_category'] == category &&
+        settings['app_sort'] == sortName &&
+        settings['app_sort_asc'] == sortAscending;
+    if (unchanged) return;
+    settings['app_filter_remember'] = rememberAppFilters;
+    settings['app_scope'] = scopeName;
+    settings['app_filter'] = filterName;
+    settings['app_filter_category'] = category;
+    settings['app_sort'] = sortName;
+    settings['app_sort_asc'] = sortAscending;
+    unawaited(_persistSettings());
+  }
+
+  static T? _enumByName<T extends Enum>(List<T> values, dynamic raw) {
+    if (raw is! String) return null;
+    for (final value in values) {
+      if (value.name == raw) return value;
+    }
+    return null;
+  }
 
   /// Number of non-default filter/sort options, shown as a badge next to the
   /// filter button on the apps screen.
@@ -253,6 +322,8 @@ class AppState extends ChangeNotifier {
     snapshots = await _loadSnapshots();
     backupLists = await _loadBackupLists();
     settings = await _loadSettings();
+    // Restore the remembered filter/sort before the first build.
+    restoreAppFilters();
     IconCache.instance.replaceAll(
       IconCache.decode(await storage.readJson(_kIcons)),
     );

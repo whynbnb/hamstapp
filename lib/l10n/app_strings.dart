@@ -843,6 +843,9 @@ const Map<String, String> _en = <String, String>{
   '用哪个浏览器': 'Which browser',
   '没有找到能打开网页的应用': 'No app found that can open web pages',
   '站点清单建议：{mode}': 'The site’s manifest asks for: {mode}',
+  '记忆筛选': 'Remember the filter',
+  '退出后下次打开应用列表时，沿用现在的筛选与排序':
+      'Keeps these filters and the sort order for the next time the app list is opened',
   '重新识别': 'Detect again',
   '正在读取网站信息…': 'Reading the site…',
   '识别后自动填写，也可以自己改': 'Filled in from the site, editable',
