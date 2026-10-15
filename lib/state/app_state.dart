@@ -1210,6 +1210,23 @@ class AppState extends ChangeNotifier {
     await storage.writeJson(_kIcons, IconCache.instance.toJson());
   }
 
+  /// Drops every cached icon — memory and disk. Icons are read again on demand
+  /// by [AppIcon], so nothing the user made is lost; this only frees the file.
+  Future<void> clearIconCache() async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    await _persistIcons();
+    AppLog.instance.log(LogModule.apps, '存储 · 已清理图标缓存');
+    notifyListeners();
+  }
+
+  /// Drops the cached scan result. The apps already in memory stay (and web
+  /// entries are unaffected), so the list does not empty now; the next start
+  /// rescans and rebuilds the file.
+  Future<void> clearScanCache() async {
+    Storage.deleteFile(_kAppsCache);
+    AppLog.instance.log(LogModule.apps, '存储 · 已清理应用扫描缓存');
+  }
+
   Future<int>? _iconRefresh;
 
   /// Drop the icon cache and re-read icons for every installed app from the
@@ -2920,13 +2937,13 @@ class AppState extends ChangeNotifier {
   static const _kSnapshots = 'snapshots';
   static const _kBackupLists = 'backup_lists';
   /// Cached scan. Renamed when [AppInfo] gained the web-app fields so an old
-  /// cache cannot blank them out — the miss makes the app rescan on startup.
-  static const _kAppsCache = 'apps_cache_v2';
+  /// cache cannot blank them out — a miss makes the app rescan on startup.
+  static const _kAppsCache = Storage.scanCacheFile;
 
   /// Websites added by hand (see [WebApp]). Kept apart from the scan cache so
   /// no scan can drop them.
   static const _kWebApps = 'web_apps';
-  static const _kIcons = 'icons';
+  static const _kIcons = Storage.iconsFile;
   static const _kTilePages = 'tile_pages';
   static const _kTiles = 'tiles';
   static const _kSettings = 'settings';

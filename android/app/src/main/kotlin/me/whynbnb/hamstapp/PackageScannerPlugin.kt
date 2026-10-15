@@ -331,6 +331,12 @@ class PackageScannerPlugin(
                 val freed = runCatching { cacheClear() }.getOrDefault(0L)
                 mainHandler.post { result.success(freed) }
             }
+            // The app's own scratch directory (Android may clear it whenever it
+            // likes). Exposed so the storage screen measures the real place
+            // instead of guessing a path.
+            "tempDir" -> mainHandler.post {
+                result.success(context.cacheDir.absolutePath)
+            }
             "installApk" -> {
                 val path = call.argument<String>("path")
                 mainHandler.post { result.success(path != null && installApk(path)) }

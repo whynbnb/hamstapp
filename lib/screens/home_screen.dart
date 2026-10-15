@@ -99,14 +99,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     // First launch: nothing scanned yet -> kick off a scan automatically. Only
     // requested once per run: a failed scan leaves the list empty, and retrying
-    // on every frame would spin forever.
+    // on every frame would spin forever. Counted on installed apps, so a
+    // cleared scan cache (or a list holding only web entries) still rescans.
     if (state.initialized &&
-        state.apps.isEmpty &&
+        state.installedApps.isEmpty &&
         !state.scanning &&
         !_autoScanRequested) {
       _autoScanRequested = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && state.apps.isEmpty && !state.scanning) state.scan();
+        if (mounted && state.installedApps.isEmpty && !state.scanning) {
+          state.scan();
+        }
       });
     }
 

@@ -16,6 +16,14 @@ class Fmt {
 
   static String size(int bytes) {
     if (bytes <= 0) return AppStrings.current.t('未知');
+    return _bytes(bytes);
+  }
+
+  /// Like [size] but reads empty as `0 B`. For the storage report, where
+  /// nothing used is a real answer rather than missing data.
+  static String storage(int bytes) => bytes <= 0 ? '0 B' : _bytes(bytes);
+
+  static String _bytes(int bytes) {
     const units = ['B', 'KB', 'MB', 'GB'];
     double v = bytes.toDouble();
     int i = 0;

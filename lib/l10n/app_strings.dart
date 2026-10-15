@@ -979,4 +979,48 @@ const Map<String, String> _en = <String, String>{
   '囤囤需要「通知使用权」才能读取其它应用的通知并在图标上显示角标。':
       '囤囤 needs "Notification access" to read other apps\' notifications and draw badges on their icons.',
   '去开启': 'Open settings',
+
+  // ---- storage
+  '存储': 'Storage',
+  '存储管理': 'Storage',
+  '查看占用并清理缓存（图标、APK、临时文件）':
+      'See what is used and clear caches (icons, APKs, temporary files)',
+  '重新统计': 'Recount',
+  '囤囤占用 {size}': '囤囤 uses {size}',
+  '其中 {size} 可清理': '{size} of it can be cleared',
+  '图标缓存': 'Icon cache',
+  '{n} 个应用图标（删除后会在需要时重新读取）':
+      '{n} app icons (read again when needed)',
+  '应用扫描缓存': 'App scan cache',
+  '上次扫描得到的应用列表（下次启动会重新扫描）':
+      'The app list from the last scan (scanned again on next start)',
+  'APK 缓存': 'APK cache',
+  '{n} 个安装包（下次安装会重新下载）':
+      '{n} APK files (downloaded again when needed)',
+  '临时文件': 'Temporary files',
+  '拖入的安装包、分享副本与网页缓存（系统也会自行清理）':
+      'Dragged-in APKs, shared copies and web cache (the system may clear '
+      'these too)',
+  '其它数据': 'Other data',
+  '{n} 个数据文件：设置、磁贴、分组、快照、网页入口等，不随缓存清理':
+      '{n} data files: settings, tiles, groups, snapshots, web entries — not '
+      'cleared with the caches',
+  '清理': 'Clear',
+  '清理全部缓存（{size}）': 'Clear all caches ({size})',
+  '清理全部缓存': 'Clear all caches',
+  '只清理可以重建的缓存，不会删除设置、磁贴、分组、快照和网页入口。':
+      'Only rebuildable caches are cleared: settings, tiles, groups, '
+      'snapshots and web entries are kept.',
+  '将清理图标缓存、扫描缓存、APK 缓存和临时文件，共 {size}。设置、磁贴、分组、快照和网页入口不受影响。':
+      'This clears the icon cache, scan cache, APK cache and temporary files '
+      '({size}). Settings, tiles, groups, snapshots and web entries are '
+      'untouched.',
+  '清理 APK 缓存': 'Clear APK cache',
+  '删除 {n} 个已缓存的安装包（{size}）？下次安装会重新下载。':
+      'Delete {n} cached APKs ({size})? They will be downloaded again when '
+      'needed.',
+  '已清理 {size}': 'Freed {size}',
+  'APK 缓存明细': 'APK cache details',
+  '按应用查看、单独安装或删除已缓存的安装包':
+      'Browse cached APKs by app, install one, or delete it',
 };

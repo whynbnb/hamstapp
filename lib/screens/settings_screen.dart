@@ -11,6 +11,7 @@ import '../widgets/collapsed_nav.dart';
 import '../widgets/theme_color_picker.dart';
 import 'haptics_settings_screen.dart';
 import 'log_screen.dart';
+import 'storage_manager_screen.dart';
 import 'sync_screen.dart';
 import 'web_app_check_screen.dart';
 
@@ -380,6 +381,20 @@ class SettingsScreen extends StatelessWidget {
             onTap: () => Navigator.push(
               context,
               MaterialPageRoute(builder: (_) => const SyncScreen()),
+            ),
+          ),
+          const Divider(height: 1),
+          _SectionHeader(context.strings.t('存储')),
+          ListTile(
+            leading: const Icon(Icons.storage_outlined),
+            title: Text(context.strings.t('存储管理')),
+            subtitle: Text(
+              context.strings.t('查看占用并清理缓存（图标、APK、临时文件）'),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const StorageManagerScreen()),
             ),
           ),
           ListTile(

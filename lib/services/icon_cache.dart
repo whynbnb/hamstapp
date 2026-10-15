@@ -63,6 +63,10 @@ class IconCache extends ChangeNotifier {
 
   int get length => _bytes.length;
 
+  /// Total size of the cached icon data, for the storage screen.
+  int get byteCount =>
+      _bytes.values.fold<int>(0, (sum, bytes) => sum + bytes.length);
+
   /// Persistence hook installed by [AppState]. Called (coalesced) after a
   /// silent [put] so an on-demand fetch is written to disk and survives a
   /// restart. Null outside the running app (e.g. in some tests).

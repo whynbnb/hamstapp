@@ -593,6 +593,17 @@ class NativeApps {
     return freed?.toInt() ?? 0;
   }
 
+  /// The app's own scratch directory, where dragged-in APKs and shared copies
+  /// are written. Android may clear it at any time, so its contents are always
+  /// disposable. Null when the native side cannot say.
+  static Future<String?> tempDir() async {
+    try {
+      return await _channel.invokeMethod<String>('tempDir');
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Hands a downloaded APK to the system package installer.
   static Future<bool> installApk(String path) async {
     final ok = await _channel.invokeMethod<bool>('installApk', {'path': path});
