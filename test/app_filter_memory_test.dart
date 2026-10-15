@@ -1,5 +1,7 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:hamstapp/services/icon_cache.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
 
@@ -77,6 +79,35 @@ void main() {
     state.refresh();
     await Future<void>.delayed(Duration.zero);
     expect(state.settings['app_scope'], 'system');
+  });
+
+  testWidgets('a bulk icon refresh keeps the web entry icons', (tester) async {
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      // Nothing to fetch for installed apps in a test binding.
+      if (call.method == 'getAppIcon') return null;
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final state = AppState(_MemStorage())..initialized = true;
+    await state.addWebApp(url: 'https://photos.example/', name: 'Photos');
+    final id = state.webApps.single.id;
+    final icon = Uint8List.fromList([1, 2, 3, 4]);
+    IconCache.instance.put(id, icon);
+
+    await state.refreshIconCache();
+
+    // Web entries have no installed app to refetch from: their icons must
+    // survive the sweep that clears the cache.
+    expect(IconCache.instance[id], icon);
   });
 
   test('turning it on stores the current choice right away', () async {

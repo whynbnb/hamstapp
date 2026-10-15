@@ -306,14 +306,24 @@ class WebAppActivity : Activity() {
         val text = raw.trim().lowercase()
         if (text.isEmpty() || text == "transparent") return 0
         if (text.startsWith("#")) {
-            var hex = text.substring(1)
-            if (hex.length == 3 || hex.length == 4) {
-                hex = hex.map { "$it$it" }.joinToString("")
+            val hex = text.substring(1)
+            fun ok(length: Int) = Regex("^[0-9a-f]{$length}$").matches(hex)
+            // #rgb and #rrggbb are opaque; only #rgba/#rrggbbaa carry alpha, and
+            // only those need the CSS order (#rrggbbaa) turned into ARGB. Getting
+            // this wrong swaps the channels — a dark green came out red.
+            if (hex.length == 3 && ok(3)) {
+                val doubled = hex.map { "$it$it" }.joinToString("")
+                return (0xff shl 24) or doubled.toLong(16).toInt()
             }
-            if (hex.length == 6) hex = "ff$hex"
-            if (hex.length != 8 || !hex.all { it in "0123456789abcdef" }) return 0
-            val value = hex.toLongOrNull(16) ?: return 0
-            // #rrggbbaa → 0xaarrggbb
+            if (hex.length == 6 && ok(6)) {
+                return (0xff shl 24) or hex.toLong(16).toInt()
+            }
+            val rgba = when {
+                hex.length == 4 && ok(4) -> hex.map { "$it$it" }.joinToString("")
+                hex.length == 8 && ok(8) -> hex
+                else -> return 0
+            }
+            val value = rgba.toLongOrNull(16) ?: return 0
             return (((value and 0xff) shl 24) or (value shr 8)).toInt()
         }
         val match = Regex("^rgba?\\(([^)]*)\\)$").find(text) ?: return 0
@@ -329,7 +339,11 @@ class WebAppActivity : Activity() {
         val g = channel(parts[1]) ?: return 0
         val b = channel(parts[2]) ?: return 0
         val a = if (parts.size >= 4) {
-            (parts[3].toDoubleOrNull() ?: 1.0).let { (it * 255).toInt().coerceIn(0, 255) }
+            val raw = parts[3]
+            val alpha = raw.toDoubleOrNull() ?: 1.0
+            (if (raw.endsWith("%")) alpha * 255 / 100 else alpha * 255)
+                .toInt()
+                .coerceIn(0, 255)
         } else {
             255
         }
@@ -831,6 +845,18 @@ class WebAppActivity : Activity() {
                 var parts = m[1].split(',');
                 return parts.length < 4 || parseFloat(parts[3]) >= 0.5;
               }
+              // Let the CSSOM normalise whatever the site wrote (hex, a colour
+              // name, hsl…) into rgb() form, so the native side only has one
+              // shape to read.
+              function canonical(color) {
+                try {
+                  var probe = document.createElement('span');
+                  probe.style.color = color;
+                  return probe.style.color || color;
+                } catch (e) {
+                  return color;
+                }
+              }
               try {
                 var x = Math.floor(window.innerWidth / 2);
                 var el = document.elementFromPoint(x, 1) ||
@@ -846,7 +872,7 @@ class WebAppActivity : Activity() {
                 for (var i = 0; i < metas.length; i++) {
                   var media = metas[i].getAttribute('media');
                   if (media && !window.matchMedia(media).matches) continue;
-                  if (metas[i].content) return metas[i].content;
+                  if (metas[i].content) return canonical(metas[i].content);
                 }
               } catch (e) {}
               return '';

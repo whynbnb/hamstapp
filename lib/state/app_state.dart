@@ -1227,9 +1227,12 @@ class AppState extends ChangeNotifier {
 
   Future<int> _runIconRefresh() async {
     try {
+      // Web entries are not installed apps, so their icons are never refetched
+      // — read them out *before* the sweep clears the cache, or they are lost
+      // until the next background re-read.
+      final webIcons = _webEntryIcons();
       IconCache.instance.clearSilent();
       final next = <String, Uint8List>{};
-      // Web entries have no icon to fetch; the avatar fallback covers them.
       for (final a in installedApps) {
         try {
           // Fetch the icon of the entry this app launches, not blindly the
@@ -1247,9 +1250,8 @@ class AppState extends ChangeNotifier {
           // Keep going: one unreadable icon must not abort the refresh.
         }
       }
-      // Web entries are not installed apps, so their icons are not refetched —
-      // carry them over instead of dropping them.
-      _carryWebEntryIcons(next);
+      // Put the hand-added web entries' icons back on top of the fresh map.
+      next.addAll(webIcons);
       IconCache.instance.replaceAll(next);
       await _persistIcons();
       notifyListeners();
@@ -1259,13 +1261,15 @@ class AppState extends ChangeNotifier {
     }
   }
 
-  /// Keeps the icons of hand-added web entries (they are not installed apps, so
-  /// a bulk refresh would otherwise drop them) on top of the fresh map.
-  void _carryWebEntryIcons(Map<String, Uint8List> next) {
+  /// The icons of hand-added web entries, as they are right now: a bulk refresh
+  /// must carry them over, since none of them belongs to an installed app.
+  Map<String, Uint8List> _webEntryIcons() {
+    final kept = <String, Uint8List>{};
     for (final w in webApps) {
       final bytes = IconCache.instance[w.id];
-      if (bytes != null && bytes.isNotEmpty) next[w.id] = bytes;
+      if (bytes != null && bytes.isNotEmpty) kept[w.id] = bytes;
     }
+    return kept;
   }
 
   // ---------------------------------------------------------------- backups
