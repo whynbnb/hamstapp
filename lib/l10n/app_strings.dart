@@ -152,8 +152,8 @@ const Map<String, String> _en = <String, String>{
   '导入数据': 'Import data',
   '导出囤囤数据': 'Export Hamstapp data',
   '选择囤囤数据包': 'Select a Hamstapp data file',
-  '编辑模式：点右上角 ➕ 置顶应用，长按磁贴拖动移动，拖动右下角缩放；完成后点「完成」':
-      'Edit mode: tap ➕ to pin apps, long-press a tile to move it, drag its corner to resize, then tap Done.',
+  '编辑模式：点右上角 ➕ 置顶应用或添加信息磁贴，长按拖动移动，拖右下角缩放；完成后点「完成」':
+      'Edit mode: tap ➕ to pin apps or add an info tile, long-press to move a tile, drag its corner to resize, then tap Done.',
   '磁贴：在「启动 → 磁贴」点击右上角 ✏️ 进入编辑模式，长按磁贴拖动移动、拖动右下角缩放；完成后点击右上角「完成」退出。':
       'Tiles: on Launch → Tiles, tap ✏️ to edit. Long-press a tile to move it, drag its corner to resize, then tap Done.',
   '长按磁贴拖动移动、拖动右下角缩放；完成后点击右上角「完成」退出。':
@@ -497,8 +497,8 @@ const Map<String, String> _en = <String, String>{
   '移除该磁贴': 'Remove this tile',
   '确定移除这个磁贴吗？': 'Remove this tile?',
   '移除': 'Remove',
-  '「{page}」还没有磁贴\n点击右上角 ✏️ 进入编辑，再点 ➕ 选择要置顶的应用':
-      'No tiles on "{page}" yet.\nTap ✏️ to edit, then ➕ to pick apps to pin.',
+  '「{page}」还没有磁贴\n点击右上角 ✏️ 进入编辑，再点 ➕ 置顶应用或添加信息磁贴':
+      'No tiles on "{page}" yet.\nTap ✏️ to edit, then ➕ to pin apps or add an info tile.',
   '还没有收藏的应用\n点击右上角 ➕ 添加，即可在这里一键启动':
       'No favorites yet.\nTap ➕ to add apps and launch them here.',
   '还没有启动记录\n从囤囤里启动应用后会出现在这里':

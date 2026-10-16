@@ -1383,13 +1383,14 @@ class AppState extends ChangeNotifier {
   }
 
   /// Tiles shown on [page], in stable display order. Tiles whose page no longer
-  /// exists fall back to the first page; tiles whose app is gone are skipped.
+  /// exists fall back to the first page; app tiles whose app is gone are
+  /// skipped (info tiles have no app by design and are always kept).
   List<Tile> tilesOnPage(TilePage page) {
     if (tilePages.isEmpty) return const <Tile>[];
     final firstId = tilePages.first.id;
     final validIds = tilePages.map((p) => p.id).toSet();
     final result = tiles.where((t) {
-      if (appByPackage(t.packageName) == null) return false;
+      if (!t.isInfo && appByPackage(t.packageName) == null) return false;
       final pid = validIds.contains(t.pageId) ? t.pageId : firstId;
       return pid == page.id;
     }).toList();

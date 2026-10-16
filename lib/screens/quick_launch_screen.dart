@@ -324,7 +324,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
                   SnackBar(
                     content: Text(
                       s.t(
-                        '编辑模式：点右上角 ➕ 置顶应用，长按磁贴拖动移动，拖动右下角缩放；完成后点「完成」',
+                        '编辑模式：点右上角 ➕ 置顶应用或添加信息磁贴，长按拖动移动，拖右下角缩放；完成后点「完成」',
                       ),
                     ),
                     behavior: SnackBarBehavior.floating,
@@ -934,7 +934,7 @@ class _TileBoardState extends State<_TileBoard> {
         context,
         icon: Icons.grid_view_rounded,
         text: context.strings.t(
-          '「{page}」还没有磁贴\n点击右上角 ✏️ 进入编辑，再点 ➕ 选择要置顶的应用',
+          '「{page}」还没有磁贴\n点击右上角 ✏️ 进入编辑，再点 ➕ 置顶应用或添加信息磁贴',
           {'page': page.name},
         ),
       );
