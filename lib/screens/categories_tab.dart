@@ -467,10 +467,146 @@ const List<TileKind> kInfoTileTools = <TileKind>[
   TileKind.overview,
 ];
 
-/// Picker for the live info tiles: readings, app lists and one-tap actions.
+/// The picker's groups, in order. The sheet shows them all or just one.
+const List<(String, List<TileKind>)> kInfoTileGroups =
+    <(String, List<TileKind>)>[
+  ('读数', kInfoTileReadings),
+  ('应用', kInfoTileAppLists),
+  ('囤囤', kInfoTileOwn),
+  ('工具', kInfoTileTools),
+  // Driven by kInfoTileActions rather than by kinds: each entry is one action.
+  ('动作', <TileKind>[]),
+];
+
+/// Picker for the live info tiles, filterable by group.
 void showInfoTileSheet(BuildContext context, AppState state) {
-  Widget header(String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
+  showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    builder: (_) => _InfoTileSheet(state: state),
+  );
+}
+
+class _InfoTileSheet extends StatefulWidget {
+  const _InfoTileSheet({required this.state});
+
+  final AppState state;
+
+  @override
+  State<_InfoTileSheet> createState() => _InfoTileSheetState();
+}
+
+class _InfoTileSheetState extends State<_InfoTileSheet> {
+  /// Which group is showing; -1 means all of them.
+  int _group = -1;
+
+  AppState get state => widget.state;
+
+  Future<void> _add(
+    TileKind kind,
+    String title, {
+    Map<String, dynamic>? options,
+  }) async {
+    await state.addInfoTile(kind, options: options);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(context.strings.t('已添加「{name}」磁贴', {'name': title})),
+          duration: const Duration(milliseconds: 1200),
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.strings;
+    final groups = <(String, List<TileKind>)>[
+      for (final (title, kinds) in kInfoTileGroups) (s.t(title), kinds),
+    ];
+    final shown = _group < 0
+        ? List<int>.generate(groups.length, (i) => i)
+        : <int>[_group];
+
+    return SafeArea(
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        builder: (ctx, controller) => ListView(
+          controller: controller,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      s.t('添加信息磁贴'),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      s.t('磁贴板上会实时显示的小卡片，不依赖任何应用'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            // Filter by group, or look at everything.
+            SizedBox(
+              height: 44,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                children: [
+                  _chip(s.t('全部'), -1),
+                  for (var i = 0; i < groups.length; i++)
+                    _chip(groups[i].$1, i),
+                ],
+              ),
+            ),
+            for (final i in shown) ...[
+              if (_group < 0) _header(groups[i].$1),
+              ..._rows(groups[i].$2),
+            ],
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _chip(String label, int index) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: _group == index,
+        // Tapping the selected chip again returns to "all", which keeps the
+        // whole list one tap away.
+        onSelected: (_) => setState(() => _group = _group == index ? -1 : index),
+        labelStyle: TextStyle(
+          fontSize: 13,
+          fontWeight: _group == index ? FontWeight.w700 : FontWeight.w400,
+          color: _group == index ? scheme.onSecondaryContainer : null,
+        ),
+      ),
+    );
+  }
+
+  Widget _header(String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 2),
         child: Align(
           alignment: Alignment.centerLeft,
           child: Text(
@@ -484,131 +620,43 @@ void showInfoTileSheet(BuildContext context, AppState state) {
         ),
       );
 
-  Future<void> add(
-    TileKind kind,
-    String title, {
-    Map<String, dynamic>? options,
-  }) async {
-    await state.addInfoTile(kind, options: options);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            context.strings.t('已添加「{name}」磁贴', {'name': title}),
-          ),
-          duration: const Duration(milliseconds: 1200),
-        ),
-      );
-  }
-
-  showModalBottomSheet(
-    context: context,
-    isScrollControlled: true,
-    builder: (ctx) => SafeArea(
-      child: DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.75,
-        builder: (ctx, controller) => ListView(
-          controller: controller,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 2),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      ctx.strings.t('添加信息磁贴'),
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      ctx.strings.t('磁贴板上会实时显示的小卡片，不依赖任何应用'),
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+  /// Rows for one group. An empty kind list means the actions group.
+  List<Widget> _rows(List<TileKind> kinds) {
+    if (kinds.isEmpty) {
+      return [
+        for (final action in kInfoTileActions)
+          ListTile(
+            dense: true,
+            leading: Icon(actionIcon(action)),
+            title: Text(context.strings.t(actionTitle(action))),
+            subtitle: Text(
+              context.strings.t(infoTileSubtitle(TileKind.action)),
             ),
-            header(ctx.strings.t('读数')),
-            for (final kind in kInfoTileReadings)
-              ListTile(
-                dense: true,
-                leading: Icon(infoTileIcon(kind)),
-                title: Text(ctx.strings.t(infoTileTitle(kind))),
-                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  add(kind, ctx.strings.t(infoTileTitle(kind)));
-                },
-              ),
-            header(ctx.strings.t('应用')),
-            for (final kind in kInfoTileAppLists)
-              ListTile(
-                dense: true,
-                leading: Icon(infoTileIcon(kind)),
-                title: Text(ctx.strings.t(infoTileTitle(kind))),
-                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  add(kind, ctx.strings.t(infoTileTitle(kind)));
-                },
-              ),
-            header(ctx.strings.t('囤囤')),
-            for (final kind in kInfoTileOwn)
-              ListTile(
-                dense: true,
-                leading: Icon(infoTileIcon(kind)),
-                title: Text(ctx.strings.t(infoTileTitle(kind))),
-                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  add(kind, ctx.strings.t(infoTileTitle(kind)));
-                },
-              ),
-            header(ctx.strings.t('工具')),
-            for (final kind in kInfoTileTools)
-              ListTile(
-                dense: true,
-                leading: Icon(infoTileIcon(kind)),
-                title: Text(ctx.strings.t(infoTileTitle(kind))),
-                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  add(kind, ctx.strings.t(infoTileTitle(kind)));
-                },
-              ),
-            header(ctx.strings.t('动作')),
-            for (final action in kInfoTileActions)
-              ListTile(
-                dense: true,
-                leading: Icon(actionIcon(action)),
-                title: Text(ctx.strings.t(actionTitle(action))),
-                subtitle: Text(ctx.strings.t(infoTileSubtitle(TileKind.action))),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  add(
-                    TileKind.action,
-                    ctx.strings.t(actionTitle(action)),
-                    options: {'action': action},
-                  );
-                },
-              ),
-            const SizedBox(height: 12),
-          ],
+            onTap: () {
+              Navigator.pop(context);
+              _add(
+                TileKind.action,
+                context.strings.t(actionTitle(action)),
+                options: {'action': action},
+              );
+            },
+          ),
+      ];
+    }
+    return [
+      for (final kind in kinds)
+        ListTile(
+          dense: true,
+          leading: Icon(infoTileIcon(kind)),
+          title: Text(context.strings.t(infoTileTitle(kind))),
+          subtitle: Text(context.strings.t(infoTileSubtitle(kind))),
+          onTap: () {
+            Navigator.pop(context);
+            _add(kind, context.strings.t(infoTileTitle(kind)));
+          },
         ),
-      ),
-    ),
-  );
+    ];
+  }
 }
 
 class _PinSheet extends StatefulWidget {
@@ -684,23 +732,37 @@ class _PinSheetState extends State<_PinSheet> {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  // The board is where a web app is most wanted, so its entry
-                  // can be created right here instead of hunting in Settings.
-                  TextButton.icon(
-                    onPressed: () async {
-                      await showWebAppEditor(context, state);
-                      if (mounted) setState(() {});
-                    },
-                    icon: const Icon(Icons.add_link, size: 18),
-                    label: Text(ctx.strings.t('添加网页应用')),
-                  ),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: TextButton.icon(
-                      onPressed: () => showInfoTileSheet(context, state),
-                      icon: const Icon(Icons.schedule, size: 18),
-                      label: Text(ctx.strings.t('添加信息磁贴')),
-                    ),
+                  // Two secondary ways to add something to the board, side by
+                  // side: stacked they pushed the app list down for little.
+                  Row(
+                    children: [
+                      Flexible(
+                        child: TextButton.icon(
+                          onPressed: () async {
+                            await showWebAppEditor(context, state);
+                            if (mounted) setState(() {});
+                          },
+                          icon: const Icon(Icons.add_link, size: 18),
+                          label: Text(
+                            ctx.strings.t('添加网页应用'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: TextButton.icon(
+                          onPressed: () => showInfoTileSheet(context, state),
+                          icon: const Icon(Icons.schedule, size: 18),
+                          label: Text(
+                            ctx.strings.t('添加信息磁贴'),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),

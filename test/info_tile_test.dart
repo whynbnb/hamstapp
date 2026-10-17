@@ -354,6 +354,53 @@ void main() {
       expect(shown.map((t) => t.id), ['i1']);
     });
 
+    testWidgets('the info picker filters by group', (tester) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('hamstapp/apps'),
+        (call) async => null,
+      );
+
+      final state = board();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: const MaterialApp(home: QuickLaunchScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byIcon(Icons.edit_outlined));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('置顶应用到磁贴'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('添加信息磁贴'));
+      await tester.pumpAndSettle();
+
+      // Everything is listed, grouped, with a filter row on top.
+      expect(find.widgetWithText(ChoiceChip, '全部'), findsOneWidget);
+      expect(find.text('时钟'), findsOneWidget);
+
+      // One group only — which is also how you reach a tile far down the
+      // "all" list without scrolling through it.
+      await tester.tap(find.widgetWithText(ChoiceChip, '工具'));
+      await tester.pumpAndSettle();
+      expect(find.text('时钟'), findsNothing);
+      expect(find.text('便签'), findsOneWidget);
+      expect(find.text('手电筒'), findsOneWidget);
+
+      // And back to the whole list.
+      await tester.tap(find.widgetWithText(ChoiceChip, '全部'));
+      await tester.pumpAndSettle();
+      expect(find.text('时钟'), findsOneWidget);
+      expect(find.text('便签'), findsNothing);
+    });
+
     testWidgets('an unsupported tile stays visible and can be removed', (
       tester,
     ) async {
