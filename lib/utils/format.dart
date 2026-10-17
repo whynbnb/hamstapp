@@ -66,6 +66,27 @@ class Fmt {
     return '${t.month}/${t.day}';
   }
 
+  /// `3 天 4 小时` / `5 小时 20 分` / `42 分钟` — for an elapsed time.
+  static String spanned(int millis) {
+    final s = AppStrings.current;
+    final minutes = millis ~/ 60000;
+    if (minutes < 1) return s.t('不到 1 分钟');
+    final days = minutes ~/ (60 * 24);
+    final hours = (minutes ~/ 60) % 24;
+    if (days > 0) {
+      return hours > 0
+          ? s.t('{d} 天 {h} 小时', {'d': days, 'h': hours})
+          : s.t('{d} 天', {'d': days});
+    }
+    return duration(millis);
+  }
+
+  /// `2.3 MB/秒` for a throughput in bytes per second.
+  static String speed(int bytesPerSecond) {
+    if (bytesPerSecond <= 0) return '0 B/s';
+    return '${storage(bytesPerSecond)}/s';
+  }
+
   /// `3 小时 42 分` / `42 分钟` / `不到 1 分钟`.
   static String duration(int millis) {
     final s = AppStrings.current;

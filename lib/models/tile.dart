@@ -22,6 +22,24 @@ enum TileKind {
   newApps,
   neglected,
   folder,
+  favorites,
+  biggest,
+
+  // 囤囤's own state.
+  snapshot,
+  unorganized,
+  cache,
+  backupList,
+
+  // Device extras.
+  torch,
+  uptime,
+  dial,
+  countdown,
+  worldClock,
+  note,
+  netSpeed,
+  overview,
 
   /// A tile that runs one action when tapped (scan, snapshot, search, storage).
   action,
@@ -60,6 +78,20 @@ enum TileKind {
     TileKind.newApps => (2, 2),
     TileKind.neglected => (2, 1),
     TileKind.folder => (2, 2),
+    TileKind.favorites => (2, 2),
+    TileKind.biggest => (2, 2),
+    TileKind.snapshot => (2, 2),
+    TileKind.unorganized => (2, 1),
+    TileKind.cache => (2, 1),
+    TileKind.backupList => (2, 1),
+    TileKind.torch => (1, 1),
+    TileKind.uptime => (2, 1),
+    TileKind.dial => (1, 1),
+    TileKind.countdown => (2, 2),
+    TileKind.worldClock => (2, 1),
+    TileKind.note => (2, 2),
+    TileKind.netSpeed => (2, 1),
+    TileKind.overview => (2, 2),
     TileKind.action => (1, 1),
     TileKind.unknown => (2, 1),
   };

@@ -80,6 +80,9 @@ class DeviceStatus {
     this.memAvailBytes = 0,
     this.memLow = false,
     this.alarmAt = 0,
+    this.uptimeMillis = 0,
+    this.batteryTempC = -1,
+    this.torchOn = false,
   });
 
   /// 0-100, or -1 when the system did not report one.
@@ -96,6 +99,15 @@ class DeviceStatus {
   /// When the next alarm fires (millis since epoch), 0 when none is set.
   final int alarmAt;
 
+  /// Time since boot, in milliseconds.
+  final int uptimeMillis;
+
+  /// Battery temperature in °C, or -1 when unavailable.
+  final double batteryTempC;
+
+  /// Whether the camera torch is currently on.
+  final bool torchOn;
+
   static const DeviceStatus unknown = DeviceStatus(
     level: -1,
     charging: false,
@@ -104,6 +116,8 @@ class DeviceStatus {
   );
 
   bool get hasLevel => level >= 0;
+  bool get hasTemp => batteryTempC > 0;
+  bool get hasUptime => uptimeMillis > 0;
   bool get hasStorage => totalBytes > 0;
   bool get hasMemory => memTotalBytes > 0;
   int get memUsedBytes =>
@@ -126,6 +140,9 @@ class DeviceStatus {
     memAvailBytes: (map['memAvailBytes'] as num?)?.toInt() ?? 0,
     memLow: map['memLow'] as bool? ?? false,
     alarmAt: (map['alarmAt'] as num?)?.toInt() ?? 0,
+    uptimeMillis: (map['uptimeMillis'] as num?)?.toInt() ?? 0,
+    batteryTempC: (map['batteryTempC'] as num?)?.toDouble() ?? -1,
+    torchOn: map['torchOn'] as bool? ?? false,
   );
 }
 
@@ -140,6 +157,26 @@ class SystemUsage {
   factory SystemUsage.fromMap(Map<dynamic, dynamic> map) => SystemUsage(
     permitted: map['permitted'] as bool? ?? false,
     totalMillis: (map['totalMillis'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// Device-wide byte counters since boot (for a live speed reading).
+class TrafficTotals {
+  const TrafficTotals({
+    required this.supported,
+    this.rxBytes = 0,
+    this.txBytes = 0,
+  });
+
+  /// False when the ROM does not expose the counters.
+  final bool supported;
+  final int rxBytes;
+  final int txBytes;
+
+  factory TrafficTotals.fromMap(Map<dynamic, dynamic> map) => TrafficTotals(
+    supported: map['supported'] as bool? ?? false,
+    rxBytes: (map['rx'] as num?)?.toInt() ?? 0,
+    txBytes: (map['tx'] as num?)?.toInt() ?? 0,
   );
 }
 
@@ -795,6 +832,26 @@ class NativeApps {
       return TrafficUsage.fromMap((r ?? {}).cast<dynamic, dynamic>());
     } catch (_) {
       return const TrafficUsage(permitted: false);
+    }
+  }
+
+  /// Turns the camera torch on/off. False when there is no torch.
+  static Future<bool> setTorch(bool on) async {
+    try {
+      return await _channel.invokeMethod<bool>('setTorch', {'on': on}) ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Device-wide bytes since boot, for a live throughput reading.
+  static Future<TrafficTotals> trafficTotals() async {
+    try {
+      final r = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('trafficTotals');
+      return TrafficTotals.fromMap((r ?? {}).cast<dynamic, dynamic>());
+    } catch (_) {
+      return const TrafficTotals(supported: false);
     }
   }
 

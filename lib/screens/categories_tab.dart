@@ -434,6 +434,8 @@ const List<TileKind> kInfoTileReadings = <TileKind>[
   TileKind.screenTime,
   TileKind.traffic,
   TileKind.alarm,
+  TileKind.uptime,
+  TileKind.netSpeed,
   TileKind.unread,
 ];
 
@@ -442,7 +444,27 @@ const List<TileKind> kInfoTileAppLists = <TileKind>[
   TileKind.frequent,
   TileKind.newApps,
   TileKind.neglected,
+  TileKind.favorites,
+  TileKind.biggest,
   TileKind.folder,
+];
+
+/// Tiles about 囤囤's own state (snapshots, caches, backup lists).
+const List<TileKind> kInfoTileOwn = <TileKind>[
+  TileKind.snapshot,
+  TileKind.unorganized,
+  TileKind.cache,
+  TileKind.backupList,
+];
+
+/// Small tools: a switch, a dial shortcut, a countdown, a note.
+const List<TileKind> kInfoTileTools = <TileKind>[
+  TileKind.torch,
+  TileKind.dial,
+  TileKind.countdown,
+  TileKind.worldClock,
+  TileKind.note,
+  TileKind.overview,
 ];
 
 /// Picker for the live info tiles: readings, app lists and one-tap actions.
@@ -531,6 +553,30 @@ void showInfoTileSheet(BuildContext context, AppState state) {
               ),
             header(ctx.strings.t('应用')),
             for (final kind in kInfoTileAppLists)
+              ListTile(
+                dense: true,
+                leading: Icon(infoTileIcon(kind)),
+                title: Text(ctx.strings.t(infoTileTitle(kind))),
+                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  add(kind, ctx.strings.t(infoTileTitle(kind)));
+                },
+              ),
+            header(ctx.strings.t('囤囤')),
+            for (final kind in kInfoTileOwn)
+              ListTile(
+                dense: true,
+                leading: Icon(infoTileIcon(kind)),
+                title: Text(ctx.strings.t(infoTileTitle(kind))),
+                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  add(kind, ctx.strings.t(infoTileTitle(kind)));
+                },
+              ),
+            header(ctx.strings.t('工具')),
+            for (final kind in kInfoTileTools)
               ListTile(
                 dense: true,
                 leading: Icon(infoTileIcon(kind)),

@@ -532,13 +532,60 @@ class _AppSearchSheetState extends State<_AppSearchSheet> {
 
 // ----------------------------------------------------------------- settings
 
+/// Time zones the 世界时钟 tile can show (minutes from UTC).
+const List<(int, String)> kWorldClocks = <(int, String)>[
+  (-480, 'UTC-8'),
+  (-420, 'UTC-7'),
+  (-300, 'UTC-5'),
+  (-240, 'UTC-4'),
+  (0, 'UTC+0'),
+  (60, 'UTC+1'),
+  (180, 'UTC+3'),
+  (240, 'UTC+4'),
+  (330, 'UTC+5:30'),
+  (420, 'UTC+7'),
+  (480, 'UTC+8'),
+  (540, 'UTC+9'),
+  (600, 'UTC+10'),
+];
+
+/// `UTC+8` for a signed offset in minutes.
+String worldClockLabel(int offsetMinutes) {
+  for (final (minutes, label) in kWorldClocks) {
+    if (minutes == offsetMinutes) return label;
+  }
+  final sign = offsetMinutes < 0 ? '-' : '+';
+  final abs = offsetMinutes.abs();
+  final rest = abs % 60;
+  return 'UTC$sign${abs ~/ 60}'
+      '${rest == 0 ? '' : ':${rest.toString().padLeft(2, '0')}'}';
+}
+
+/// Whether tapping this kind does anything (drives the tile's ripple too).
+bool infoTileIsTappable(TileKind kind) => switch (kind) {
+  TileKind.clock ||
+  TileKind.date ||
+  TileKind.battery ||
+  TileKind.uptime ||
+  TileKind.netSpeed ||
+  TileKind.overview => false,
+  _ => true,
+};
+
 /// Whether this kind has anything to configure.
 bool infoTileHasSettings(TileKind kind) => switch (kind) {
   TileKind.frequent ||
   TileKind.newApps ||
   TileKind.neglected ||
   TileKind.action ||
-  TileKind.folder => true,
+  TileKind.folder ||
+  TileKind.battery ||
+  TileKind.biggest ||
+  TileKind.backupList ||
+  TileKind.dial ||
+  TileKind.countdown ||
+  TileKind.worldClock ||
+  TileKind.note => true,
   _ => false,
 };
 
@@ -604,6 +651,148 @@ void showInfoTileSettings(BuildContext context, AppState state, Tile tile) {
                   },
                 ),
               ],
+              if (tile.kind == TileKind.battery) ...[
+                _choice(
+                  ctx,
+                  s.t('显示内容'),
+                  [
+                    ('level', s.t('电量百分比')),
+                    ('temp', s.t('电池温度')),
+                    ('both', s.t('两者都显示')),
+                  ],
+                  tile.optionString('mode', 'level'),
+                  (v) {
+                    save({'mode': v});
+                    setSheetState(() {});
+                  },
+                ),
+              ],
+              if (tile.kind == TileKind.biggest) ...[
+                _choice(
+                  ctx,
+                  s.t('统计口径'),
+                  [
+                    ('apk', s.t('只看安装包')),
+                    ('total', s.t('含数据与缓存（需授权）')),
+                  ],
+                  tile.optionString('mode', 'apk'),
+                  (v) {
+                    save({'mode': v});
+                    setSheetState(() {});
+                  },
+                ),
+              ],
+              if (tile.kind == TileKind.backupList) ...[
+                _choice(
+                  ctx,
+                  s.t('备份列表'),
+                  [
+                    for (final b in state.backupLists) (b.id, b.name),
+                  ],
+                  tile.optionString('list'),
+                  (v) {
+                    save({'list': v});
+                    setSheetState(() {});
+                  },
+                ),
+                if (state.backupLists.isEmpty)
+                  _hint(ctx, s.t('还没有备份列表，先去「快照 → 备份列表」建一个')),
+              ],
+              if (tile.kind == TileKind.dial) ...[
+                _textRow(
+                  ctx,
+                  s.t('名称'),
+                  tile.optionString('label'),
+                  (v) {
+                    save({'label': v});
+                    setSheetState(() {});
+                  },
+                ),
+                _textRow(
+                  ctx,
+                  s.t('号码'),
+                  tile.optionString('number'),
+                  (v) {
+                    save({'number': v});
+                    setSheetState(() {});
+                  },
+                ),
+              ],
+              if (tile.kind == TileKind.countdown) ...[
+                _textRow(
+                  ctx,
+                  s.t('名称'),
+                  tile.optionString('title'),
+                  (v) {
+                    save({'title': v});
+                    setSheetState(() {});
+                  },
+                ),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.event),
+                  title: Text(s.t('日期')),
+                  subtitle: Text(
+                    tile.optionInt('date') > 0
+                        ? Fmt.day(tile.optionInt('date'))
+                        : s.t('未设置'),
+                  ),
+                  onTap: () async {
+                    final now = DateTime.now();
+                    final current = tile.optionInt('date') > 0
+                        ? DateTime.fromMillisecondsSinceEpoch(
+                            tile.optionInt('date'),
+                          )
+                        : now;
+                    final picked = await showDatePicker(
+                      context: ctx,
+                      initialDate: current,
+                      firstDate: DateTime(now.year - 5),
+                      lastDate: DateTime(now.year + 20),
+                    );
+                    if (picked == null) return;
+                    save({'date': picked.millisecondsSinceEpoch});
+                    setSheetState(() {});
+                  },
+                ),
+              ],
+              if (tile.kind == TileKind.worldClock) ...[
+                _choice(
+                  ctx,
+                  s.t('时区'),
+                  [
+                    for (final (minutes, label) in kWorldClocks) (
+                      '$minutes',
+                      label,
+                    ),
+                  ],
+                  '${tile.optionInt('offset', 1 << 30)}',
+                  (v) {
+                    save({'offset': int.parse(v)});
+                    setSheetState(() {});
+                  },
+                ),
+                _textRow(
+                  ctx,
+                  s.t('名称'),
+                  tile.optionString('label'),
+                  (v) {
+                    save({'label': v});
+                    setSheetState(() {});
+                  },
+                ),
+              ],
+              if (tile.kind == TileKind.note) ...[
+                _textRow(
+                  ctx,
+                  s.t('内容'),
+                  tile.optionString('text'),
+                  (v) {
+                    save({'text': v});
+                    setSheetState(() {});
+                  },
+                ),
+              ],
               if (tile.kind == TileKind.action) ...[
                 _choice(
                   ctx,
@@ -623,6 +812,65 @@ void showInfoTileSettings(BuildContext context, AppState state, Tile tile) {
         ),
       ),
     ),
+  );
+}
+
+Widget _hint(BuildContext ctx, String text) => Padding(
+  padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+  child: Align(
+    alignment: Alignment.centerLeft,
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 12,
+        color: Theme.of(ctx).colorScheme.onSurfaceVariant,
+      ),
+    ),
+  ),
+);
+
+/// A row that edits one free-text option through a dialog.
+Widget _textRow(
+  BuildContext ctx,
+  String label,
+  String value,
+  ValueChanged<String> onSave,
+) {
+  return ListTile(
+    dense: true,
+    leading: const Icon(Icons.edit_outlined),
+    title: Text(label),
+    subtitle: Text(
+      value.isEmpty ? ctx.strings.t('未设置') : value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    ),
+    onTap: () async {
+      final controller = TextEditingController(text: value);
+      final text = await showDialog<String>(
+        context: ctx,
+        builder: (dctx) => AlertDialog(
+          title: Text(label),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            decoration: InputDecoration(hintText: ctx.strings.t('输入内容')),
+            onSubmitted: (v) => Navigator.pop(dctx, v),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dctx),
+              child: Text(ctx.strings.t('取消')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dctx, controller.text.trim()),
+              child: Text(ctx.strings.t('确定')),
+            ),
+          ],
+        ),
+      );
+      if (text != null) onSave(text);
+    },
   );
 }
 
@@ -841,6 +1089,20 @@ String infoTileTitle(TileKind kind) => switch (kind) {
   TileKind.neglected => '长期未打开',
   TileKind.folder => '文件夹',
   TileKind.action => '快捷动作',
+  TileKind.favorites => '收藏',
+  TileKind.biggest => '占用最大',
+  TileKind.snapshot => '快照',
+  TileKind.unorganized => '未整理',
+  TileKind.cache => '下载缓存',
+  TileKind.backupList => '备份列表',
+  TileKind.torch => '手电筒',
+  TileKind.uptime => '运行时长',
+  TileKind.dial => '一键拨号',
+  TileKind.countdown => '倒计时',
+  TileKind.worldClock => '世界时钟',
+  TileKind.note => '便签',
+  TileKind.netSpeed => '当前网速',
+  TileKind.overview => '状态总览',
   TileKind.unknown => '不支持的小组件',
   TileKind.app => '应用',
 };
@@ -861,6 +1123,20 @@ String infoTileSubtitle(TileKind kind) => switch (kind) {
   TileKind.neglected => '很久没打开的应用数',
   TileKind.folder => '一个分类或自选几个应用，点开是网格',
   TileKind.action => '点一下执行一个动作',
+  TileKind.favorites => '收藏的应用，点开是完整列表',
+  TileKind.biggest => '最占空间的几个应用',
+  TileKind.snapshot => '上次快照多久前 + 与现在的差异',
+  TileKind.unorganized => '还没有分类/原因/备注的应用数',
+  TileKind.cache => '已下载的安装包数量与占用',
+  TileKind.backupList => '某个备份列表装了多少、还缺多少',
+  TileKind.torch => '点一下开关手电筒',
+  TileKind.uptime => '开机到现在的时长',
+  TileKind.dial => '存一个号码，点一下打开拨号盘',
+  TileKind.countdown => '距离某天还有多久，过完显示已过几天',
+  TileKind.worldClock => '第二个时区的当前时间',
+  TileKind.note => '自己写一行字，点一下编辑',
+  TileKind.netSpeed => '实时下行/上行速率（部分机型不支持）',
+  TileKind.overview => '电量、内存、存储、流量四个小格',
   TileKind.unknown => '当前版本不支持这种磁贴，点一下可以移除',
   TileKind.app => '',
 };
@@ -881,6 +1157,20 @@ IconData infoTileIcon(TileKind kind) => switch (kind) {
   TileKind.neglected => Icons.hourglass_disabled,
   TileKind.folder => Icons.folder_outlined,
   TileKind.action => Icons.touch_app_outlined,
+  TileKind.favorites => Icons.star_outline,
+  TileKind.biggest => Icons.donut_large,
+  TileKind.snapshot => Icons.camera_alt_outlined,
+  TileKind.unorganized => Icons.cleaning_services_outlined,
+  TileKind.cache => Icons.download_done,
+  TileKind.backupList => Icons.playlist_add_check,
+  TileKind.torch => Icons.flashlight_on,
+  TileKind.uptime => Icons.timelapse,
+  TileKind.dial => Icons.call,
+  TileKind.countdown => Icons.event_available,
+  TileKind.worldClock => Icons.public,
+  TileKind.note => Icons.sticky_note_2_outlined,
+  TileKind.netSpeed => Icons.speed,
+  TileKind.overview => Icons.dashboard_outlined,
   TileKind.unknown => Icons.help_outline,
   TileKind.app => Icons.apps,
 };

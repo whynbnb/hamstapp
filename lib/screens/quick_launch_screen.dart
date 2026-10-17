@@ -2054,6 +2054,7 @@ class _Tile extends StatelessWidget {
     if (packageName.isNotEmpty) {
       return () => launchApp(context, packageName);
     }
+    if (!infoTileIsTappable(tile.kind)) return null;
     return () => handleInfoTileTap(context, state, tile);
   }
 

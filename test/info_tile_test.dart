@@ -5,6 +5,10 @@ import 'package:provider/provider.dart';
 
 import 'package:hamstapp/l10n/app_strings.dart';
 import 'package:hamstapp/models/app_info.dart';
+import 'package:hamstapp/models/app_meta.dart';
+import 'package:hamstapp/models/backup_list.dart';
+import 'package:hamstapp/models/snapshot.dart';
+import 'package:hamstapp/models/snapshot_diff.dart';
 import 'package:hamstapp/models/tile.dart';
 import 'package:hamstapp/models/tile_page.dart';
 import 'package:hamstapp/screens/quick_launch_screen.dart';
@@ -162,6 +166,92 @@ void main() {
         'pageId': 'p1',
       });
       expect(empty.kind, TileKind.unknown);
+    });
+
+    test('the unorganized rule skips anything the user touched', () {
+      expect(AppState.isUnorganized(AppMeta(packageName: 'a')), isTrue);
+      expect(
+        AppState.isUnorganized(
+          AppMeta(packageName: 'a', categoryIds: const ['c1']),
+        ),
+        isFalse,
+      );
+      expect(
+        AppState.isUnorganized(AppMeta(packageName: 'a', reason: 'r')),
+        isFalse,
+      );
+      expect(
+        AppState.isUnorganized(AppMeta(packageName: 'a', note: 'n')),
+        isFalse,
+      );
+      expect(
+        AppState.isUnorganized(AppMeta(packageName: 'a', favorite: true)),
+        isFalse,
+      );
+      expect(
+        AppState.isUnorganized(AppMeta(packageName: 'a', pinned: true)),
+        isFalse,
+      );
+    });
+
+    test('world clock labels fall back to the raw offset', () {
+      expect(worldClockLabel(480), 'UTC+8');
+      expect(worldClockLabel(-300), 'UTC-5');
+      expect(worldClockLabel(330), 'UTC+5:30');
+      expect(worldClockLabel(75), 'UTC+1:15');
+    });
+
+    test('the snapshot tile diffs the newest snapshot against now', () {
+      final state = AppState(_MemStorage())
+        ..initialized = true
+        ..apps = [appOf('com.a', name: 'A', versionCode: 2),
+          appOf('com.b', name: 'B'),];
+      // One snapshot, taken before com.a was updated and com.b installed.
+      state.snapshots = [
+        Snapshot(
+          id: 's1',
+          name: '旧的',
+          createdAt: DateTime.now()
+              .subtract(const Duration(days: 3))
+              .millisecondsSinceEpoch,
+          entries: [
+            SnapshotEntry(
+              packageName: 'com.a',
+              appName: 'A',
+              versionName: '1.0',
+              versionCode: 1,
+              lastUpdateTime: 0,
+              firstInstallTime: 0,
+              isSystem: false,
+              sizeBytes: 0,
+            ),
+          ],
+        ),
+      ];
+      expect(state.latestSnapshot?.id, 's1');
+      final diff = SnapshotDiff.between(
+        state.latestSnapshot!,
+        state.currentDeviceSnapshot(),
+      );
+      expect(diff.updated.map((d) => d.packageName), ['com.a']);
+      expect(diff.added.map((d) => d.packageName), ['com.b']);
+      expect(diff.removed, isEmpty);
+    });
+
+    test('a backup list reports what is installed and what is missing', () {
+      final state = AppState(_MemStorage())
+        ..initialized = true
+        ..apps = [appOf('com.a', name: 'A')]
+        ..backupLists = [
+          BackupList(
+            id: 'l1',
+            name: '常用',
+            createdAt: 0,
+            updatedAt: 0,
+          )..packageNames = ['com.a', 'com.gone'],
+        ];
+      expect(state.backupListCounts('l1'), (1, 1));
+      expect(state.backupListCounts('nope'), (0, 0));
     });
 
     test('every info kind has a usable default size', () {
@@ -432,6 +522,23 @@ void main() {
     });
   });
 }
+
+/// A minimal installed app for the tile tests.
+AppInfo appOf(String pkg, {String name = '', int versionCode = 1}) => AppInfo(
+  packageName: pkg,
+  appName: name.isEmpty ? pkg : name,
+  versionName: '$versionCode.0',
+  versionCode: versionCode,
+  firstInstallTime: 0,
+  lastUpdateTime: 0,
+  isSystem: false,
+  enabled: true,
+  apkPath: '',
+  sizeBytes: 0,
+  targetSdk: 33,
+  minSdk: 21,
+  uid: 0,
+);
 
 /// The info kinds, spelled out so a new one cannot be forgotten by the tests.
 const List<TileKind> kTestInfoKinds = <TileKind>[

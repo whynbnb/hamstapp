@@ -2674,16 +2674,7 @@ class AppState extends ChangeNotifier {
           if (metaFor(app.packageName).reason.isEmpty) return false;
           break;
         case AppFilter.unorganized:
-          // "Organized" covers anything the user has already invested in from
-          // the launch tab: categories, reasons/notes, favorites and tiles.
-          final m = metaFor(app.packageName);
-          if (m.categoryIds.isNotEmpty ||
-              m.reason.isNotEmpty ||
-              m.note.isNotEmpty ||
-              m.favorite ||
-              m.pinned) {
-            return false;
-          }
+          if (!isUnorganized(metaFor(app.packageName))) return false;
           break;
         case AppFilter.uninstalled:
           // Handled separately via [uninstalledApps].
@@ -2755,6 +2746,64 @@ class AppState extends ChangeNotifier {
       );
 
   /// Apps launched from this app, most recent first.
+  /// "Organized" covers anything the user has already invested in from the
+  /// launch tab: categories, reasons/notes, favorites and tiles. Shared by the
+  /// 应用 page's 未整理 filter and the 未整理 tile, so both agree.
+  static bool isUnorganized(AppMeta m) =>
+      m.categoryIds.isEmpty &&
+      m.reason.isEmpty &&
+      m.note.isEmpty &&
+      !m.favorite &&
+      !m.pinned;
+
+  /// Apps that are not sorted out yet.
+  List<AppInfo> get unorganizedApps =>
+      apps.where((a) => isUnorganized(metaFor(a.packageName))).toList();
+
+  /// The newest stored snapshot, or null when none was taken.
+  Snapshot? get latestSnapshot {
+    if (snapshots.isEmpty) return null;
+    var newest = snapshots.first;
+    for (final s in snapshots) {
+      if (s.createdAt > newest.createdAt) newest = s;
+    }
+    return newest;
+  }
+
+  /// What is on the device right now, as a snapshot, so it can be diffed
+  /// against a stored one (same shape the 快照 page compares against).
+  Snapshot currentDeviceSnapshot() => Snapshot(
+    id: 'current',
+    name: AppStrings.current.t('当前设备'),
+    createdAt: DateTime.now().millisecondsSinceEpoch,
+    entries: [
+      for (final a in apps)
+        SnapshotEntry(
+          packageName: a.packageName,
+          appName: a.appName,
+          versionName: a.versionName,
+          versionCode: a.versionCode,
+          lastUpdateTime: a.lastUpdateTime,
+          firstInstallTime: a.firstInstallTime,
+          isSystem: a.isSystem,
+          sizeBytes: a.sizeBytes,
+          icon: iconFor(a.packageName),
+        ),
+    ],
+  );
+
+  /// How many of a backup list's apps are installed and how many are missing.
+  (int installed, int missing) backupListCounts(String listId) {
+    for (final list in backupLists) {
+      if (list.id != listId) continue;
+      final installed = list.packageNames
+          .where((p) => appByPackage(p) != null)
+          .length;
+      return (installed, list.packageNames.length - installed);
+    }
+    return (0, 0);
+  }
+
   List<AppInfo> get recentApps => recentAppsBy(RecentSort.recent);
 
   /// Apps launched from this app, optionally filtered to launches at/after

@@ -11,6 +11,7 @@ import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
@@ -18,11 +19,14 @@ import android.content.pm.PermissionInfo
 import android.content.pm.ResolveInfo
 import android.content.pm.Signature
 import android.content.pm.SigningInfo
+import android.hardware.camera2.CameraCharacteristics
+import android.hardware.camera2.CameraManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.net.ConnectivityManager
+import android.net.TrafficStats
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -32,6 +36,7 @@ import android.os.Looper
 import android.os.PowerManager
 import android.os.Process
 import android.os.StatFs
+import android.os.SystemClock
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -90,6 +95,7 @@ class PackageScannerPlugin(
         // Load the persisted unread-notification state as soon as the bridge
         // exists, so counts are available even before the listener connects.
         NotificationStore.init(context)
+        registerTorchCallback()
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -329,6 +335,16 @@ class PackageScannerPlugin(
             }
             "openNextAlarm" -> mainHandler.post {
                 result.success(openNextAlarm())
+            }
+            "setTorch" -> {
+                val on = call.argument<Boolean>("on") ?: false
+                mainHandler.post { result.success(setTorch(on)) }
+            }
+            "trafficTotals" -> executor.execute {
+                val totals = runCatching { trafficTotals() }.getOrElse {
+                    mapOf("rx" to 0L, "tx" to 0L, "supported" to false)
+                }
+                mainHandler.post { result.success(totals) }
             }
             "remoteTest" -> {
                 val config = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
@@ -2866,6 +2882,12 @@ class PackageScannerPlugin(
             (context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager)
                 ?.nextAlarmClock
         }.getOrNull()
+        // Battery temperature comes from the sticky battery broadcast (tenths
+        // of a degree, no permission).
+        val temperature = runCatching {
+            context.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+                ?.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, -1) ?: -1
+        }.getOrDefault(-1)
         return mapOf(
             "level" to level,
             "charging" to charging,
@@ -2874,7 +2896,10 @@ class PackageScannerPlugin(
             "memTotalBytes" to memory.totalMem,
             "memAvailBytes" to memory.availMem,
             "memLow" to memory.lowMemory,
-            "alarmAt" to (alarm?.triggerTime ?: 0L)
+            "alarmAt" to (alarm?.triggerTime ?: 0L),
+            "uptimeMillis" to SystemClock.elapsedRealtime(),
+            "batteryTempC" to (if (temperature > 0) temperature / 10.0 else -1.0),
+            "torchOn" to torchState()
         )
     }
 
@@ -2937,6 +2962,67 @@ class PackageScannerPlugin(
             // it simply reports 0.
             "mobileBytes" to query(ConnectivityManager.TYPE_MOBILE),
             "wifiBytes" to query(ConnectivityManager.TYPE_WIFI)
+        )
+    }
+
+    /** The back camera's torch, when it has one. */
+    private fun torchCameraId(): String? = runCatching {
+        val manager = context.getSystemService(Context.CAMERA_SERVICE)
+            as? CameraManager ?: return null
+        manager.cameraIdList.firstOrNull { id ->
+            val chars = manager.getCameraCharacteristics(id)
+            chars.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true &&
+                chars.get(CameraCharacteristics.LENS_FACING) ==
+                CameraCharacteristics.LENS_FACING_BACK
+        }
+    }.getOrNull()
+
+    /**
+     * Latest known torch state. Android has no public getter, so this is kept
+     * up to date by [torchCallback] plus our own writes — which also means a
+     * torch switched on from the notification shade shows up here.
+     */
+    @Volatile
+    private var torchOn = false
+
+    private fun registerTorchCallback() {
+        runCatching {
+            val manager = context.getSystemService(Context.CAMERA_SERVICE)
+                as? CameraManager ?: return
+            val id = torchCameraId() ?: return
+            manager.registerTorchCallback(
+                object : CameraManager.TorchCallback() {
+                    override fun onTorchModeChanged(cameraId: String, enabled: Boolean) {
+                        if (cameraId == id) torchOn = enabled
+                    }
+                },
+                null
+            )
+        }
+    }
+
+    private fun torchState(): Boolean = torchOn
+
+    /** Turns the torch on/off; returns the state afterwards. */
+    private fun setTorch(on: Boolean): Boolean = runCatching {
+        val manager = context.getSystemService(Context.CAMERA_SERVICE)
+            as? CameraManager ?: return false
+        val id = torchCameraId() ?: return false
+        manager.setTorchMode(id, on)
+        torchOn = on
+        true
+    }.getOrDefault(false)
+
+    /** Device-wide bytes since boot, for a live throughput reading. */
+    private fun trafficTotals(): Map<String, Any?> {
+        val rx = TrafficStats.getTotalRxBytes()
+        val tx = TrafficStats.getTotalTxBytes()
+        val unsupported = TrafficStats.UNSUPPORTED.toLong()
+        val supported = rx != unsupported && tx != unsupported
+        return mapOf(
+            "rx" to (if (rx > 0) rx else 0L),
+            "tx" to (if (tx > 0) tx else 0L),
+            "supported" to supported
         )
     }
 

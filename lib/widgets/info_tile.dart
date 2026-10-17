@@ -4,11 +4,19 @@ import 'package:flutter/material.dart';
 
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
+import '../models/snapshot_diff.dart';
 import '../models/tile.dart';
 import '../services/device_status.dart';
+import '../services/local_stats.dart';
+import '../services/net_speed.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../services/system_stats.dart';
+import '../screens/apps_screen.dart';
+import '../screens/backup_lists_screen.dart';
+import '../screens/orphan_cache_screen.dart';
+import '../screens/snapshots_screen.dart';
+import '../screens/storage_usage_screen.dart';
 import '../screens/usage_stats_screen.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
@@ -58,6 +66,36 @@ Color infoTileColor(BuildContext context, TileKind kind, {DeviceStatus? status})
       return const Color(0xFF8D6E63);
     case TileKind.folder:
       return const Color(0xFF455A64);
+    case TileKind.favorites:
+      return const Color(0xFFF9A825);
+    case TileKind.biggest:
+      return const Color(0xFF4E342E);
+    case TileKind.snapshot:
+      return const Color(0xFF0277BD);
+    case TileKind.unorganized:
+      return const Color(0xFFEF6C00);
+    case TileKind.cache:
+      return const Color(0xFF78909C);
+    case TileKind.backupList:
+      return const Color(0xFF7E57C2);
+    case TileKind.torch:
+      return (status?.torchOn ?? false)
+          ? const Color(0xFFF9A825)
+          : const Color(0xFF607D8B);
+    case TileKind.uptime:
+      return const Color(0xFF26A69A);
+    case TileKind.dial:
+      return const Color(0xFF43A047);
+    case TileKind.countdown:
+      return const Color(0xFFD81B60);
+    case TileKind.worldClock:
+      return const Color(0xFF5C6BC0);
+    case TileKind.note:
+      return const Color(0xFFA1887F);
+    case TileKind.netSpeed:
+      return const Color(0xFF0097A7);
+    case TileKind.overview:
+      return const Color(0xFF263238);
     case TileKind.action:
       return const Color(0xFF546E7A);
     case TileKind.unknown:
@@ -109,6 +147,60 @@ void handleInfoTileTap(BuildContext context, AppState state, Tile tile) {
       } else {
         showFolderSheet(context, state, tile);
       }
+    case TileKind.favorites:
+      showAppListSheet(
+        context,
+        state,
+        tile.kind,
+        apps: state.favorites,
+      );
+    case TileKind.biggest:
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const StorageUsageScreen()),
+      );
+    case TileKind.snapshot:
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const SnapshotsScreen()),
+      );
+    case TileKind.unorganized:
+      // Same filter the 应用 page offers, so the list matches this count.
+      state.filter = AppFilter.unorganized;
+      state.refresh();
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const AppsScreen()),
+      );
+    case TileKind.cache:
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const OrphanCacheScreen()),
+      );
+    case TileKind.backupList:
+      final listId = tile.optionString('list');
+      final exists = state.backupLists.any((b) => b.id == listId);
+      if (listId.isEmpty || !exists) {
+        showInfoTileSettings(context, state, tile);
+      } else {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => BackupListDetailScreen(listId: listId),
+          ),
+        );
+      }
+    case TileKind.torch:
+      unawaited(_toggleTorch());
+    case TileKind.dial:
+      final number = tile.optionString('number');
+      if (number.isEmpty) {
+        showInfoTileSettings(context, state, tile);
+      } else {
+        unawaited(NativeApps.openUrl('tel:$number'));
+      }
+    case TileKind.countdown || TileKind.worldClock || TileKind.note:
+      showInfoTileSettings(context, state, tile);
     case TileKind.traffic:
       showTrafficSheet(context);
     case TileKind.memory:
@@ -129,11 +221,23 @@ void handleInfoTileTap(BuildContext context, AppState state, Tile tile) {
       runInfoTileAction(context, state, tile);
     case TileKind.unknown:
       showUnsupportedTileDialog(context, state, tile);
-    case TileKind.clock || TileKind.date || TileKind.battery:
+    case TileKind.clock ||
+        TileKind.date ||
+        TileKind.battery ||
+        TileKind.uptime ||
+        TileKind.netSpeed ||
+        TileKind.overview:
       break;
     case TileKind.app:
       break;
   }
+}
+
+/// Flips the camera torch and reads the new state back.
+Future<void> _toggleTorch() async {
+  final on = DeviceStatusService.instance.status.torchOn;
+  await NativeApps.setTorch(!on);
+  await DeviceStatusService.instance.refresh(force: true);
 }
 
 /// Apps installed within the last [days] days, newest first.
@@ -163,6 +267,25 @@ List<AppInfo> frequentApps(AppState state, Tile tile) {
     for (final pkg in packages)
       if (state.appByPackage(pkg) != null) state.appByPackage(pkg)!,
   ];
+}
+
+/// Apps taking the most space. Defaults to APK size, which needs no
+/// permission; the "with data" mode uses the system's per-app statistics and
+/// falls back to APK size when that is not granted.
+List<AppInfo> biggestApps(AppState state, Tile tile) {
+  if (tile.optionString('mode', 'apk') == 'total') {
+    final entries = BigAppsService.instance.entries;
+    if (BigAppsService.instance.permitted && entries.isNotEmpty) {
+      return [
+        for (final e in entries.take(4))
+          if (state.appByPackage(e.packageName) != null)
+            state.appByPackage(e.packageName)!,
+      ];
+    }
+  }
+  final list = [...state.installedApps]
+    ..sort((a, b) => b.sizeBytes.compareTo(a.sizeBytes));
+  return list.take(4).toList();
 }
 
 /// Apps that used to be opened routinely but not in the last [days] days
@@ -208,6 +331,9 @@ class _InfoTileContentState extends State<InfoTileContent> {
     super.initState();
     DeviceStatusService.instance.addListener(_onChanged);
     SystemStatsService.instance.addListener(_onChanged);
+    CacheStatsService.instance.addListener(_onChanged);
+    BigAppsService.instance.addListener(_onChanged);
+    NetSpeedService.instance.addListener(_onChanged);
     NotificationBadges.instance.addListener(_onChanged);
     _schedule();
   }
@@ -227,6 +353,9 @@ class _InfoTileContentState extends State<InfoTileContent> {
     _timer?.cancel();
     DeviceStatusService.instance.removeListener(_onChanged);
     SystemStatsService.instance.removeListener(_onChanged);
+    CacheStatsService.instance.removeListener(_onChanged);
+    BigAppsService.instance.removeListener(_onChanged);
+    NetSpeedService.instance.removeListener(_onChanged);
     NotificationBadges.instance.removeListener(_onChanged);
     super.dispose();
   }
@@ -253,10 +382,30 @@ class _InfoTileContentState extends State<InfoTileContent> {
     if (kind == TileKind.battery ||
         kind == TileKind.storage ||
         kind == TileKind.memory ||
-        kind == TileKind.alarm) {
+        kind == TileKind.alarm ||
+        kind == TileKind.torch) {
       unawaited(DeviceStatusService.instance.refresh());
       _timer = Timer.periodic(const Duration(seconds: 60), (_) {
         unawaited(DeviceStatusService.instance.refresh(force: true));
+      });
+      return;
+    }
+    if (kind == TileKind.cache || kind == TileKind.biggest) {
+      unawaited(CacheStatsService.instance.refresh());
+      unawaited(BigAppsService.instance.refresh());
+      _timer = Timer.periodic(const Duration(minutes: 5), (_) {
+        unawaited(CacheStatsService.instance.refresh(force: true));
+        unawaited(BigAppsService.instance.refresh(force: true));
+      });
+      return;
+    }
+    if (kind == TileKind.countdown ||
+        kind == TileKind.worldClock ||
+        kind == TileKind.uptime ||
+        kind == TileKind.snapshot) {
+      // These change slowly; a minute is plenty to stay truthful.
+      _timer = Timer.periodic(const Duration(minutes: 1), (_) {
+        if (mounted) setState(() {});
       });
       return;
     }
@@ -415,6 +564,110 @@ class _InfoTileContentState extends State<InfoTileContent> {
             );
           case TileKind.folder:
             return _folder(context, s, fg, shortest, pad, showCaption);
+          case TileKind.favorites:
+            return _appGrid(
+              context,
+              s,
+              fg,
+              shortest,
+              pad,
+              showCaption,
+              widget.state?.favorites,
+              s.t('收藏'),
+              s.t('还没有收藏'),
+            );
+          case TileKind.biggest:
+            return _appGrid(
+              context,
+              s,
+              fg,
+              shortest,
+              pad,
+              showCaption,
+              widget.state == null
+                  ? null
+                  : biggestApps(widget.state!, tile),
+              s.t('占用最大'),
+              s.t('没有数据'),
+            );
+          case TileKind.snapshot:
+            return _snapshot(s, fg, shortest, pad, showCaption);
+          case TileKind.unorganized:
+            final count = widget.state?.unorganizedApps.length ?? 0;
+            return _value(
+              s,
+              fg,
+              shortest,
+              pad,
+              showCaption,
+              '$count',
+              count == 0 ? s.t('都整理好了') : s.t('个应用待整理'),
+            );
+          case TileKind.cache:
+            final cache = CacheStatsService.instance;
+            return _value(
+              s,
+              fg,
+              shortest,
+              pad,
+              showCaption,
+              Fmt.storage(cache.bytes),
+              cache.count == 0
+                  ? s.t('没有缓存的安装包')
+                  : s.t('{n} 个安装包', {'n': cache.count}),
+            );
+          case TileKind.backupList:
+            return _backupList(s, fg, shortest, pad, showCaption, tile);
+          case TileKind.torch:
+            final on = status.torchOn;
+            return _iconLabel(
+              s,
+              fg,
+              shortest,
+              pad,
+              on ? Icons.flashlight_on : Icons.flashlight_off,
+              s.t(on ? '已开' : '已关'),
+            );
+          case TileKind.uptime:
+            return _value(
+              s,
+              fg,
+              shortest,
+              pad,
+              showCaption,
+              status.hasUptime ? Fmt.spanned(status.uptimeMillis) : '--',
+              s.t('已开机'),
+            );
+          case TileKind.dial:
+            return _iconLabel(
+              s,
+              fg,
+              shortest,
+              pad,
+              Icons.call,
+              tile.optionString('label').isEmpty
+                  ? s.t('点一下设置号码')
+                  : tile.optionString('label'),
+            );
+          case TileKind.countdown:
+            return _countdown(s, fg, shortest, pad, showCaption, tile);
+          case TileKind.worldClock:
+            return _worldClock(s, fg, shortest, pad, showCaption, tile);
+          case TileKind.note:
+            return _note(s, fg, pad, tile);
+          case TileKind.netSpeed:
+            final net = NetSpeedService.instance;
+            return _value(
+              s,
+              fg,
+              shortest,
+              pad,
+              showCaption,
+              net.supported ? '↓ ${Fmt.speed(net.downBytesPerSecond)}' : s.t('不支持'),
+              '↑ ${Fmt.speed(net.upBytesPerSecond)}',
+            );
+          case TileKind.overview:
+            return _overview(s, fg, pad, status, showCaption);
           case TileKind.action:
             return _action(s, fg, shortest, pad);
           case TileKind.unknown:
@@ -615,6 +868,7 @@ class _InfoTileContentState extends State<InfoTileContent> {
     );
   }
 
+  /// Battery level, temperature, or both (the tile's own setting).
   Widget _battery(
     AppStrings s,
     Color fg,
@@ -623,6 +877,9 @@ class _InfoTileContentState extends State<InfoTileContent> {
     DeviceStatus status,
     bool showCaption,
   ) {
+    final mode = widget.tile.optionString('mode', 'level');
+    final showLevel = mode != 'temp';
+    final showTemp = mode != 'level' && status.hasTemp;
     return Center(
       child: Padding(
         padding: EdgeInsets.all(pad),
@@ -634,24 +891,36 @@ class _InfoTileContentState extends State<InfoTileContent> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    status.hasLevel ? '${status.level}%' : '--',
-                    style: TextStyle(
-                      color: fg,
-                      fontWeight: FontWeight.w700,
-                      fontSize: shortest * 0.34,
-                      height: 1.1,
+                  if (showLevel)
+                    Text(
+                      status.hasLevel ? '${status.level}%' : '--',
+                      style: TextStyle(
+                        color: fg,
+                        fontWeight: FontWeight.w700,
+                        fontSize: shortest * 0.34,
+                        height: 1.1,
+                      ),
                     ),
-                  ),
-                  if (status.charging) ...[
+                  if (showLevel && status.charging) ...[
                     SizedBox(width: shortest * 0.04),
                     Icon(Icons.bolt, color: fg, size: shortest * 0.22),
                   ],
+                  if (showLevel && showTemp) SizedBox(width: shortest * 0.06),
+                  if (showTemp)
+                    Text(
+                      '${status.batteryTempC.toStringAsFixed(1)}°',
+                      style: TextStyle(
+                        color: fg,
+                        fontWeight: FontWeight.w700,
+                        fontSize: shortest * (showLevel ? 0.2 : 0.34),
+                        height: 1.1,
+                      ),
+                    ),
                 ],
               ),
               if (showCaption)
                 Text(
-                  s.t('电量'),
+                  showTemp && !showLevel ? s.t('电池温度') : s.t('电量'),
                   style: TextStyle(
                     color: fg.withValues(alpha: 0.85),
                     fontSize: shortest * 0.13,
@@ -826,6 +1095,296 @@ class _InfoTileContentState extends State<InfoTileContent> {
     );
   }
 
+  /// The newest snapshot's age over how the device differs from it now.
+  Widget _snapshot(
+    AppStrings s,
+    Color fg,
+    double shortest,
+    double pad,
+    bool showCaption,
+  ) {
+    final state = widget.state;
+    final latest = state?.latestSnapshot;
+    if (state == null || latest == null) {
+      return _value(
+        s,
+        fg,
+        shortest,
+        pad,
+        showCaption,
+        '--',
+        s.t('还没有快照'),
+      );
+    }
+    final diff = SnapshotDiff.between(latest, state.currentDeviceSnapshot());
+    final parts = <String>[
+      if (diff.added.isNotEmpty) s.t('新增 {n}', {'n': diff.added.length}),
+      if (diff.removed.isNotEmpty) s.t('卸载 {n}', {'n': diff.removed.length}),
+      if (diff.updated.isNotEmpty) s.t('更新 {n}', {'n': diff.updated.length}),
+    ];
+    return _value(
+      s,
+      fg,
+      shortest,
+      pad,
+      showCaption,
+      Fmt.relative(latest.createdAt),
+      parts.isEmpty ? s.t('和现在一致') : parts.join(' · '),
+    );
+  }
+
+  Widget _backupList(
+    AppStrings s,
+    Color fg,
+    double shortest,
+    double pad,
+    bool showCaption,
+    Tile tile,
+  ) {
+    final state = widget.state;
+    final listId = tile.optionString('list');
+    if (state == null || listId.isEmpty) {
+      return _value(
+        s,
+        fg,
+        shortest,
+        pad,
+        showCaption,
+        '--',
+        s.t('点一下选备份列表'),
+      );
+    }
+    final list = state.backupLists.where((b) => b.id == listId).firstOrNull;
+    if (list == null) {
+      return _value(
+        s,
+        fg,
+        shortest,
+        pad,
+        showCaption,
+        '--',
+        s.t('这个备份列表已删除'),
+      );
+    }
+    final (installed, missing) = state.backupListCounts(listId);
+    return _value(
+      s,
+      fg,
+      shortest,
+      pad,
+      showCaption,
+      missing == 0 ? s.t('齐了') : s.t('缺 {n}', {'n': missing}),
+      s.t('{name} · 已装 {installed}', {
+        'name': list.name,
+        'installed': installed,
+      }),
+    );
+  }
+
+  Widget _countdown(
+    AppStrings s,
+    Color fg,
+    double shortest,
+    double pad,
+    bool showCaption,
+    Tile tile,
+  ) {
+    final title = tile.optionString('title');
+    final at = tile.optionInt('date');
+    if (title.isEmpty || at <= 0) {
+      return _value(
+        s,
+        fg,
+        shortest,
+        pad,
+        showCaption,
+        '--',
+        s.t('点一下设置纪念日'),
+      );
+    }
+    final now = DateTime.now();
+    final days = DateTime.fromMillisecondsSinceEpoch(at)
+        .difference(DateTime(now.year, now.month, now.day))
+        .inDays;
+    final text = days == 0
+        ? s.t('就是今天')
+        : days > 0
+        ? s.t('还有 {n} 天', {'n': days})
+        : s.t('已过 {n} 天', {'n': -days});
+    return _value(s, fg, shortest, pad, showCaption, text, title);
+  }
+
+  Widget _worldClock(
+    AppStrings s,
+    Color fg,
+    double shortest,
+    double pad,
+    bool showCaption,
+    Tile tile,
+  ) {
+    final offset = tile.optionInt('offset', 1 << 30);
+    if (offset == 1 << 30) {
+      return _value(
+        s,
+        fg,
+        shortest,
+        pad,
+        showCaption,
+        '--',
+        s.t('点一下选择时区'),
+      );
+    }
+    final at = DateTime.now().toUtc().add(Duration(minutes: offset));
+    final label = tile.optionString('label');
+    return _value(
+      s,
+      fg,
+      shortest,
+      pad,
+      showCaption,
+      '${at.hour.toString().padLeft(2, '0')}:'
+          '${at.minute.toString().padLeft(2, '0')}',
+      label.isEmpty ? worldClockLabel(offset) : label,
+    );
+  }
+
+  Widget _note(AppStrings s, Color fg, double pad, Tile tile) {
+    final text = tile.optionString('text');
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.all(pad + 2),
+        child: Text(
+          text.isEmpty ? s.t('点一下写点什么') : text,
+          textAlign: TextAlign.center,
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: fg,
+            fontSize: 13,
+            height: 1.3,
+            fontWeight: text.isEmpty ? FontWeight.w400 : FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Battery / memory / storage / data as four mini cells.
+  Widget _overview(
+    AppStrings s,
+    Color fg,
+    double pad,
+    DeviceStatus status,
+    bool showCaption,
+  ) {
+    final traffic = SystemStatsService.instance.traffic;
+    Widget cell(String label, String value) => Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: fg.withValues(alpha: 0.8),
+            fontSize: 10.5,
+            height: 1.1,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: fg,
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+            height: 1.2,
+          ),
+        ),
+      ],
+    );
+    return Padding(
+      padding: EdgeInsets.all(pad + 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: cell(
+                    s.t('电量'),
+                    status.hasLevel ? '${status.level}%' : '--',
+                  ),
+                ),
+                Expanded(
+                  child: cell(
+                    s.t('内存'),
+                    status.hasMemory
+                        ? '${(status.memUsedFraction * 100).round()}%'
+                        : '--',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(
+                  child: cell(
+                    s.t('存储空间'),
+                    status.hasStorage
+                        ? '${(status.usedFraction * 100).round()}%'
+                        : '--',
+                  ),
+                ),
+                Expanded(
+                  child: cell(
+                    s.t('流量'),
+                    traffic.permitted ? Fmt.storage(traffic.totalBytes) : '--',
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Icon over a label, for the simple action-ish tiles.
+  Widget _iconLabel(
+    AppStrings s,
+    Color fg,
+    double shortest,
+    double pad,
+    IconData icon,
+    String label,
+  ) {
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.all(pad),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: fg, size: shortest * 0.34),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: TextStyle(
+                  color: fg,
+                  fontWeight: FontWeight.w600,
+                  fontSize: shortest * 0.14,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   /// A tile whose kind this build does not support: say so, and let the tap
   /// offer to remove it.
   Widget _unsupported(
@@ -869,28 +1428,13 @@ class _InfoTileContentState extends State<InfoTileContent> {
   /// A tile that runs one action: icon + label.
   Widget _action(AppStrings s, Color fg, double shortest, double pad) {
     final action = widget.tile.optionString('action', 'scan');
-    return Center(
-      child: Padding(
-        padding: EdgeInsets.all(pad),
-        child: FittedBox(
-          fit: BoxFit.scaleDown,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(actionIcon(action), color: fg, size: shortest * 0.34),
-              const SizedBox(height: 4),
-              Text(
-                s.t(actionTitle(action)),
-                style: TextStyle(
-                  color: fg,
-                  fontWeight: FontWeight.w600,
-                  fontSize: shortest * 0.14,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return _iconLabel(
+      s,
+      fg,
+      shortest,
+      pad,
+      actionIcon(action),
+      s.t(actionTitle(action)),
     );
   }
 
