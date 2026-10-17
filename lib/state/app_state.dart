@@ -65,6 +65,10 @@ enum CategorySort { manual, name, count }
 ///   navigation (long-press it to jump back to Launch).
 enum NavMode { auto, bottom, rail, collapsed }
 
+/// Where the page chips sit on the bottom bar when the pages do not fill its
+/// width. [center] is the default; [left] is how a plain list behaves.
+enum TileBarAlign { center, left, right }
+
 /// Which color scheme the app follows.
 ///
 /// - [system]: match the device light/dark setting.
@@ -2655,6 +2659,21 @@ class AppState extends ChangeNotifier {
 
   Future<void> setCompactDensity(bool value) async {
     settings['compact_density'] = value;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Alignment of the page chips on the bottom bar when there is spare room.
+  TileBarAlign get tileBarAlign {
+    final raw = settings['tile_bar_align'] as String?;
+    return TileBarAlign.values.firstWhere(
+      (a) => a.name == raw,
+      orElse: () => TileBarAlign.center,
+    );
+  }
+
+  Future<void> setTileBarAlign(TileBarAlign value) async {
+    settings['tile_bar_align'] = value.name;
     await _persistSettings();
     notifyListeners();
   }

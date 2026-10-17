@@ -353,6 +353,32 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.align_horizontal_center),
+            title: Text(context.strings.t('页面栏对齐')),
+            subtitle: Text(context.strings.t('页面标签不足一行时的位置')),
+            trailing: DropdownButton<TileBarAlign>(
+              value: state.tileBarAlign,
+              underline: const SizedBox.shrink(),
+              onChanged: (v) {
+                if (v != null) state.setTileBarAlign(v);
+              },
+              items: [
+                DropdownMenuItem(
+                  value: TileBarAlign.center,
+                  child: Text(context.strings.t('居中')),
+                ),
+                DropdownMenuItem(
+                  value: TileBarAlign.left,
+                  child: Text(context.strings.t('居左')),
+                ),
+                DropdownMenuItem(
+                  value: TileBarAlign.right,
+                  child: Text(context.strings.t('居右')),
+                ),
+              ],
+            ),
+          ),
           SwitchListTile(
             secondary: const Icon(Icons.lock_outline),
             title: Text(context.strings.t('锁定磁贴布局')),

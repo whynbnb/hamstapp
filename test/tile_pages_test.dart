@@ -46,6 +46,20 @@ AppState _state() => AppState(_MemStorage())
   ..currentTilePageIndex = 0;
 
 void main() {
+  test('the page bar alignment is remembered', () async {
+    final storage = _MemStorage();
+    final state = AppState(storage)..initialized = true;
+    expect(state.tileBarAlign, TileBarAlign.center);
+
+    await state.setTileBarAlign(TileBarAlign.right);
+
+    final restored = AppState(storage)
+      ..initialized = true
+      ..settings = (await storage.readJson('settings') as Map)
+          .cast<String, dynamic>();
+    expect(restored.tileBarAlign, TileBarAlign.right);
+  });
+
   testWidgets('long press a page tab does nothing outside edit mode', (
     tester,
   ) async {
@@ -83,6 +97,71 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('重命名页面'), findsOneWidget);
+  });
+
+  testWidgets('the page bar centres its chips by default', (tester) async {
+    tester.view.physicalSize = const Size(1000, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final state = _state();
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(state.tileBarAlign, TileBarAlign.center);
+    final centered = tester.getCenter(find.text('P1')).dx;
+
+    await state.setTileBarAlign(TileBarAlign.left);
+    await tester.pump();
+    final left = tester.getCenter(find.text('P1')).dx;
+
+    await state.setTileBarAlign(TileBarAlign.right);
+    await tester.pump();
+    final right = tester.getCenter(find.text('P1')).dx;
+
+    expect(left, lessThan(centered));
+    expect(centered, lessThan(right));
+    // Centred: the first chip is well past the left padding, but not at the
+    // right edge either.
+    expect(centered, greaterThan(left + 20));
+    expect(right, greaterThan(centered + 20));
+  });
+
+  testWidgets('the page menu offers the alignment and applies it', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1000, 1600);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(() {
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
+    });
+    final state = _state()..tileEditMode = true;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: QuickLaunchScreen()),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    await tester.longPress(find.text('P2'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('内容不足时的位置'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, '居右'));
+    await tester.pumpAndSettle();
+
+    expect(state.tileBarAlign, TileBarAlign.right);
+    // Choosing closes the menu.
+    expect(find.text('内容不足时的位置'), findsNothing);
   });
 
   testWidgets('deleting a page from the manager asks for confirmation', (

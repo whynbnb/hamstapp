@@ -1745,89 +1745,105 @@ class _PageBar extends StatelessWidget {
     final pages = state.tilePages;
     if (pages.isEmpty) return const SizedBox.shrink();
 
-    final chips = ListView.builder(
-      scrollDirection: Axis.horizontal,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      itemCount: pages.length,
-      itemBuilder: (context, i) {
-        final page = pages[i];
-        final selected = i == currentIndex;
-        final count = state.pinCountOnPage(page);
-        final fg = selected
-            ? scheme.onPrimaryContainer
-            : scheme.onSurfaceVariant;
-        // A single glyph (one character, or one emoji even if it is a multi-code
-        // point sequence such as a ZWJ family or a flag) gets a larger font
-        // while the capsule keeps the same height/size.
-        final isSingle = !editing && page.name.trim().characters.length == 1;
-        final hPad = isSingle ? 8.0 : (editing ? 14.0 : 10.0);
-        final baseFont = editing ? 13.0 : 12.0;
-        return Padding(
-          padding: EdgeInsets.symmetric(
-            horizontal: 3,
-            vertical: editing ? 8 : 6,
-          ),
-          child: GestureDetector(
-            onTap: () => onSelect(i),
-            // Page management (rename / reorder / delete) lives in the
-            // dedicated management screen reached from edit mode; outside edit
-            // mode a long press does nothing.
-            onLongPress: editing
-                ? () => _pageMenu(context, state, i, onChanged)
-                : null,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: EdgeInsets.symmetric(horizontal: hPad),
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    color: selected
-                        ? scheme.primaryContainer
-                        : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-                    borderRadius: BorderRadius.circular(editing ? 20 : 14),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
+    Widget chipAt(int i) {
+      final page = pages[i];
+      final selected = i == currentIndex;
+      final count = state.pinCountOnPage(page);
+      final fg = selected ? scheme.onPrimaryContainer : scheme.onSurfaceVariant;
+      // A single glyph (one character, or one emoji even if it is a multi-code
+      // point sequence such as a ZWJ family or a flag) gets a larger font
+      // while the capsule keeps the same height/size.
+      final isSingle = !editing && page.name.trim().characters.length == 1;
+      final hPad = isSingle ? 8.0 : (editing ? 14.0 : 10.0);
+      final baseFont = editing ? 13.0 : 12.0;
+      return Padding(
+        padding: EdgeInsets.symmetric(horizontal: 3, vertical: editing ? 8 : 6),
+        child: GestureDetector(
+          onTap: () => onSelect(i),
+          // Page management (rename / reorder / delete) lives in the
+          // dedicated management screen reached from edit mode; outside edit
+          // mode a long press does nothing.
+          onLongPress: editing
+              ? () => _pageMenu(context, state, i, onChanged)
+              : null,
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: EdgeInsets.symmetric(horizontal: hPad),
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: selected
+                      ? scheme.primaryContainer
+                      : scheme.surfaceContainerHighest.withValues(alpha: 0.6),
+                  borderRadius: BorderRadius.circular(editing ? 20 : 14),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      page.name,
+                      style: TextStyle(
+                        fontSize: isSingle ? 18 : baseFont,
+                        height: isSingle ? 1.0 : null,
+                        fontWeight: selected
+                            ? FontWeight.w700
+                            : FontWeight.w500,
+                        color: fg,
+                      ),
+                    ),
+                    if (editing) ...[
+                      const SizedBox(width: 5),
                       Text(
-                        page.name,
+                        '$count',
                         style: TextStyle(
-                          fontSize: isSingle ? 18 : baseFont,
-                          height: isSingle ? 1.0 : null,
-                          fontWeight: selected
-                              ? FontWeight.w700
-                              : FontWeight.w500,
-                          color: fg,
+                          fontSize: 11,
+                          color: fg.withValues(alpha: 0.7),
                         ),
                       ),
-                      if (editing) ...[
-                        const SizedBox(width: 5),
-                        Text(
-                          '$count',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: fg.withValues(alpha: 0.7),
-                          ),
-                        ),
-                      ],
                     ],
-                  ),
+                  ],
                 ),
-                // Floats over the chip's top-right corner so it never widens
-                // the chip or shifts the row.
-                if (!editing)
-                  Positioned(
-                    top: -5,
-                    right: -5,
-                    child: _PageUnreadBadge(page: page, state: state),
-                  ),
-              ],
+              ),
+              // Floats over the chip's top-right corner so it never widens
+              // the chip or shifts the row.
+              if (!editing)
+                Positioned(
+                  top: -5,
+                  right: -5,
+                  child: _PageUnreadBadge(page: page, state: state),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // With only a few pages the chips sit in the middle by default; left and
+    // right are available for people who want the bar to hug an edge.
+    final alignment = switch (state.tileBarAlign) {
+      TileBarAlign.center => Alignment.center,
+      TileBarAlign.left => Alignment.centerLeft,
+      TileBarAlign.right => Alignment.centerRight,
+    };
+    final chips = LayoutBuilder(
+      builder: (context, constraints) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: constraints.maxWidth),
+          child: Align(
+            alignment: alignment,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [for (var i = 0; i < pages.length; i++) chipAt(i)],
+              ),
             ),
           ),
-        );
-      },
+        ),
+      ),
     );
 
     return Container(
@@ -1952,6 +1968,52 @@ void _pageMenu(
                         onChanged();
                       }
                     : null,
+              ),
+              const Divider(height: 1),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    s.t('页面栏'),
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 2, 16, 0),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    s.t('内容不足时的位置'),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 8),
+                child: Wrap(
+                  spacing: 8,
+                  children: [
+                    for (final (value, label) in <(TileBarAlign, String)>[
+                      (TileBarAlign.center, s.t('居中')),
+                      (TileBarAlign.left, s.t('居左')),
+                      (TileBarAlign.right, s.t('居右')),
+                    ])
+                      ChoiceChip(
+                        label: Text(label),
+                        selected: state.tileBarAlign == value,
+                        onSelected: (_) async {
+                          await state.setTileBarAlign(value);
+                          // Close so the bar is visible behind the choice.
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        },
+                      ),
+                  ],
+                ),
               ),
               const Divider(height: 1),
               ListTile(
