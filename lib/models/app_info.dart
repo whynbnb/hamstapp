@@ -28,6 +28,12 @@ class AppInfo {
   /// declare one (or when this is not a web app).
   final String webUrl;
 
+  /// The package that installed this app (the store or installer), as the
+  /// system reports it; '' when the app was side-loaded or unknown. It is a
+  /// package name, not a label: the UI resolves it to a name when that package
+  /// is itself installed.
+  final String installer;
+
   /// Whether this is a web entry the user added by hand rather than an
   /// installed package. Such an entry has a synthetic package name
   /// ([WebApp.idPrefix]), no APK and nothing to uninstall — its "launch" opens
@@ -52,6 +58,7 @@ class AppInfo {
     this.webUrl = '',
     this.webSignal = '',
     this.isWebEntry = false,
+    this.installer = '',
   });
 
   factory AppInfo.fromMap(Map<dynamic, dynamic> map) {
@@ -73,6 +80,7 @@ class AppInfo {
       webUrl: map['webUrl'] as String? ?? '',
       webSignal: map['webSignal'] as String? ?? '',
       isWebEntry: map['isWebEntry'] as bool? ?? false,
+      installer: map['installer'] as String? ?? '',
     );
   }
 
@@ -101,5 +109,6 @@ class AppInfo {
         'isWebApp': isWebApp,
         'webUrl': webUrl,
         'isWebEntry': isWebEntry,
+        'installer': installer,
       };
 }

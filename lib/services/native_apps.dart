@@ -367,6 +367,88 @@ class SignatureInfo {
   );
 }
 
+/// The snapshot-time facts of one installed app: what it asks for, what it is
+/// signed with and where it lives. Read in one native pass so a snapshot can
+/// answer "what did this update change?" later on.
+class AppFacts {
+  const AppFacts({
+    this.permissions = const <String>[],
+    this.signature = '',
+    this.targetSdk = 0,
+    this.installer = '',
+    this.external = false,
+  });
+
+  /// Declared (requested) permissions, full names, sorted.
+  final List<String> permissions;
+
+  /// SHA-256 of the signing certificate the app is installed with; '' when the
+  /// system would not tell us.
+  final String signature;
+
+  final int targetSdk;
+
+  /// The package that installed the app; '' when side-loaded / unknown.
+  final String installer;
+
+  /// Installed on adopted/removable storage rather than internal memory.
+  final bool external;
+
+  factory AppFacts.fromMap(Map<dynamic, dynamic> m) => AppFacts(
+        permissions:
+            (m['permissions'] as List?)?.map((e) => '$e').toList() ??
+                const <String>[],
+        signature: m['signature'] as String? ?? '',
+        targetSdk: (m['targetSdk'] as num?)?.toInt() ?? 0,
+        installer: m['installer'] as String? ?? '',
+        external: m['external'] as bool? ?? false,
+      );
+}
+
+/// Where an installed app came from, as the system reports it.
+///
+/// [installer] is the package that performed the install (a store, an installer
+/// app), [initiating] the app whose UI started it and [originating] the app the
+/// install is attributed to. The last two are only knowable on Android 11+, so
+/// [detailed] is false there and both stay empty rather than being guessed.
+class InstallSource {
+  const InstallSource({
+    this.installer = '',
+    this.initiating = '',
+    this.originating = '',
+    this.detailed = false,
+  });
+
+  final String installer;
+  final String initiating;
+  final String originating;
+  final bool detailed;
+
+  bool get isEmpty =>
+      installer.isEmpty && initiating.isEmpty && originating.isEmpty;
+
+  factory InstallSource.fromMap(Map<dynamic, dynamic> m) => InstallSource(
+        installer: m['installer'] as String? ?? '',
+        initiating: m['initiating'] as String? ?? '',
+        originating: m['originating'] as String? ?? '',
+        detailed: m['detailed'] as bool? ?? false,
+      );
+}
+
+/// One entry of the launcher's dynamic shortcut list: an app the user launched
+/// recently, offered on a long press of 囤囤's own icon.
+class RecentShortcut {
+  const RecentShortcut({required this.packageName, required this.label});
+
+  final String packageName;
+  final String label;
+
+  Map<String, dynamic> toMap() => {
+        'packageName': packageName,
+        'label': label,
+      };
+}
+
 /// One app holding a sensitive capability.
 class AuditEntry {
   const AuditEntry({
@@ -947,6 +1029,79 @@ class NativeApps {
       return SignatureInfo.fromMap(r.cast<dynamic, dynamic>());
     } catch (_) {
       return null;
+    }
+  }
+
+  /// The wallpaper's own colours (primary first), which is as close to the
+  /// launcher's Material You seed as the public API gets. Empty when the
+  /// platform will not say (Android 8.0 or older).
+  static Future<List<int>> wallpaperColors() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'wallpaperColors',
+      );
+      final colors = (r?['colors'] as List?) ?? const [];
+      return colors
+          // The colour is used as a seed, so it must be fully opaque: some
+          // wallpapers report a translucent primary colour.
+          .map((e) => (e as num).toInt() | 0xFF000000)
+          .where((c) => c != 0xFF000000)
+          .toList(growable: false);
+    } catch (_) {
+      return const <int>[];
+    }
+  }
+
+  /// Publishes (replacing) the dynamic launcher shortcuts: the recent apps a
+  /// long press on 囤囤's own icon should offer. Returns false when the platform
+  /// or the launcher refuses.
+  static Future<bool> setRecentShortcuts(List<RecentShortcut> shortcuts) async {
+    if (shortcuts.isEmpty) {
+      // Clearing on purpose, so the list does not go stale.
+      try {
+        await _channel.invokeMethod<bool>('updateShortcuts', {
+          'shortcuts': const <Map<String, dynamic>>[],
+        });
+      } catch (_) {}
+      return true;
+    }
+    try {
+      return await _channel.invokeMethod<bool>('updateShortcuts', {
+            'shortcuts': [for (final s in shortcuts) s.toMap()],
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Snapshot-time facts of every installed package, keyed by package name.
+  static Future<Map<String, AppFacts>> appFacts() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('appFacts');
+      if (r == null) return const <String, AppFacts>{};
+      return {
+        for (final e in r.entries)
+          '${e.key}': AppFacts.fromMap(
+            (e.value as Map).cast<dynamic, dynamic>(),
+          ),
+      };
+    } catch (_) {
+      return const <String, AppFacts>{};
+    }
+  }
+
+  /// The full install chain of [packageName] (empty when unknown).
+  static Future<InstallSource> installSource(String packageName) async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'installSource',
+        {'packageName': packageName},
+      );
+      if (r == null) return const InstallSource();
+      return InstallSource.fromMap(r);
+    } catch (_) {
+      return const InstallSource();
     }
   }
 

@@ -25,7 +25,21 @@ class _ThemeColorDialog extends StatefulWidget {
 class _ThemeColorDialogState extends State<_ThemeColorDialog> {
   late HSVColor _hsv = HSVColor.fromColor(widget.initial);
 
+  /// The wallpaper's own colours, offered as swatches. Empty on devices that
+  /// will not report them, in which case the row is simply not shown.
+  List<int> _wallpaper = <int>[];
+
   Color get _color => _hsv.toColor();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final colors = await context.read<AppState>().refreshWallpaperColor();
+      if (!mounted) return;
+      setState(() => _wallpaper = colors);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +70,25 @@ class _ThemeColorDialogState extends State<_ThemeColorDialog> {
                     ),
                 ],
               ),
+              if (_wallpaper.isNotEmpty) ...[
+                const SizedBox(height: 20),
+                _Label(s.t('壁纸')),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 12,
+                  children: [
+                    for (final value in _wallpaper)
+                      _Swatch(
+                        color: Color(value),
+                        selected: _color.toARGB32() == value,
+                        onTap: () => setState(
+                          () => _hsv = HSVColor.fromColor(Color(value)),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 20),
               _Label(s.t('自定义')),
               const SizedBox(height: 8),

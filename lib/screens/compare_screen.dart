@@ -6,6 +6,7 @@ import '../models/snapshot.dart';
 import '../models/snapshot_diff.dart';
 import '../state/app_state.dart';
 import '../utils/format.dart';
+import '../utils/permissions.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/uninstall_reason.dart';
 
@@ -34,6 +35,11 @@ class _CompareScreenState extends State<CompareScreen> {
   );
 
   bool _showUnchanged = false;
+  bool _securityOnly = false;
+
+  /// Only the upgrades that changed permissions or the certificate.
+  List<DiffItem> get _updatedItems =>
+      _securityOnly ? _diff.securityUpdates : _diff.updated;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +61,15 @@ class _CompareScreenState extends State<CompareScreen> {
             tabAlignment: TabAlignment.start,
           ),
           actions: [
+            if (_diff.securityUpdates.isNotEmpty)
+              IconButton(
+                tooltip: s.t('只看安全相关的变化'),
+                isSelected: _securityOnly,
+                icon: const Icon(Icons.shield_outlined),
+                selectedIcon: const Icon(Icons.shield),
+                onPressed: () =>
+                    setState(() => _securityOnly = !_securityOnly),
+              ),
             IconButton(
               tooltip: _showUnchanged ? s.t('隐藏未变化') : s.t('显示未变化'),
               icon: Icon(_showUnchanged ? Icons.visibility : Icons.visibility_off),
@@ -78,7 +93,13 @@ class _CompareScreenState extends State<CompareScreen> {
                     emptyText: s.t('没有卸载应用'),
                     allowUninstallReason: true,
                   ),
-                  _DiffList(items: _diff.updated, emptyText: s.t('没有应用更新'), showVersion: true),
+                  _DiffList(
+                    items: _updatedItems,
+                    emptyText: _securityOnly
+                        ? s.t('这次升级没有权限或签名的变化')
+                        : s.t('没有应用更新'),
+                    showVersion: true,
+                  ),
                 ],
               ),
             ),
@@ -142,6 +163,39 @@ class _CompareHeader extends StatelessWidget {
             ),
             style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
           ),
+          if (diff.appsWithNewPermissions > 0 ||
+              diff.appsWithSignatureChange > 0) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Icon(
+                  Icons.shield_outlined,
+                  size: 15,
+                  color: scheme.error,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    [
+                      if (diff.appsWithNewPermissions > 0)
+                        context.strings.t('{n} 个应用新增了权限', {
+                          'n': diff.appsWithNewPermissions,
+                        }),
+                      if (diff.appsWithSignatureChange > 0)
+                        context.strings.t('{n} 个应用换了签名', {
+                          'n': diff.appsWithSignatureChange,
+                        }),
+                    ].join(' · '),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: scheme.error,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -231,6 +285,9 @@ class _DiffTile extends StatelessWidget {
         ? '${item.fromVersion}  →  ${item.toVersion}'
         : '${item.packageName}${item.sizeBytes > 0 ? ' · ${Fmt.size(item.sizeBytes)}' : ''}';
 
+    final details =
+        item.type == DiffType.updated && item.hasDetails ? _changes(context) : null;
+
     return ListTile(
       leading: AppIcon(
         packageName: item.packageName,
@@ -239,12 +296,21 @@ class _DiffTile extends StatelessWidget {
         bytes: item.icon,
       ),
       title: Text(item.appName, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        uninstallReason.isNotEmpty ? '🗑️ $uninstallReason\n$base' : base,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            uninstallReason.isNotEmpty ? '🗑️ $uninstallReason\n$base' : base,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (details != null) ...[
+            const SizedBox(height: 6),
+            details,
+          ],
+        ],
       ),
-      isThreeLine: uninstallReason.isNotEmpty,
+      isThreeLine: uninstallReason.isNotEmpty || details != null,
       trailing: onEditReason != null
           ? IconButton(
               tooltip: uninstallReason.isEmpty
@@ -258,5 +324,194 @@ class _DiffTile extends StatelessWidget {
             )
           : Icon(icon, color: color),
     );
+  }
+
+  /// What the upgrade did beyond bumping the version number: new and dropped
+  /// permissions, a replaced certificate, a target-SDK jump, a different
+  /// install source or a move to external storage.
+  Widget _changes(BuildContext context) {
+    final s = context.strings;
+    final scheme = Theme.of(context).colorScheme;
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final state = context.read<AppState>();
+    final rows = <Widget>[];
+
+    if (item.addedPermissions.isNotEmpty) {
+      rows.add(
+        _permissionRow(
+          context,
+          s.t('新增权限'),
+          item.addedPermissions,
+          scheme.error,
+          scheme.errorContainer,
+        ),
+      );
+    }
+    if (item.removedPermissions.isNotEmpty) {
+      rows.add(
+        _permissionRow(
+          context,
+          s.t('移除权限'),
+          item.removedPermissions,
+          dark ? Colors.green.shade300 : Colors.green.shade800,
+          Colors.green.withValues(alpha: 0.15),
+        ),
+      );
+    }
+    if (item.signatureChanged) {
+      rows.add(
+        _line(
+          context,
+          Icons.gpp_maybe_outlined,
+          scheme.error,
+          s.t('签名已变化'),
+          '${_short(item.fromSignature)} → ${_short(item.toSignature)}',
+        ),
+      );
+    }
+    if (item.fromTargetSdk > 0 &&
+        item.toTargetSdk > 0 &&
+        item.fromTargetSdk != item.toTargetSdk) {
+      rows.add(
+        _line(
+          context,
+          Icons.flag_outlined,
+          scheme.onSurfaceVariant,
+          'targetSdk',
+          '${item.fromTargetSdk} → ${item.toTargetSdk}',
+        ),
+      );
+    }
+    if (item.fromInstaller != item.toInstaller) {
+      rows.add(
+        _line(
+          context,
+          Icons.move_to_inbox_outlined,
+          scheme.onSurfaceVariant,
+          s.t('安装来源'),
+          '${_installer(state, s, item.fromInstaller)}'
+              ' → ${_installer(state, s, item.toInstaller)}',
+        ),
+      );
+    }
+    if (item.fromExternal != item.toExternal) {
+      rows.add(
+        _line(
+          context,
+          Icons.sd_card_outlined,
+          scheme.onSurfaceVariant,
+          s.t('安装位置'),
+          '${item.fromExternal ? s.t('外部存储') : s.t('内部存储')}'
+              ' → ${item.toExternal ? s.t('外部存储') : s.t('内部存储')}',
+        ),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: rows,
+    );
+  }
+
+  Widget _permissionRow(
+    BuildContext context,
+    String label,
+    List<String> permissions,
+    Color color,
+    Color background,
+  ) {
+    final s = context.strings;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Wrap(
+            spacing: 5,
+            runSpacing: 4,
+            children: [
+              for (final p in permissions)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isSensitivePermission(p)
+                        ? background
+                        : Theme.of(context)
+                            .colorScheme
+                            .surfaceContainerHighest
+                            .withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    s.t(permissionLabel(p)),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: isSensitivePermission(p)
+                          ? FontWeight.w700
+                          : FontWeight.w400,
+                      color: isSensitivePermission(p) ? color : null,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _line(
+    BuildContext context,
+    IconData icon,
+    Color color,
+    String label,
+    String value,
+  ) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 5),
+          Text(
+            '$label ',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+          Expanded(
+            child: Text(value, style: const TextStyle(fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The install source as a name when that package is installed, otherwise the
+  /// package name itself; '' is a side-load as far as the system knows.
+  String _installer(AppState state, AppStrings s, String packageName) {
+    if (packageName.isEmpty) return s.t('侧载或未知');
+    final app = state.appByPackage(packageName);
+    if (app == null) return packageName;
+    final label = state.displayNameFor(packageName);
+    return label.isEmpty || label == packageName ? packageName : label;
+  }
+
+  /// `AB:CD:…:12:34` — enough to compare by eye.
+  static String _short(String fingerprint) {
+    if (fingerprint.length <= 20) return fingerprint.isEmpty ? '—' : fingerprint;
+    return '${fingerprint.substring(0, 10)}…'
+        '${fingerprint.substring(fingerprint.length - 8)}';
   }
 }

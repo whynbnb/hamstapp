@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
+import '../state/app_state.dart';
 import '../services/native_apps.dart';
 import '../services/remote_client.dart';
 import '../utils/format.dart';
@@ -621,5 +623,171 @@ class _AppSignatureCardState extends State<AppSignatureCard> {
   static String _short(String fingerprint) {
     if (fingerprint.length <= 24) return fingerprint;
     return '${fingerprint.substring(0, 12)}…${fingerprint.substring(fingerprint.length - 12)}';
+  }
+}
+
+/// Where the app came from: the installer the system recorded, plus — on
+/// Android 11 and newer — who asked for the install and who it is attributed
+/// to. A missing installer is normal for system apps and for anything that was
+/// side-loaded, so it says so instead of leaving a blank.
+class AppInstallSourceCard extends StatefulWidget {
+  const AppInstallSourceCard({super.key, required this.packageName});
+
+  final String packageName;
+
+  @override
+  State<AppInstallSourceCard> createState() => _AppInstallSourceCardState();
+}
+
+class _AppInstallSourceCardState extends State<AppInstallSourceCard> {
+  InstallSource? _source;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final source = await NativeApps.installSource(widget.packageName);
+    if (!mounted) return;
+    setState(() {
+      _source = source;
+      _loading = false;
+    });
+  }
+
+  /// The label of the installer package when it is installed, so a store shows
+  /// its name instead of its package. Falls back to the package name.
+  String _labelFor(AppState state, String packageName) {
+    if (packageName.isEmpty) return '';
+    final app = state.appByPackage(packageName);
+    if (app == null) return packageName;
+    final label = state.displayNameFor(packageName);
+    return label.isEmpty || label == packageName
+        ? packageName
+        : '$label（$packageName）';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.strings;
+    final state = context.read<AppState>();
+    final scheme = Theme.of(context).colorScheme;
+    final source = _source;
+
+    return Card(
+      elevation: 0,
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.4),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.move_to_inbox_outlined,
+                    size: 18, color: scheme.primary),
+                const SizedBox(width: 8),
+                Text(
+                  s.t('安装来源'),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                if (_loading)
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    tooltip: s.t('重新读取'),
+                    icon: const Icon(Icons.refresh, size: 18),
+                    onPressed: _load,
+                  ),
+              ],
+            ),
+            if (!_loading) ...[
+              if (source == null || source.isEmpty) ...[
+                Text(
+                  s.t('系统没有记录安装者：通常是侧载安装（直接装安装包），或者本来就是系统预装的应用。'),
+                  style: const TextStyle(fontSize: 12.5, height: 1.4),
+                ),
+              ] else ...[
+                _row(s, s.t('安装者'), _labelFor(state, source.installer)),
+                if (source.initiating.isNotEmpty &&
+                    source.initiating != source.installer)
+                  _row(s, s.t('发起安装'), _labelFor(state, source.initiating)),
+                if (source.originating.isNotEmpty &&
+                    source.originating != source.installer)
+                  _row(s, s.t('来源应用'), _labelFor(state, source.originating)),
+                if (source.installer.isEmpty &&
+                    (source.initiating.isNotEmpty ||
+                        source.originating.isNotEmpty))
+                  Text(
+                    s.t('系统没有记录安装者，但记录到了发起安装的应用。'),
+                    style: const TextStyle(fontSize: 12.5, height: 1.4),
+                  ),
+                if (!source.detailed) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    s.t('Android 11 以下只能读到安装者，无法区分发起安装的应用。'),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      height: 1.35,
+                      color: Colors.grey.shade600,
+                    ),
+                  ),
+                ],
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(AppStrings s, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(
+              label,
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            ),
+          ),
+          Expanded(
+            child: GestureDetector(
+              onTap: () {
+                Clipboard.setData(ClipboardData(text: value));
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(
+                      content: Text(s.t('已复制')),
+                      duration: const Duration(milliseconds: 1200),
+                    ),
+                  );
+              },
+              child: Text(
+                value.isEmpty ? s.t('未知') : value,
+                style: const TextStyle(fontSize: 13, height: 1.35),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

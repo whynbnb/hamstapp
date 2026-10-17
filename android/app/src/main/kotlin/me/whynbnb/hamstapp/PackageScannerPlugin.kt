@@ -3,6 +3,7 @@ package me.whynbnb.hamstapp
 import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.AppOpsManager
+import android.app.WallpaperManager
 import android.app.usage.NetworkStatsManager
 import android.app.usage.StorageStats
 import android.app.usage.StorageStatsManager
@@ -297,6 +298,41 @@ class PackageScannerPlugin(
                     mainHandler.post { result.success(info) }
                 }
             }
+            // One pass over every installed package for the facts a snapshot
+            // records next to each app: requested permissions, signing
+            // certificate, target SDK, installer and whether it lives on
+            // external storage. A single getInstalledPackages call, so a
+            // snapshot does not turn into hundreds of binder round trips.
+            // The wallpaper's own colours: the closest public API to the
+            // launcher's Material You seed. Empty when the platform will not
+            // tell us (Android 8.0 or older, or a wallpaper that declares
+            // nothing) — the UI then keeps the colour it already has.
+            "wallpaperColors" -> executor.execute {
+                val colors = runCatching { wallpaperColors() }
+                    .getOrDefault(emptyList())
+                mainHandler.post {
+                    result.success(
+                        mapOf("ok" to colors.isNotEmpty(), "colors" to colors)
+                    )
+                }
+            }
+            "appFacts" -> executor.execute {
+                val facts = runCatching { appFacts() }.getOrDefault(emptyMap())
+                mainHandler.post { result.success(facts) }
+            }
+            "installSource" -> {
+                val pkg = call.argument<String>("packageName")
+                executor.execute {
+                    val info = runCatching {
+                        if (pkg.isNullOrEmpty()) {
+                            emptyMap<String, Any?>()
+                        } else {
+                            installSource(pkg)
+                        }
+                    }.getOrDefault(emptyMap())
+                    mainHandler.post { result.success(info) }
+                }
+            }
             "permissionAudit" -> executor.execute {
                 val audit = runCatching { permissionAudit() }.getOrElse {
                     mapOf(
@@ -511,6 +547,134 @@ class PackageScannerPlugin(
         }
     }
 
+    /**
+     * The wallpaper's own colours (primary first). Public API since Android
+     * 8.1, no vendor hooks involved: the launcher's exact Material You seed is
+     * not exposed, so its private colours are used to derive a seed of our own
+     * in Dart.
+     */
+    private fun wallpaperColors(): List<Int> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O_MR1) {
+            return emptyList()
+        }
+        val manager = WallpaperManager.getInstance(context)
+        val colors = manager.getWallpaperColors(WallpaperManager.FLAG_SYSTEM)
+            ?: return emptyList()
+        return listOf("getPrimaryColor", "getSecondaryColor", "getTertiaryColor")
+            .mapNotNull { name -> readWallpaperColor(colors, name) }
+    }
+
+    /**
+     * One of a [WallpaperColors]' colours as an ARGB int.
+     *
+     * Android 15 changed these getters from returning an ARGB int to returning
+     * an `android.graphics.Color` object, which is not binary compatible; the
+     * app still runs on Android 7. Reading them reflectively lets the same code
+     * handle whichever shape the running platform returns, instead of failing
+     * with a link error on one side of the divide.
+     */
+    private fun readWallpaperColor(colors: Any, getter: String): Int? = runCatching {
+        when (val raw = colors.javaClass.getMethod(getter).invoke(colors)) {
+            is Int -> raw
+            null -> null
+            else -> raw.javaClass.getMethod("toArgb").invoke(raw) as? Int
+        }
+    }.getOrNull()
+
+    /**
+     * Per-package facts captured with a snapshot, keyed by package name. The
+     * requested permissions are the declared ones (not the grant state), which
+     * is what "did this update ask for more?" is about.
+     */
+    private fun appFacts(): Map<String, Any?> {
+        val pm = context.packageManager
+        var flags = PackageManager.GET_PERMISSIONS
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            flags = flags or PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            flags = flags or PackageManager.GET_SIGNATURES
+        }
+        val packages = pm.getInstalledPackages(flags)
+        val out = HashMap<String, Any?>(packages.size * 2)
+        for (info in packages) {
+            val app = info.applicationInfo ?: continue
+            val permissions = (info.requestedPermissions ?: emptyArray<String>())
+                .sorted()
+            var sha = ""
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val si = info.signingInfo
+                val arr = if (si != null && si.hasMultipleSigners()) {
+                    si.apkContentsSigners
+                } else {
+                    si?.signingCertificateHistory
+                }
+                sha = arr?.firstOrNull()?.let { certInfo(it)["sha256"] as? String } ?: ""
+            } else {
+                @Suppress("DEPRECATION")
+                sha = info.signatures?.firstOrNull()
+                    ?.let { certInfo(it)["sha256"] as? String } ?: ""
+            }
+            out[info.packageName] = mapOf(
+                "permissions" to permissions,
+                "signature" to sha,
+                "targetSdk" to app.targetSdkVersion,
+                "installer" to installerOf(info.packageName),
+                "external" to ((app.flags and ApplicationInfo.FLAG_EXTERNAL_STORAGE) != 0)
+            )
+        }
+        return out
+    }
+
+    /**
+     * Who installed [packageName]: '' when the package was side-loaded or the
+     * installer is unknown. `getInstallerPackageName` still answers on newer
+     * releases, but the newer API is the one that is still supported.
+     */
+    private fun installerOf(packageName: String): String = runCatching {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            context.packageManager.getInstallSourceInfo(packageName)
+                .installingPackageName ?: ""
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.getInstallerPackageName(packageName) ?: ""
+        }
+    }.getOrDefault("")
+
+    /**
+     * The full install chain of a package: who installed it, which app asked
+     * for the install and which app the install is attributed to. Only the
+     * installer is knowable before Android 11, so the other two stay empty
+     * there instead of being guessed.
+     */
+    private fun installSource(packageName: String): Map<String, Any?> {
+        val installer = installerOf(packageName)
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            return mapOf(
+                "installer" to installer,
+                "initiating" to "",
+                "originating" to "",
+                "detailed" to false
+            )
+        }
+        return runCatching {
+            val src = context.packageManager.getInstallSourceInfo(packageName)
+            mapOf(
+                "installer" to (src.installingPackageName ?: installer),
+                "initiating" to (src.initiatingPackageName ?: ""),
+                "originating" to (src.originatingPackageName ?: ""),
+                "detailed" to true
+            )
+        }.getOrElse {
+            mapOf(
+                "installer" to installer,
+                "initiating" to "",
+                "originating" to "",
+                "detailed" to false
+            )
+        }
+    }
+
     private fun scanApps(includeSystem: Boolean): List<Map<String, Any?>> {
         val pm = context.packageManager
         // GET_META_DATA so installed web apps (WebAPK / Trusted Web Activity)
@@ -545,6 +709,7 @@ class PackageScannerPlugin(
                     "targetSdk" to app.targetSdkVersion,
                     "minSdk" to app.minSdkVersion,
                     "uid" to app.uid,
+                    "installer" to installerOf(info.packageName),
                     "isWebApp" to (webUrl != null),
                     "webUrl" to (webUrl ?: ""),
                     "webSignal" to webAppSignal(app, info.packageName, shells)
@@ -1824,10 +1989,27 @@ class PackageScannerPlugin(
         val permissions = (info.requestedPermissions ?: emptyArray<String>()).toList()
         val features = (info.reqFeatures ?: emptyArray())
             .mapNotNull { it.name }
-        val activityCount = info.activities?.size ?: 0
-        val serviceCount = info.services?.size ?: 0
-        val receiverCount = info.receivers?.size ?: 0
-        val providerCount = info.providers?.size ?: 0
+        val activities = info.activities ?: emptyArray()
+        val services = info.services ?: emptyArray()
+        val receivers = info.receivers ?: emptyArray()
+        val providers = info.providers ?: emptyArray()
+        val activityCount = activities.size
+        val serviceCount = services.size
+        val receiverCount = receivers.size
+        val providerCount = providers.size
+        // Exported components are reachable from other apps; the accessibility
+        // and device-admin bindings are the two most powerful things an app can
+        // ask to be, so the risk check wants to know about all of them.
+        val exportedActivities = activities.count { it.exported }
+        val exportedServices = services.count { it.exported }
+        val exportedReceivers = receivers.count { it.exported }
+        val exportedProviders = providers.count { it.exported }
+        val accessibilityService = services.any {
+            it.permission == "android.permission.BIND_ACCESSIBILITY_SERVICE"
+        }
+        val deviceAdminReceiver = receivers.any {
+            it.permission == "android.permission.BIND_DEVICE_ADMIN"
+        }
 
         val appFlags = app?.flags ?: 0
         val debuggable = (appFlags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
@@ -1979,6 +2161,12 @@ class PackageScannerPlugin(
             "serviceCount" to serviceCount,
             "receiverCount" to receiverCount,
             "providerCount" to providerCount,
+            "exportedActivities" to exportedActivities,
+            "exportedServices" to exportedServices,
+            "exportedReceivers" to exportedReceivers,
+            "exportedProviders" to exportedProviders,
+            "accessibilityService" to accessibilityService,
+            "deviceAdminReceiver" to deviceAdminReceiver,
             "abis" to abis.toList(),
             "nativeLibCount" to nativeLibCount,
             "dexCount" to dexCount,

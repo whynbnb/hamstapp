@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_strings.dart';
 import '../services/native_apps.dart';
 import '../state/app_state.dart';
+import '../utils/actions.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/uninstall_reason.dart';
 import 'apps_screen.dart';
@@ -66,10 +67,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   /// Brings the matching screen forward for a launcher shortcut: `scan`,
-  /// `recent` or `tiles`.
+  /// `recent`, `tiles`, or `app:<package>` for one of the recent apps the
+  /// dynamic shortcuts offer.
   void _handleShortcut(String id) {
     if (!mounted) return;
     final state = context.read<AppState>();
+    if (id.startsWith('app:')) {
+      final packageName = id.substring(4);
+      if (packageName.isNotEmpty) unawaited(launchApp(context, packageName));
+      return;
+    }
     switch (id) {
       case 'scan':
         _select(state, 1);
@@ -88,7 +95,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     // Notification events that arrive while the app is backgrounded can be
     // missed, so re-read the counts whenever we come back to the foreground.
     if (state == AppLifecycleState.resumed) {
-      unawaited(_syncNotifications(context.read<AppState>()));
+      final app = context.read<AppState>();
+      unawaited(_syncNotifications(app));
+      // A changed wallpaper should change the theme without a restart.
+      unawaited(app.refreshWallpaperColor());
     }
   }
 

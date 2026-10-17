@@ -1,7 +1,13 @@
 package me.whynbnb.hamstapp
 
 import android.content.Intent
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.drawable.Icon
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import android.view.DragEvent
@@ -29,6 +35,9 @@ class MainActivity : FlutterActivity() {
 
     /** Extra the static shortcuts carry; see res/xml/shortcuts.xml. */
     private val shortcutExtra = "hamstapp.action"
+
+    /** Action carried by every 囤囤 shortcut intent, static or dynamic. */
+    private val shortcutAction = "me.whynbnb.hamstapp.action.SHORTCUT"
 
     /**
      * Set once the engine is configured, so a shortcut tapped while the app is
@@ -65,6 +74,12 @@ class MainActivity : FlutterActivity() {
                     applyStatusBarVisibility()
                     result.success(null)
                 }
+                // The apps launched most recently, published as dynamic
+                // shortcuts so a long press on 囤囤's icon starts them directly.
+                "updateShortcuts" -> {
+                    val items = call.argument<List<Map<String, Any?>>>("shortcuts")
+                    result.success(publishShortcuts(items ?: emptyList()))
+                }
                 // The action of the shortcut that started this process, if any.
                 "consumeShortcut" -> {
                     val id = pendingShortcut
@@ -87,6 +102,60 @@ class MainActivity : FlutterActivity() {
         val sink = shortcutSink
         if (sink != null) sink(id) else pendingShortcut = id
     }
+
+    /**
+     * Publishes the most recently launched apps as dynamic shortcuts. Their
+     * rank starts at 0, so a launcher that has to choose between these and the
+     * static ones (res/xml/shortcuts.xml) lists the recent apps first — which
+     * is the point of having them.
+     */
+    private fun publishShortcuts(items: List<Map<String, Any?>>): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N_MR1) return false
+        val manager = getSystemService(ShortcutManager::class.java) ?: return false
+        return runCatching {
+            if (items.isEmpty()) {
+                manager.removeAllDynamicShortcuts()
+                return@runCatching true
+            }
+            // The platform caps how many dynamic shortcuts may be published.
+            val limit = manager.maxShortcutCountPerActivity.coerceAtLeast(1)
+            val infos = ArrayList<ShortcutInfo>()
+            for ((index, item) in items.take(limit).withIndex()) {
+                val pkg = item["packageName"] as? String ?: continue
+                if (pkg.isEmpty()) continue
+                val label = (item["label"] as? String).orEmpty().ifEmpty { pkg }
+                val intent = Intent(this, MainActivity::class.java)
+                    .setAction(shortcutAction)
+                    .putExtra(shortcutExtra, "app:$pkg")
+                val builder = ShortcutInfo.Builder(this, "recent-$index")
+                    .setShortLabel(label.take(10))
+                    .setLongLabel(label.take(25))
+                    .setRank(index)
+                    .setIntent(intent)
+                appIcon(pkg)?.let { builder.setIcon(it) }
+                infos.add(builder.build())
+            }
+            if (infos.isEmpty()) {
+                manager.removeAllDynamicShortcuts()
+            } else {
+                // Some launchers allow fewer dynamic shortcuts than others; the
+                // newest ones are the ones worth keeping.
+                runCatching { manager.setDynamicShortcuts(infos) }
+                    .onFailure { manager.setDynamicShortcuts(infos.take(2)) }
+            }
+            true
+        }.getOrDefault(false)
+    }
+
+    /** The app's own launcher icon, drawn into the bitmap a shortcut needs. */
+    private fun appIcon(packageName: String): Icon? = runCatching {
+        val drawable = packageManager.getApplicationIcon(packageName)
+        val size = (48 * resources.displayMetrics.density).toInt().coerceAtLeast(48)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(Canvas(bitmap))
+        Icon.createWithBitmap(bitmap)
+    }.getOrNull()
 
     /** The shortcut id carried by [intent], if it is one of ours. */
     private fun shortcutFrom(intent: Intent?): String? {

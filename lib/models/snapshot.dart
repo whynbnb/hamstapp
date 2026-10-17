@@ -30,6 +30,22 @@ class SnapshotEntry {
   /// When the app was uninstalled; 0 means it was installed at snapshot time.
   final int uninstalledAt;
 
+  /// What the app asked for at snapshot time (full permission names). Used to
+  /// tell whether an update started asking for more.
+  final List<String> permissions;
+
+  /// SHA-256 of the signing certificate the app was installed with; '' when it
+  /// was not recorded (older snapshots, or the system would not say).
+  final String signature;
+
+  final int targetSdk;
+
+  /// The package that installed the app; '' when side-loaded or unknown.
+  final String installer;
+
+  /// Whether it lived on adopted/external storage.
+  final bool external;
+
   /// PNG bytes of the app icon captured with the snapshot, so uninstalled apps
   /// can still be shown with their icon. Null for snapshots taken before icons
   /// were recorded (old data stays compatible).
@@ -51,6 +67,11 @@ class SnapshotEntry {
     this.pinned = false,
     this.uninstallReason = '',
     this.uninstalledAt = 0,
+    this.permissions = const <String>[],
+    this.signature = '',
+    this.targetSdk = 0,
+    this.installer = '',
+    this.external = false,
     this.icon,
   });
 
@@ -72,6 +93,13 @@ class SnapshotEntry {
         pinned: map['pinned'] as bool? ?? false,
         uninstallReason: map['uninstallReason'] as String? ?? '',
         uninstalledAt: map['uninstalledAt'] as int? ?? 0,
+        permissions:
+            (map['permissions'] as List?)?.map((e) => '$e').toList() ??
+                const <String>[],
+        signature: map['signature'] as String? ?? '',
+        targetSdk: map['targetSdk'] as int? ?? 0,
+        installer: map['installer'] as String? ?? '',
+        external: map['external'] as bool? ?? false,
         icon: _decodeIcon(map['icon']),
       );
 
@@ -100,6 +128,11 @@ class SnapshotEntry {
         'pinned': pinned,
         'uninstallReason': uninstallReason,
         'uninstalledAt': uninstalledAt,
+        if (permissions.isNotEmpty) 'permissions': permissions,
+        if (signature.isNotEmpty) 'signature': signature,
+        if (targetSdk > 0) 'targetSdk': targetSdk,
+        if (installer.isNotEmpty) 'installer': installer,
+        if (external) 'external': external,
         if (icon != null) 'icon': base64Encode(icon!),
       };
 }
@@ -127,6 +160,22 @@ class Snapshot {
   }) : categories = categories ?? <AppCategory>[];
 
   DateTime get createdDate => DateTime.fromMillisecondsSinceEpoch(createdAt);
+
+  /// Whether this snapshot recorded per-app facts (permissions, certificate,
+  /// target SDK, install source). Snapshots taken before 1.1 did not, and their
+  /// empty fields must not be read as "the app asks for nothing" — see
+  /// [SnapshotDiff.between].
+  bool get hasFacts {
+    final cached = _hasFacts;
+    if (cached != null) return cached;
+    final value = entries.any(
+      (e) => e.permissions.isNotEmpty || e.signature.isNotEmpty,
+    );
+    _hasFacts = value;
+    return value;
+  }
+
+  bool? _hasFacts;
 
   int get installedCount => entries.where((e) => e.isInstalled).length;
 

@@ -69,21 +69,6 @@ class _SnapshotsScreenState extends State<SnapshotsScreen>
   }
 }
 
-List<SnapshotEntry> _currentEntries(AppState state) => state.apps
-    .map(
-      (a) => SnapshotEntry(
-        packageName: a.packageName,
-        appName: a.appName,
-        versionName: a.versionName,
-        versionCode: a.versionCode,
-        lastUpdateTime: a.lastUpdateTime,
-        firstInstallTime: a.firstInstallTime,
-        isSystem: a.isSystem,
-        sizeBytes: a.sizeBytes,
-        icon: state.iconFor(a.packageName),
-      ),
-    )
-    .toList();
 
 class _SnapshotsTab extends StatelessWidget {
   const _SnapshotsTab();
@@ -242,12 +227,16 @@ Future<void> _onSnapshotAction(
         );
         return;
       }
+      // The facts behind "what did the update change" are read on demand; this
+      // is the only comparison that needs them.
+      await state.ensureAppFacts();
+      if (!context.mounted) return;
       _openCompare(
         context,
         olderLabel: '${s.name} (${Fmt.dateTime(s.createdAt)})',
         newerLabel: context.strings.t('当前设备'),
         older: s.entries,
-        newer: _currentEntries(state),
+        newer: state.deviceEntries(),
       );
       break;
     case 'other':

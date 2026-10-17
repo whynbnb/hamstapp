@@ -6,6 +6,7 @@ import '../services/app_log.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../state/app_state.dart';
+import '../utils/app_exporter.dart';
 import '../utils/backup_actions.dart';
 import '../utils/format.dart';
 import '../widgets/collapsed_nav.dart';
@@ -82,8 +83,39 @@ class SettingsScreen extends StatelessWidget {
               ),
             ),
             title: Text(context.strings.t('主题色')),
-            subtitle: Text(context.strings.t('选择一个预设色，或自定义任意颜色')),
+            subtitle: Text(
+              state.themeFollowWallpaper
+                  ? context.strings.t('正在跟随壁纸取色')
+                  : context.strings.t('选择一个预设色，或自定义任意颜色'),
+            ),
             onTap: () => showThemeColorPicker(context, state),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.wallpaper_outlined),
+            title: Text(context.strings.t('跟随壁纸取色')),
+            subtitle: Text(
+              context.strings.t(
+                '从壁纸的主要颜色取种子色，回到前台时会重新读取（需要 Android 8.1 以上）',
+              ),
+            ),
+            value: state.themeFollowWallpaper,
+            onChanged: (v) async {
+              await state.setThemeFollowWallpaper(v);
+              if (!context.mounted || !v) return;
+              if (state.wallpaperColors.isEmpty) {
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        context.strings.t(
+                          '系统没有给出壁纸颜色，主题色保持原样（有些壁纸或系统不提供）',
+                        ),
+                      ),
+                    ),
+                  );
+              }
+            },
           ),
           ListTile(
             leading: Icon(_tileStyleIcon(state.tileStyle)),
@@ -474,6 +506,14 @@ class SettingsScreen extends StatelessWidget {
               context.strings.t('把快照、磁贴、分组、备份列表等全部数据打包为单个文件'),
             ),
             onTap: () => exportData(context, state),
+          ),
+          ListTile(
+            leading: const Icon(Icons.description_outlined),
+            title: Text(context.strings.t('导出应用清单')),
+            subtitle: Text(
+              context.strings.t('导出成 Markdown / CSV / 纯文本，带上分类、原因和备注'),
+            ),
+            onTap: () => exportAppList(context, state),
           ),
           ListTile(
             leading: const Icon(Icons.download_outlined),

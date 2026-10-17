@@ -21,6 +21,7 @@ import '../services/app_log.dart';
 import '../services/pwa.dart';
 import '../services/storage.dart';
 import '../services/icon_cache.dart';
+import '../utils/app_grouping.dart';
 import '../utils/format.dart';
 import '../utils/recommender.dart';
 import '../utils/search.dart';
@@ -217,6 +218,69 @@ class AppState extends ChangeNotifier {
   /// lifetime of the state).
   StreamSubscription<Map<String, int>>? _notificationSub;
 
+  /// Per-app snapshot facts (requested permissions, signing certificate,
+  /// target SDK, install source), read in one native pass and cached. Cleared
+  /// on every scan, because an install or an update can change all of it.
+  Map<String, AppFacts> appFacts = <String, AppFacts>{};
+
+  Future<void>? _factsFuture;
+
+  /// Whether the fact cache has been filled at least once.
+  bool get factsLoaded => appFacts.isNotEmpty;
+
+  /// Reads (and caches) the facts of every installed app. Shared by snapshot
+  /// creation and the comparison against the current device, so the native pass
+  /// runs once even when both are triggered.
+  Future<void> ensureAppFacts() async {
+    if (appFacts.isNotEmpty) return;
+    final pending = _factsFuture;
+    if (pending != null) return pending;
+    final future = _loadFacts();
+    _factsFuture = future;
+    try {
+      await future;
+    } finally {
+      _factsFuture = null;
+    }
+  }
+
+  Future<void> _loadFacts() async {
+    final sw = Stopwatch()..start();
+    try {
+      final facts = await NativeApps.appFacts();
+      appFacts = facts;
+      AppLog.instance.log(
+        LogModule.apps,
+        '读取应用事实 · ${facts.length} 个 · ${sw.elapsedMilliseconds}ms',
+      );
+    } catch (e) {
+      AppLog.instance.error(LogModule.apps, '读取应用事实失败 · $e');
+    }
+  }
+
+  /// One snapshot entry per installed app, with annotations and facts attached.
+  /// The 当前设备 side of a comparison is built from this, so an upgrade's
+  /// permission and signature changes show up there too.
+  List<SnapshotEntry> deviceEntries() => [
+        for (final a in apps)
+          SnapshotEntry(
+            packageName: a.packageName,
+            appName: a.appName,
+            versionName: a.versionName,
+            versionCode: a.versionCode,
+            lastUpdateTime: a.lastUpdateTime,
+            firstInstallTime: a.firstInstallTime,
+            isSystem: a.isSystem,
+            sizeBytes: a.sizeBytes,
+            permissions: appFacts[a.packageName]?.permissions ?? const <String>[],
+            signature: appFacts[a.packageName]?.signature ?? '',
+            targetSdk: appFacts[a.packageName]?.targetSdk ?? a.targetSdk,
+            installer: appFacts[a.packageName]?.installer ?? a.installer,
+            external: appFacts[a.packageName]?.external ?? false,
+            icon: iconFor(a.packageName),
+          ),
+      ];
+
   String query = '';
   AppScope scope = AppScope.all;
   AppFilter filter = AppFilter.all;
@@ -310,12 +374,44 @@ class AppState extends ChangeNotifier {
     if (filterCategoryId != null) n++;
     if (sort != AppSort.name) n++;
     if (!sortAscending) n++;
+    if (groupMode != AppGroupMode.none) n++;
     return n;
   }
 
   /// Natural direction for a freshly picked sort: names read A→Z, while time
   /// and size are most useful newest/largest first.
   static bool _defaultAscending(AppSort s) => s == AppSort.name;
+
+  /// Section headers in the app list. Defaults to [AppGroupMode.none].
+  AppGroupMode get groupMode {
+    final raw = settings['app_group'] as String?;
+    return AppGroupMode.values.firstWhere(
+      (m) => m.name == raw,
+      orElse: () => AppGroupMode.none,
+    );
+  }
+
+  Future<void> setAppGroupMode(AppGroupMode value) async {
+    settings['app_group'] = value.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// The app list split into sections, ready for the sticky-header list.
+  List<AppGroup> get groupedApps {
+    final uncategorized = AppStrings.current.t('未分类');
+    return groupApps(
+      visibleApps,
+      groupMode,
+      nameOf: (a) => displayNameFor(a.packageName),
+      categoriesOf: (a) => [
+        for (final id in metaFor(a.packageName).categoryIds)
+          if (categoryById(id) != null) categoryById(id)!.name,
+      ],
+      uncategorizedLabel: uncategorized,
+      categoryOrder: [for (final c in categories) c.name],
+    );
+  }
 
   void setAppSort(AppSort value) {
     if (sort == value) return;
@@ -357,8 +453,10 @@ class AppState extends ChangeNotifier {
       IconCache.decode(await storage.readJson(_kIcons)),
     );
     _applyLanguage();
-    _applyLanguage();
     _applyFormat();
+    // A theme that follows the wallpaper must be re-seeded before the first
+    // frame, otherwise the previous seed flashes on screen.
+    if (themeFollowWallpaper) await refreshWallpaperColor();
     launchLog = await _loadLaunchLog();
     _pruneLaunchLog();
     tilePages = await _loadTilePages();
@@ -377,6 +475,8 @@ class AppState extends ChangeNotifier {
       final saved = (settings['last_tile_page'] as num?)?.toInt() ?? 0;
       currentTilePageIndex = saved.clamp(0, tilePages.length - 1);
     }
+    // The launcher's long-press list is rebuilt from the stored launch log.
+    unawaited(syncRecentShortcuts());
     // Tiles are independent of apps; load them and migrate legacy pins
     // (stored on AppMeta as a single `pinned` flag) into concrete tile entries.
     final firstPageId = tilePages.first.id;
@@ -754,6 +854,8 @@ class AppState extends ChangeNotifier {
     scanning = true;
     scanError = null;
     pendingUninstalls = <AppMeta>[];
+    // Versions, permissions and certificates can all have moved on.
+    appFacts = <String, AppFacts>{};
     notifyListeners();
 
     AppLog.instance.log(
@@ -857,7 +959,11 @@ class AppState extends ChangeNotifier {
     }
     // Refresh the icon cache together with the app list, so updated app icons
     // show up without a separate trip to Settings.
-    if (scanError == null) unawaited(refreshIconCache());
+    if (scanError == null) {
+      unawaited(refreshIconCache());
+      // An uninstalled app must not stay on the long-press list.
+      unawaited(syncRecentShortcuts());
+    }
   }
 
   Map<String, String> _baseline() {
@@ -936,6 +1042,14 @@ class AppState extends ChangeNotifier {
 
   Future<void> _persistMeta() =>
       storage.writeJson(_kMeta, meta.map((k, v) => MapEntry(k, v.toMap())));
+
+  /// The category with [id], or null when it was deleted.
+  AppCategory? categoryById(String id) {
+    for (final c in categories) {
+      if (c.id == id) return c;
+    }
+    return null;
+  }
 
   // ---------------------------------------------------------------- categories
 
@@ -1051,10 +1165,15 @@ class AppState extends ChangeNotifier {
     final entries = <SnapshotEntry>[];
     final seen = <String>{};
 
+    // Permissions, certificate, target SDK and install source, so a later
+    // comparison can say what an update actually changed.
+    await ensureAppFacts();
+
     // Currently installed apps, together with their annotations.
     for (final a in apps) {
       final m = metaFor(a.packageName);
       seen.add(a.packageName);
+      final facts = appFacts[a.packageName];
       entries.add(
         SnapshotEntry(
           packageName: a.packageName,
@@ -1065,6 +1184,11 @@ class AppState extends ChangeNotifier {
           firstInstallTime: a.firstInstallTime,
           isSystem: a.isSystem,
           sizeBytes: a.sizeBytes,
+          permissions: facts?.permissions ?? const <String>[],
+          signature: facts?.signature ?? '',
+          targetSdk: facts?.targetSdk ?? a.targetSdk,
+          installer: facts?.installer ?? a.installer,
+          external: facts?.external ?? false,
           reason: m.reason,
           note: m.note,
           categoryIds: List<String>.from(m.categoryIds),
@@ -2331,6 +2455,39 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Follow the wallpaper: take the seed colour from it and re-read it whenever
+  /// the app comes back to the foreground. Defaults to off, because it changes
+  /// the look on its own.
+  bool get themeFollowWallpaper =>
+      settings['theme_follow_wallpaper'] as bool? ?? false;
+
+  Future<void> setThemeFollowWallpaper(bool value) async {
+    settings['theme_follow_wallpaper'] = value;
+    await _persistSettings();
+    notifyListeners();
+    if (value) await refreshWallpaperColor();
+  }
+
+  /// The colours the wallpaper last offered (primary first); empty before the
+  /// first read or when the platform will not say.
+  List<int> wallpaperColors = <int>[];
+
+  /// Reads the wallpaper colours and, when the theme follows the wallpaper,
+  /// seeds the theme from the first one. Returns the colours that were read, so
+  /// the picker can offer them as swatches.
+  Future<List<int>> refreshWallpaperColor() async {
+    final colors = await NativeApps.wallpaperColors();
+    wallpaperColors = colors;
+    if (colors.isNotEmpty && themeFollowWallpaper) {
+      // Persisted like any other choice, so a cold start before the wallpaper
+      // read lands still uses the right seed.
+      await setThemeColor(colors.first);
+    } else {
+      notifyListeners();
+    }
+    return colors;
+  }
+
   /// UI language preference. Defaults to [AppLanguage.system].
   AppLanguage get language {
     final raw = settings['language'] as String?;
@@ -2676,8 +2833,41 @@ class AppState extends ChangeNotifier {
 
   // ---------------------------------------------------------------- filtering
 
+  /// The current search text, read as text plus filters (`size:`, `installed:`,
+  /// `cat:`, `reason:`, `source:`, `type:` — see [AppQuery]).
+  AppQuery get parsedQuery =>
+      AppQuery.parse(query, now: DateTime.now().millisecondsSinceEpoch);
+
+  /// The last few searches, most recent first, offered as chips under the
+  /// search field so a repeated query is one tap.
+  static const int kSearchHistoryMax = 8;
+
+  List<String> get searchHistory =>
+      (settings['search_history'] as List?)?.map((e) => '$e').toList() ??
+      <String>[];
+
+  Future<void> rememberQuery(String raw) async {
+    final q = raw.trim();
+    if (q.isEmpty) return;
+    final list = List<String>.from(searchHistory)
+      ..removeWhere((e) => e == q)
+      ..insert(0, q);
+    settings['search_history'] = list.take(kSearchHistoryMax).toList();
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  Future<void> clearSearchHistory() async {
+    settings['search_history'] = <String>[];
+    await _persistSettings();
+    notifyListeners();
+  }
+
   List<AppInfo> get visibleApps {
-    final q = query.trim();
+    final parsed = parsedQuery;
+    // Only the free text goes through the fuzzy matcher; the filters are
+    // predicates below.
+    final q = parsed.text.trim();
     final scores = <String, int>{};
     final list = apps.where((app) {
       switch (scope) {
@@ -2716,6 +2906,26 @@ class AppState extends ChangeNotifier {
         if (!metaFor(app.packageName).categoryIds.contains(filterCategoryId)) {
           return false;
         }
+      }
+      if (parsed.hasFilters) {
+        final meta = metaFor(app.packageName);
+        final installer = appFacts[app.packageName]?.installer ?? app.installer;
+        final installerLabel = installer.isEmpty
+            ? ''
+            : '${displayNameFor(installer)} $installer';
+        final ok = parsed.matches(
+          sizeBytes: app.sizeBytes,
+          firstInstallTime: app.firstInstallTime,
+          lastUpdateTime: app.lastUpdateTime,
+          isSystem: app.isSystem,
+          categoryNames: [
+            for (final id in meta.categoryIds) categoryById(id)?.name ?? '',
+          ].join(' '),
+          reason: meta.reason,
+          installerLabel: installerLabel,
+          sideloaded: installer.isEmpty,
+        );
+        if (!ok) return false;
       }
       // Match either name: the package's own label, or the name of a pinned
       // launcher entry (which is what the row shows).
@@ -2806,20 +3016,7 @@ class AppState extends ChangeNotifier {
     id: 'current',
     name: AppStrings.current.t('当前设备'),
     createdAt: DateTime.now().millisecondsSinceEpoch,
-    entries: [
-      for (final a in apps)
-        SnapshotEntry(
-          packageName: a.packageName,
-          appName: a.appName,
-          versionName: a.versionName,
-          versionCode: a.versionCode,
-          lastUpdateTime: a.lastUpdateTime,
-          firstInstallTime: a.firstInstallTime,
-          isSystem: a.isSystem,
-          sizeBytes: a.sizeBytes,
-          icon: iconFor(a.packageName),
-        ),
-    ],
+    entries: deviceEntries(),
   );
 
   /// How many of a backup list's apps are installed and how many are missing.
@@ -2873,6 +3070,29 @@ class AppState extends ChangeNotifier {
     await _persistMeta();
     await _persistLaunchLog();
     notifyListeners();
+    // The launcher's long press should offer what was used last.
+    unawaited(syncRecentShortcuts());
+  }
+
+  /// How many recent apps a long press on 囤囤's icon offers.
+  static const int kRecentShortcutCount = 4;
+
+  /// Publishes the most recently launched apps as dynamic launcher shortcuts.
+  /// Best effort: a launcher that refuses them changes nothing for the user.
+  Future<void> syncRecentShortcuts() async {
+    final recents = recentAppsBy(
+      RecentSort.recent,
+    ).take(kRecentShortcutCount).toList();
+    final ok = await NativeApps.setRecentShortcuts([
+      for (final a in recents)
+        RecentShortcut(
+          packageName: a.packageName,
+          label: displayNameFor(a.packageName),
+        ),
+    ]);
+    if (!ok) {
+      AppLog.instance.log(LogModule.apps, '系统拒绝了快捷方式更新');
+    }
   }
 
   void _recordLaunch(String packageName, int at) {

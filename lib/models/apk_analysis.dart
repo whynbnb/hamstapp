@@ -68,6 +68,24 @@ class ApkAnalysis {
   final int receiverCount;
   final int providerCount;
 
+  /// Components other apps can reach (no permission required by the manifest).
+  final int exportedActivities;
+  final int exportedServices;
+  final int exportedReceivers;
+  final int exportedProviders;
+
+  /// The APK declares an accessibility service or a device-admin receiver —
+  /// the two bindings that can read the screen or lock the device.
+  final bool accessibilityService;
+  final bool deviceAdminReceiver;
+
+  /// Total exported components, for the risk summary.
+  int get exportedCount =>
+      exportedActivities +
+      exportedServices +
+      exportedReceivers +
+      exportedProviders;
+
   final List<String> abis;
   final int nativeLibCount;
   final int dexCount;
@@ -113,6 +131,12 @@ class ApkAnalysis {
     required this.serviceCount,
     required this.receiverCount,
     required this.providerCount,
+    this.exportedActivities = 0,
+    this.exportedServices = 0,
+    this.exportedReceivers = 0,
+    this.exportedProviders = 0,
+    this.accessibilityService = false,
+    this.deviceAdminReceiver = false,
     required this.abis,
     required this.nativeLibCount,
     required this.dexCount,
@@ -163,6 +187,12 @@ class ApkAnalysis {
       serviceCount: intOf('serviceCount'),
       receiverCount: intOf('receiverCount'),
       providerCount: intOf('providerCount'),
+      exportedActivities: intOf('exportedActivities'),
+      exportedServices: intOf('exportedServices'),
+      exportedReceivers: intOf('exportedReceivers'),
+      exportedProviders: intOf('exportedProviders'),
+      accessibilityService: boolOf('accessibilityService'),
+      deviceAdminReceiver: boolOf('deviceAdminReceiver'),
       abis: strings('abis'),
       nativeLibCount: intOf('nativeLibCount'),
       dexCount: intOf('dexCount'),

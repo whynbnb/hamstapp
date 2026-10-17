@@ -924,6 +924,8 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
               packageName: widget.packageName,
               appName: name,
             ),
+            const SizedBox(height: 10),
+            AppInstallSourceCard(packageName: widget.packageName),
           ],
           const SizedBox(height: 24),
           _SectionTitle(context.strings.t('使用记录')),

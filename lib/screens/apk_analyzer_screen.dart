@@ -5,10 +5,13 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
 import '../models/apk_analysis.dart';
 import '../services/native_apps.dart';
+import '../state/app_state.dart';
+import '../utils/apk_risk.dart';
 import '../utils/format.dart';
 import '../utils/install_helper.dart';
 import '../widgets/app_icon.dart';
@@ -190,6 +193,8 @@ class _ApkAnalyzerScreenState extends State<ApkAnalyzerScreen> {
           if (a != null && !_loading) ...[
             const SizedBox(height: 16),
             _Header(a: a),
+            const SizedBox(height: 12),
+            _RiskCard(a: a),
             const SizedBox(height: 12),
             _InstallBanner(a: a, onInstall: _install),
             const SizedBox(height: 12),
@@ -737,6 +742,312 @@ class _StructureCard extends StatelessWidget {
         _BoolRow(s.t('包含 resources.arsc'), a.hasResourcesArsc),
         _BoolRow(s.t('包含 AndroidManifest'), a.hasManifest),
       ],
+    );
+  }
+}
+
+
+/// The red-flag check for one APK: manifest-level warnings plus a comparison
+/// against installed apps with a similar name, which is what catches a
+/// repackaged "same app, someone else's certificate".
+class _RiskCard extends StatefulWidget {
+  const _RiskCard({required this.a});
+  final ApkAnalysis a;
+
+  @override
+  State<_RiskCard> createState() => _RiskCardState();
+}
+
+class _RiskCardState extends State<_RiskCard> {
+  /// Resolved lazily, because each candidate costs a native lookup.
+  List<SpoofMatch> _matches = const <SpoofMatch>[];
+  bool _checking = false;
+  bool _expanded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkSpoofing());
+  }
+
+  @override
+  void didUpdateWidget(_RiskCard old) {
+    super.didUpdateWidget(old);
+    if (old.a.path != widget.a.path) {
+      _matches = const <SpoofMatch>[];
+      _checkSpoofing();
+    }
+  }
+
+  /// The installed list is only available when this screen runs inside the app
+  /// (a standalone analyzer, as in the tests, simply has nothing to compare).
+  List<InstalledAppRef> _installedRefs() {
+    try {
+      final state = context.read<AppState>();
+      return [
+        for (final app in state.apps)
+          InstalledAppRef(
+            packageName: app.packageName,
+            name: state.displayNameFor(app.packageName),
+          ),
+      ];
+    } on ProviderNotFoundException {
+      return const <InstalledAppRef>[];
+    }
+  }
+
+  Future<void> _checkSpoofing() async {
+    if (!mounted) return;
+    final installed = _installedRefs();
+    final candidates = spoofCandidates(widget.a, installed);
+    if (candidates.isEmpty) {
+      if (mounted) setState(() => _matches = const <SpoofMatch>[]);
+      return;
+    }
+    setState(() => _checking = true);
+    final signatures = <String, String>{};
+    for (final c in candidates) {
+      final info = await NativeApps.appSignature(c.packageName);
+      signatures[c.packageName] = info?.sha256 ?? '';
+    }
+    if (!mounted) return;
+    setState(() {
+      _matches = spoofMatches(
+        candidates,
+        [
+          for (final app in installed)
+            InstalledAppRef(
+              packageName: app.packageName,
+              name: app.name,
+              signature: signatures[app.packageName] ?? '',
+            ),
+        ],
+        apkSignature: widget.a.signers.isEmpty
+            ? ''
+            : widget.a.signers.first.sha256,
+      );
+      _checking = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.strings;
+    final installed = _installedRefs();
+    final report = assessApk(widget.a, installed: installed);
+    // A same-name app signed by someone else is the strongest signal there is,
+    // so it lifts the whole report to high.
+    final spoofed = _matches.any(
+      (m) => m.verdict == SpoofVerdict.differentSigner,
+    );
+    final level = spoofed ? RiskLevel.high : report.level;
+
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final warning = dark ? Colors.orange.shade300 : Colors.orange.shade800;
+    final (color, label, icon) = switch (level) {
+      RiskLevel.high => (
+        Theme.of(context).colorScheme.error,
+        s.t('高风险'),
+        Icons.dangerous_outlined,
+      ),
+      RiskLevel.medium => (warning, s.t('中风险'), Icons.warning_amber),
+      RiskLevel.low => (Colors.green.shade700, s.t('低风险'), Icons.verified_outlined),
+    };
+
+    final visible = _expanded ? report.findings : report.findings.take(3).toList();
+
+    return Card(
+      elevation: 0,
+      color: color.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 18, color: color),
+                const SizedBox(width: 8),
+                Text(
+                  s.t('风险体检'),
+                  style: const TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: color,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (report.clean && _matches.isEmpty) ...[
+              const SizedBox(height: 6),
+              Text(
+                s.t('没有发现明显的红旗。这不等于「安全」，只说明清单里没有可以明确指出的问题。'),
+                style: const TextStyle(fontSize: 12.5, height: 1.35),
+              ),
+            ],
+            for (final finding in visible) ...[
+              const SizedBox(height: 8),
+              _finding(context, finding),
+            ],
+            if (report.findings.length > 3)
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton(
+                  onPressed: () => setState(() => _expanded = !_expanded),
+                  child: Text(
+                    _expanded
+                        ? s.t('收起')
+                        : s.t('还有 {n} 条', {
+                            'n': report.findings.length - 3,
+                          }),
+                  ),
+                ),
+              ),
+            if (_checking) ...[
+              const SizedBox(height: 6),
+              Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    s.t('正在与已安装应用比对…'),
+                    style: const TextStyle(fontSize: 12.5),
+                  ),
+                ],
+              ),
+            ],
+            for (final match in _matches) ...[
+              const SizedBox(height: 8),
+              _spoof(context, match),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _finding(BuildContext context, RiskFinding finding) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = switch (finding.level) {
+      RiskLevel.high => scheme.error,
+      RiskLevel.medium => Theme.of(context).brightness == Brightness.dark
+          ? Colors.orange.shade300
+          : Colors.orange.shade800,
+      RiskLevel.low => scheme.onSurfaceVariant,
+    };
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Icon(Icons.circle, size: 8, color: color),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                context.strings.t(finding.label),
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+              Text(
+                context.strings.t(finding.detail),
+                style: const TextStyle(fontSize: 12.5, height: 1.35),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _spoof(BuildContext context, SpoofMatch match) {
+    final s = context.strings;
+    final scheme = Theme.of(context).colorScheme;
+    final (color, text) = switch (match.verdict) {
+      SpoofVerdict.differentSigner => (
+        scheme.error,
+        s.t('签名与它不同：很可能被重新打包过，不要装。'),
+      ),
+      SpoofVerdict.sameSigner => (
+        Colors.green.shade700,
+        s.t('与它是同一个签名，应该是同一个开发者发布的另一个应用。'),
+      ),
+      SpoofVerdict.unknown => (
+        scheme.onSurfaceVariant,
+        s.t('无法比对签名（系统没有给出证书）。'),
+      ),
+    };
+    final reason = match.candidate.reason == 'sameName'
+        ? s.t('同名不同包')
+        : s.t('包名只差 {n} 个字符', {'n': match.candidate.packageDistance});
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.content_copy_outlined, size: 15, color: color),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  s.t('已安装应用：{name}', {'name': match.candidate.name}),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+              Text(
+                reason,
+                style: TextStyle(fontSize: 11.5, color: color),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          SelectableText(
+            match.candidate.packageName,
+            style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            text,
+            style: TextStyle(fontSize: 12.5, height: 1.35, color: color),
+          ),
+        ],
+      ),
     );
   }
 }
