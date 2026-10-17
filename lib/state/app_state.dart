@@ -1509,7 +1509,11 @@ class AppState extends ChangeNotifier {
   static const String _kNewTileSpecId = '\u0000new-tile';
   /// Adds one of the live info tiles (clock, date, battery, storage, unread),
   /// sized by its kind. These have no app behind them, so no meta is touched.
-  Future<Tile> addInfoTile(TileKind kind, {String? pageId}) async {
+  Future<Tile> addInfoTile(
+    TileKind kind, {
+    String? pageId,
+    Map<String, dynamic>? options,
+  }) async {
     final target =
         pageId ??
         currentTilePageId ??
@@ -1521,6 +1525,7 @@ class AppState extends ChangeNotifier {
       packageName: '',
       pageId: target,
       kind: kind,
+      options: options ?? const <String, dynamic>{},
       col: col,
       row: row,
       w: w,
@@ -1530,6 +1535,27 @@ class AppState extends ChangeNotifier {
     await _persistTiles();
     notifyListeners();
     return tile;
+  }
+
+  /// Merges [values] into a tile's own settings (a folder's category, how many
+  /// days "new installs" looks back, ...). Null values delete a key.
+  Future<void> setTileOptions(
+    String tileId,
+    Map<String, dynamic> values,
+  ) async {
+    final tile = tileById(tileId);
+    if (tile == null) return;
+    final next = <String, dynamic>{...tile.options};
+    values.forEach((key, value) {
+      if (value == null) {
+        next.remove(key);
+      } else {
+        next[key] = value;
+      }
+    });
+    tile.options = next;
+    await _persistTiles();
+    notifyListeners();
   }
   /// Concrete (col,row) for a [w]x[h] tile on [pageId]: the first free cell
   /// when packing this page's current tiles.

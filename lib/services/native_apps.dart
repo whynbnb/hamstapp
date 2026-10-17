@@ -68,13 +68,18 @@ enum LaunchOutcome {
   };
 }
 
-/// Battery level, charging state and free space of the data volume.
+/// Battery level, charging state, free space of the data volume, RAM and the
+/// next alarm — one reading serves every device tile.
 class DeviceStatus {
   const DeviceStatus({
     required this.level,
     required this.charging,
     required this.freeBytes,
     required this.totalBytes,
+    this.memTotalBytes = 0,
+    this.memAvailBytes = 0,
+    this.memLow = false,
+    this.alarmAt = 0,
   });
 
   /// 0-100, or -1 when the system did not report one.
@@ -82,6 +87,14 @@ class DeviceStatus {
   final bool charging;
   final int freeBytes;
   final int totalBytes;
+
+  /// RAM, in bytes; 0 when unavailable.
+  final int memTotalBytes;
+  final int memAvailBytes;
+  final bool memLow;
+
+  /// When the next alarm fires (millis since epoch), 0 when none is set.
+  final int alarmAt;
 
   static const DeviceStatus unknown = DeviceStatus(
     level: -1,
@@ -92,16 +105,62 @@ class DeviceStatus {
 
   bool get hasLevel => level >= 0;
   bool get hasStorage => totalBytes > 0;
+  bool get hasMemory => memTotalBytes > 0;
+  int get memUsedBytes =>
+      memTotalBytes <= 0 ? 0 : (memTotalBytes - memAvailBytes).clamp(0, memTotalBytes);
 
   /// Used fraction of the data volume, 0..1.
   double get usedFraction =>
       totalBytes <= 0 ? 0 : ((totalBytes - freeBytes) / totalBytes).clamp(0.0, 1.0);
+
+  /// Used fraction of RAM, 0..1.
+  double get memUsedFraction =>
+      memTotalBytes <= 0 ? 0 : (memUsedBytes / memTotalBytes).clamp(0.0, 1.0);
 
   factory DeviceStatus.fromMap(Map<dynamic, dynamic> map) => DeviceStatus(
     level: (map['level'] as num?)?.toInt() ?? -1,
     charging: map['charging'] as bool? ?? false,
     freeBytes: (map['freeBytes'] as num?)?.toInt() ?? 0,
     totalBytes: (map['totalBytes'] as num?)?.toInt() ?? 0,
+    memTotalBytes: (map['memTotalBytes'] as num?)?.toInt() ?? 0,
+    memAvailBytes: (map['memAvailBytes'] as num?)?.toInt() ?? 0,
+    memLow: map['memLow'] as bool? ?? false,
+    alarmAt: (map['alarmAt'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// Today's screen-on time, from the system's usage statistics.
+class SystemUsage {
+  const SystemUsage({required this.permitted, required this.totalMillis});
+
+  /// False when "usage access" has not been granted.
+  final bool permitted;
+  final int totalMillis;
+
+  factory SystemUsage.fromMap(Map<dynamic, dynamic> map) => SystemUsage(
+    permitted: map['permitted'] as bool? ?? false,
+    totalMillis: (map['totalMillis'] as num?)?.toInt() ?? 0,
+  );
+}
+
+/// This month's traffic, split by network type.
+class TrafficUsage {
+  const TrafficUsage({
+    required this.permitted,
+    this.mobileBytes = 0,
+    this.wifiBytes = 0,
+  });
+
+  final bool permitted;
+  final int mobileBytes;
+  final int wifiBytes;
+
+  int get totalBytes => mobileBytes + wifiBytes;
+
+  factory TrafficUsage.fromMap(Map<dynamic, dynamic> map) => TrafficUsage(
+    permitted: map['permitted'] as bool? ?? false,
+    mobileBytes: (map['mobileBytes'] as num?)?.toInt() ?? 0,
+    wifiBytes: (map['wifiBytes'] as num?)?.toInt() ?? 0,
   );
 }
 
@@ -714,6 +773,37 @@ class NativeApps {
       return DeviceStatus.fromMap((r ?? {}).cast<dynamic, dynamic>());
     } catch (_) {
       return DeviceStatus.unknown;
+    }
+  }
+
+  /// Today's total foreground time. `permitted` is false without usage access.
+  static Future<SystemUsage> screenTimeToday() async {
+    try {
+      final r = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('screenTimeToday');
+      return SystemUsage.fromMap((r ?? {}).cast<dynamic, dynamic>());
+    } catch (_) {
+      return const SystemUsage(permitted: false, totalMillis: 0);
+    }
+  }
+
+  /// This month's traffic, split by network type.
+  static Future<TrafficUsage> trafficSummary() async {
+    try {
+      final r = await _channel
+          .invokeMethod<Map<dynamic, dynamic>>('trafficSummary');
+      return TrafficUsage.fromMap((r ?? {}).cast<dynamic, dynamic>());
+    } catch (_) {
+      return const TrafficUsage(permitted: false);
+    }
+  }
+
+  /// Opens the clock app for the next alarm. False when none is set.
+  static Future<bool> openNextAlarm() async {
+    try {
+      return await _channel.invokeMethod<bool>('openNextAlarm') ?? false;
+    } catch (_) {
+      return false;
     }
   }
 

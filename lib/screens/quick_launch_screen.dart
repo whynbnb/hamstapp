@@ -20,10 +20,10 @@ import '../widgets/app_icon.dart';
 import '../widgets/category_editor.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/info_tile.dart';
+import '../widgets/info_tile_sheets.dart';
 import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 import 'categories_tab.dart';
-import 'storage_manager_screen.dart';
 import 'tile_pages_screen.dart';
 import 'usage_stats_screen.dart';
 
@@ -1943,6 +1943,7 @@ class _Tile extends StatelessWidget {
     if (tile.isInfo) {
       return InfoTileContent(
         tile: tile,
+        state: state,
         foreground: (glass || frameless) ? scheme.onSurface : Colors.white,
       );
     }
@@ -2047,19 +2048,13 @@ class _Tile extends StatelessWidget {
     );
   }
 
-  /// Browse-mode tap: an app tile launches its app; the storage tile opens the
-  /// storage screen; the purely informational tiles do nothing.
+  /// Browse-mode tap: an app tile launches its app, an info tile runs its own
+  /// action (a sheet, a screen or a device action).
   VoidCallback? _browseTap(BuildContext context, String packageName) {
     if (packageName.isNotEmpty) {
       return () => launchApp(context, packageName);
     }
-    if (tile.kind == TileKind.storage) {
-      return () => Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const StorageManagerScreen()),
-      );
-    }
-    return null;
+    return () => handleInfoTileTap(context, state, tile);
   }
 
   void _showTileMenu(BuildContext context) {
@@ -2103,6 +2098,18 @@ class _Tile extends StatelessWidget {
                   value: state.tileById(tile.id)?.border ?? true,
                   onChanged: (v) => state.setTileBorder(tile.id, v),
                 ),
+                if (tile.isInfo && infoTileHasSettings(tile.kind))
+                  ListTile(
+                    leading: const Icon(Icons.tune),
+                    title: Text(context.strings.t('磁贴设置')),
+                    subtitle: Text(
+                      context.strings.t('选内容、范围或动作'),
+                    ),
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      showInfoTileSettings(context, state, tile);
+                    },
+                  ),
                 if (!tile.isInfo)
                   ListTile(
                     leading: const Icon(Icons.info_outline),

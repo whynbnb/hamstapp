@@ -34,6 +34,49 @@ class Fmt {
     return '${v.toStringAsFixed(v >= 100 || i == 0 ? 0 : 1)} ${units[i]}';
   }
 
+  /// Short weekday keys, indexed by `DateTime.weekday - 1`.
+  static const List<String> kWeekdayKeys = [
+    '周一',
+    '周二',
+    '周三',
+    '周四',
+    '周五',
+    '周六',
+    '周日',
+  ];
+
+  /// `07:30` for a timestamp.
+  static String clock(int millis) {
+    final t = DateTime.fromMillisecondsSinceEpoch(millis);
+    return '${t.hour.toString().padLeft(2, '0')}:'
+        '${t.minute.toString().padLeft(2, '0')}';
+  }
+
+  /// `今天` / `明天` / `周三` / `10/20` for a timestamp.
+  static String relativeDay(int millis) {
+    final t = DateTime.fromMillisecondsSinceEpoch(millis);
+    final now = DateTime.now();
+    final days = DateTime(t.year, t.month, t.day)
+        .difference(DateTime(now.year, now.month, now.day))
+        .inDays;
+    final s = AppStrings.current;
+    if (days == 0) return s.t('今天');
+    if (days == 1) return s.t('明天');
+    if (days > 1 && days < 7) return s.t(kWeekdayKeys[t.weekday - 1]);
+    return '${t.month}/${t.day}';
+  }
+
+  /// `3 小时 42 分` / `42 分钟` / `不到 1 分钟`.
+  static String duration(int millis) {
+    final s = AppStrings.current;
+    final minutes = millis ~/ 60000;
+    if (minutes < 1) return s.t('不到 1 分钟');
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h == 0) return s.t('{m} 分钟', {'m': m});
+    return s.t('{h} 小时 {m} 分', {'h': h, 'm': m});
+  }
+
   static String relative(int millis) {
     if (millis <= 0) return AppStrings.current.t('未知');
     final diff = DateTime.now().difference(

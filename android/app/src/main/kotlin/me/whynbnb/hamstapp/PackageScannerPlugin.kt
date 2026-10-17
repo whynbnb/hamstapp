@@ -1,8 +1,12 @@
 package me.whynbnb.hamstapp
 
+import android.app.ActivityManager
+import android.app.AlarmManager
 import android.app.AppOpsManager
+import android.app.usage.NetworkStatsManager
 import android.app.usage.StorageStats
 import android.app.usage.StorageStatsManager
+import android.app.usage.UsageStatsManager
 import android.content.ClipData
 import android.content.ComponentName
 import android.content.Context
@@ -18,6 +22,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
+import android.net.ConnectivityManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.Build
@@ -305,6 +310,25 @@ class PackageScannerPlugin(
                     )
                 }
                 mainHandler.post { result.success(status) }
+            }
+            "screenTimeToday" -> executor.execute {
+                val info = runCatching { screenTimeToday() }.getOrElse {
+                    mapOf("permitted" to false, "totalMillis" to 0L)
+                }
+                mainHandler.post { result.success(info) }
+            }
+            "trafficSummary" -> executor.execute {
+                val info = runCatching { trafficSummary() }.getOrElse {
+                    mapOf(
+                        "permitted" to false,
+                        "mobileBytes" to 0L,
+                        "wifiBytes" to 0L
+                    )
+                }
+                mainHandler.post { result.success(info) }
+            }
+            "openNextAlarm" -> mainHandler.post {
+                result.success(openNextAlarm())
             }
             "remoteTest" -> {
                 val config = call.arguments as? Map<*, *> ?: emptyMap<String, Any?>()
@@ -2831,11 +2855,111 @@ class PackageScannerPlugin(
             .getOrDefault(false)
         val stat = runCatching { StatFs(context.filesDir.absolutePath) }
             .getOrNull()
+        // RAM (no permission) and the next alarm (public API) ride along: the
+        // tiles that show them wake up with the same call.
+        val memory = ActivityManager.MemoryInfo()
+        runCatching {
+            (context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)
+                ?.getMemoryInfo(memory)
+        }
+        val alarm = runCatching {
+            (context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager)
+                ?.nextAlarmClock
+        }.getOrNull()
         return mapOf(
             "level" to level,
             "charging" to charging,
             "freeBytes" to (stat?.availableBytes ?: 0L),
-            "totalBytes" to (stat?.totalBytes ?: 0L)
+            "totalBytes" to (stat?.totalBytes ?: 0L),
+            "memTotalBytes" to memory.totalMem,
+            "memAvailBytes" to memory.availMem,
+            "memLow" to memory.lowMemory,
+            "alarmAt" to (alarm?.triggerTime ?: 0L)
         )
     }
+
+    /** Today's total foreground time across apps; needs usage access. */
+    private fun screenTimeToday(): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < 23) {
+            return mapOf("permitted" to true, "totalMillis" to 0L)
+        }
+        if (!hasUsageAccess()) {
+            return mapOf("permitted" to false, "totalMillis" to 0L)
+        }
+        val usage = context.getSystemService(Context.USAGE_STATS_SERVICE)
+            as? UsageStatsManager
+            ?: return mapOf("permitted" to true, "totalMillis" to 0L)
+        val start = startOfToday()
+        val stats = runCatching {
+            usage.queryUsageStats(
+                UsageStatsManager.INTERVAL_DAILY,
+                start,
+                System.currentTimeMillis()
+            )
+        }.getOrNull() ?: return mapOf("permitted" to true, "totalMillis" to 0L)
+        // Daily buckets can repeat a package; keep the largest window per
+        // package so today's time is not counted twice.
+        val perPackage = HashMap<String, Long>()
+        for (s in stats) {
+            if (s.lastTimeUsed < start) continue
+            val seen = perPackage[s.packageName] ?: 0L
+            if (s.totalTimeInForeground > seen) {
+                perPackage[s.packageName] = s.totalTimeInForeground
+            }
+        }
+        return mapOf(
+            "permitted" to true,
+            "totalMillis" to perPackage.values.sum()
+        )
+    }
+
+    /** This month's traffic, split mobile / Wi-Fi; needs usage access. */
+    private fun trafficSummary(): Map<String, Any?> {
+        fun empty(permitted: Boolean) = mapOf(
+            "permitted" to permitted,
+            "mobileBytes" to 0L,
+            "wifiBytes" to 0L
+        )
+        if (Build.VERSION.SDK_INT < 23) return empty(true)
+        if (!hasUsageAccess()) return empty(false)
+        val stats = context.getSystemService(Context.NETWORK_STATS_SERVICE)
+            as? NetworkStatsManager ?: return empty(true)
+        val start = startOfMonth()
+        val end = System.currentTimeMillis()
+        fun query(type: Int): Long = runCatching {
+            val bucket = stats.querySummaryForDevice(type, null, start, end)
+            bucket.rxBytes + bucket.txBytes
+        }.getOrDefault(0L)
+        return mapOf(
+            "permitted" to true,
+            // A null subscriber id asks for every subscription, which is the
+            // device total; some ROMs restrict the mobile query, in which case
+            // it simply reports 0.
+            "mobileBytes" to query(ConnectivityManager.TYPE_MOBILE),
+            "wifiBytes" to query(ConnectivityManager.TYPE_WIFI)
+        )
+    }
+
+    /** Opens the clock app for the next alarm, if one is set. */
+    private fun openNextAlarm(): Boolean = runCatching {
+        val alarm = (context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager)
+            ?.nextAlarmClock ?: return false
+        alarm.showIntent?.send()
+        true
+    }.getOrDefault(false)
+
+    private fun startOfToday(): Long = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
+
+    private fun startOfMonth(): Long = java.util.Calendar.getInstance().apply {
+        set(java.util.Calendar.DAY_OF_MONTH, 1)
+        set(java.util.Calendar.HOUR_OF_DAY, 0)
+        set(java.util.Calendar.MINUTE, 0)
+        set(java.util.Calendar.SECOND, 0)
+        set(java.util.Calendar.MILLISECOND, 0)
+    }.timeInMillis
 }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
 
+import 'package:hamstapp/l10n/app_strings.dart';
 import 'package:hamstapp/models/app_info.dart';
 import 'package:hamstapp/models/tile.dart';
 import 'package:hamstapp/models/tile_page.dart';
@@ -11,6 +12,7 @@ import 'package:hamstapp/services/device_status.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
 import 'package:hamstapp/widgets/info_tile.dart';
+import 'package:hamstapp/widgets/info_tile_sheets.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -38,6 +40,128 @@ void main() {
         expect(restored.kind, kind);
         expect(restored.isInfo, isTrue);
       }
+    });
+
+    test('per-tile options round-trip through the stored map', () {
+      final tile = Tile(
+        id: 'f1',
+        packageName: '',
+        pageId: 'p1',
+        kind: TileKind.folder,
+        options: {
+          'category': 'c1',
+          'apps': ['com.a', 'com.b'],
+          'days': 30,
+        },
+      );
+      final restored = Tile.fromMap(tile.toMap());
+      expect(restored.optionString('category'), 'c1');
+      expect(restored.optionList('apps'), ['com.a', 'com.b']);
+      expect(restored.optionInt('days', 7), 30);
+      expect(restored.optionInt('missing', 7), 7);
+    });
+
+    test('every info kind has a title, an icon and a size', () {
+      for (final kind in kTestInfoKinds) {
+        expect(infoTileTitle(kind), isNotEmpty);
+        expect(infoTileSubtitle(kind), isNotEmpty);
+        expect(infoTileIcon(kind), isNotNull);
+        final (w, h) = kind.defaultSize;
+        expect(w, greaterThanOrEqualTo(1));
+        expect(h, greaterThanOrEqualTo(1));
+      }
+    });
+
+    test('every action has a title and an icon', () {
+      for (final action in kInfoTileActions) {
+        expect(actionTitle(action), isNotEmpty);
+        expect(actionIcon(action), isNotNull);
+      }
+    });
+
+    test('a folder tile resolves a category or a hand-picked list', () {
+      final state = AppState(_MemStorage())
+        ..initialized = true
+        ..apps = [
+          AppInfo(
+            packageName: 'com.a',
+            appName: 'A',
+            versionName: '1',
+            versionCode: 1,
+            firstInstallTime: 0,
+            lastUpdateTime: 0,
+            isSystem: false,
+            enabled: true,
+            apkPath: '',
+            sizeBytes: 0,
+            targetSdk: 33,
+            minSdk: 21,
+            uid: 0,
+          ),
+          AppInfo(
+            packageName: 'com.b',
+            appName: 'B',
+            versionName: '1',
+            versionCode: 1,
+            firstInstallTime: 0,
+            lastUpdateTime: 0,
+            isSystem: false,
+            enabled: true,
+            apkPath: '',
+            sizeBytes: 0,
+            targetSdk: 33,
+            minSdk: 21,
+            uid: 0,
+          ),
+        ];
+      final picked = Tile(
+        id: 'f1',
+        packageName: '',
+        pageId: 'p1',
+        kind: TileKind.folder,
+        options: {
+          'apps': ['com.b', 'com.gone'],
+        },
+      );
+      // Only apps that are actually installed make it in.
+      expect(folderApps(state, picked).map((a) => a.packageName), ['com.b']);
+      expect(folderName(state, picked, const AppStrings('zh')), '自选应用');
+
+      final byCategory = Tile(
+        id: 'f2',
+        packageName: '',
+        pageId: 'p1',
+        kind: TileKind.folder,
+        options: {'category': 'c1'},
+      );
+      expect(folderApps(state, byCategory), isEmpty);
+    });
+
+    test('a tile of an unknown kind is kept and marked unsupported', () {
+      final stored = Tile.fromMap({
+        'id': 'gone',
+        'packageName': '',
+        'pageId': 'p1',
+        'kind': 'update', // a kind this build no longer has
+      });
+      expect(stored.kind, TileKind.unknown);
+      expect(stored.isInfo, isTrue, reason: 'it has no app behind it');
+
+      // A legacy tile with no kind at all is still an app tile...
+      final legacy = Tile.fromMap({
+        'id': 't1',
+        'packageName': 'com.a',
+        'pageId': 'p1',
+      });
+      expect(legacy.kind, TileKind.app);
+
+      // ...but an app tile that lost its package cannot show anything either.
+      final empty = Tile.fromMap({
+        'id': 't2',
+        'packageName': '',
+        'pageId': 'p1',
+      });
+      expect(empty.kind, TileKind.unknown);
     });
 
     test('every info kind has a usable default size', () {
@@ -92,6 +216,55 @@ void main() {
       );
       final shown = state.tilesOnPage(state.tilePages.first);
       expect(shown.map((t) => t.id), ['i1']);
+    });
+
+    testWidgets('an unsupported tile stays visible and can be removed', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(1200, 2400);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(() {
+        tester.view.resetPhysicalSize();
+        tester.view.resetDevicePixelRatio();
+      });
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+        const MethodChannel('hamstapp/apps'),
+        (call) async => null,
+      );
+
+      final state = board();
+      state.tiles.add(
+        Tile(
+          id: 'gone',
+          packageName: '',
+          pageId: 'p1',
+          kind: TileKind.unknown,
+          col: 0,
+          row: 0,
+          w: 2,
+          h: 1,
+        ),
+      );
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: const MaterialApp(home: QuickLaunchScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // It keeps its place and says what it is, rather than disappearing.
+      expect(find.text('不支持的小组件'), findsOneWidget);
+      await tester.tap(find.text('不支持的小组件'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('已经不支持了'), findsOneWidget);
+
+      // Removing is the user's decision, taken from the dialog.
+      await tester.tap(find.text('移除'));
+      await tester.pumpAndSettle();
+      expect(state.tiles.where((t) => t.id == 'gone'), isEmpty);
+      expect(find.text('不支持的小组件'), findsNothing);
     });
 
     testWidgets('adding one from the pin sheet shows it on the board', (
@@ -150,6 +323,11 @@ void main() {
             'charging': true,
             'freeBytes': 25 * 1024 * 1024 * 1024,
             'totalBytes': 100 * 1024 * 1024 * 1024,
+            'memTotalBytes': 16 * 1024 * 1024 * 1024,
+            'memAvailBytes': 8 * 1024 * 1024 * 1024,
+            'memLow': false,
+            // 07:30 local time, tomorrow: the tile only shows the clock time.
+            'alarmAt': DateTime(2026, 1, 2, 7, 30).millisecondsSinceEpoch,
           };
         }
         return null;
@@ -221,6 +399,37 @@ void main() {
       expect(find.text('0'), findsOneWidget);
       expect(find.text('没有未读'), findsOneWidget);
     });
+
+    testWidgets('the memory tile reads the native status', (tester) async {
+      await pumpTile(tester, TileKind.memory);
+      // 8 of 16 GiB used.
+      expect(find.text('50%'), findsOneWidget);
+    });
+
+    testWidgets('the alarm tile shows the next alarm time', (tester) async {
+      await pumpTile(tester, TileKind.alarm);
+      expect(find.text('07:30'), findsOneWidget);
+    });
+
+    testWidgets('an unsupported tile says so instead of vanishing', (
+      tester,
+    ) async {
+      await pumpTile(tester, TileKind.unknown);
+      expect(find.text('不支持的小组件'), findsOneWidget);
+      expect(find.text('点一下可移除'), findsOneWidget);
+    });
+
+    testWidgets('every info kind renders without throwing', (tester) async {
+      for (final kind in kTestInfoKinds) {
+        await pumpTile(tester, kind);
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: 'rendering ${kind.name} must not throw',
+        );
+        expect(find.byType(InfoTileContent), findsOneWidget);
+      }
+    });
   });
 }
 
@@ -230,7 +439,17 @@ const List<TileKind> kTestInfoKinds = <TileKind>[
   TileKind.date,
   TileKind.battery,
   TileKind.storage,
+  TileKind.memory,
+  TileKind.screenTime,
+  TileKind.traffic,
+  TileKind.alarm,
   TileKind.unread,
+  TileKind.recent,
+  TileKind.frequent,
+  TileKind.newApps,
+  TileKind.neglected,
+  TileKind.folder,
+  TileKind.action,
 ];
 
 class _MemStorage implements Storage {

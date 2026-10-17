@@ -9,6 +9,7 @@ import '../utils/actions.dart';
 import '../utils/search.dart';
 import '../widgets/app_icon.dart';
 import '../widgets/category_editor.dart';
+import '../widgets/info_tile_sheets.dart';
 import '../widgets/search_field.dart';
 import '../widgets/web_app_editor.dart';
 import 'app_detail_screen.dart';
@@ -423,54 +424,75 @@ void showPinSheet(BuildContext context, AppState state) {
   );
 }
 
-/// The kinds of live info tile, in the order the picker offers them.
-const List<TileKind> kInfoTileKinds = <TileKind>[
+/// Live info tiles, grouped the way the picker offers them.
+const List<TileKind> kInfoTileReadings = <TileKind>[
   TileKind.clock,
   TileKind.date,
   TileKind.battery,
   TileKind.storage,
+  TileKind.memory,
+  TileKind.screenTime,
+  TileKind.traffic,
+  TileKind.alarm,
   TileKind.unread,
 ];
 
-IconData infoTileIcon(TileKind kind) => switch (kind) {
-  TileKind.clock => Icons.schedule,
-  TileKind.date => Icons.calendar_today_outlined,
-  TileKind.battery => Icons.battery_charging_full,
-  TileKind.storage => Icons.storage_outlined,
-  TileKind.unread => Icons.mark_email_unread_outlined,
-  TileKind.app => Icons.apps,
-};
+const List<TileKind> kInfoTileAppLists = <TileKind>[
+  TileKind.recent,
+  TileKind.frequent,
+  TileKind.newApps,
+  TileKind.neglected,
+  TileKind.folder,
+];
 
-/// Localizable name of an info tile kind (Chinese source string).
-String infoTileTitle(TileKind kind) => switch (kind) {
-  TileKind.clock => '时钟',
-  TileKind.date => '日期',
-  TileKind.battery => '电量',
-  TileKind.storage => '存储空间',
-  TileKind.unread => '未读汇总',
-  TileKind.app => '应用',
-};
-
-String infoTileSubtitle(TileKind kind) => switch (kind) {
-  TileKind.clock => '当前时间，按分钟更新',
-  TileKind.date => '今天几号、星期几',
-  TileKind.battery => '电量与充电状态，每分钟刷新',
-  TileKind.storage => '本机存储占用，每分钟刷新',
-  TileKind.unread => '所有应用的未读通知总数',
-  TileKind.app => '',
-};
-
-/// Picker for the live info tiles (clock, date, battery, storage, unread).
+/// Picker for the live info tiles: readings, app lists and one-tap actions.
 void showInfoTileSheet(BuildContext context, AppState state) {
+  Widget header(String text) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 2),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Text(
+            text,
+            style: TextStyle(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w700,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
+        ),
+      );
+
+  Future<void> add(
+    TileKind kind,
+    String title, {
+    Map<String, dynamic>? options,
+  }) async {
+    await state.addInfoTile(kind, options: options);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            context.strings.t('已添加「{name}」磁贴', {'name': title}),
+          ),
+          duration: const Duration(milliseconds: 1200),
+        ),
+      );
+  }
+
   showModalBottomSheet(
     context: context,
+    isScrollControlled: true,
     builder: (ctx) => SafeArea(
-      child: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        builder: (ctx, controller) => ListView(
+          controller: controller,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 2),
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: Column(
@@ -495,29 +517,47 @@ void showInfoTileSheet(BuildContext context, AppState state) {
                 ),
               ),
             ),
-            for (final kind in kInfoTileKinds)
+            header(ctx.strings.t('读数')),
+            for (final kind in kInfoTileReadings)
               ListTile(
+                dense: true,
                 leading: Icon(infoTileIcon(kind)),
                 title: Text(ctx.strings.t(infoTileTitle(kind))),
                 subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
-                onTap: () async {
+                onTap: () {
                   Navigator.pop(ctx);
-                  await state.addInfoTile(kind);
-                  if (!context.mounted) return;
-                  final name = context.strings.t(infoTileTitle(kind));
-                  ScaffoldMessenger.of(context)
-                    ..hideCurrentSnackBar()
-                    ..showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          context.strings.t('已添加「{name}」磁贴', {'name': name}),
-                        ),
-                        duration: const Duration(milliseconds: 1200),
-                      ),
-                    );
+                  add(kind, ctx.strings.t(infoTileTitle(kind)));
                 },
               ),
-            const SizedBox(height: 8),
+            header(ctx.strings.t('应用')),
+            for (final kind in kInfoTileAppLists)
+              ListTile(
+                dense: true,
+                leading: Icon(infoTileIcon(kind)),
+                title: Text(ctx.strings.t(infoTileTitle(kind))),
+                subtitle: Text(ctx.strings.t(infoTileSubtitle(kind))),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  add(kind, ctx.strings.t(infoTileTitle(kind)));
+                },
+              ),
+            header(ctx.strings.t('动作')),
+            for (final action in kInfoTileActions)
+              ListTile(
+                dense: true,
+                leading: Icon(actionIcon(action)),
+                title: Text(ctx.strings.t(actionTitle(action))),
+                subtitle: Text(ctx.strings.t(infoTileSubtitle(TileKind.action))),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  add(
+                    TileKind.action,
+                    ctx.strings.t(actionTitle(action)),
+                    options: {'action': action},
+                  );
+                },
+              ),
+            const SizedBox(height: 12),
           ],
         ),
       ),
