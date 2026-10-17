@@ -2,17 +2,70 @@ import 'package:intl/intl.dart';
 
 import '../l10n/app_strings.dart';
 
+/// How dates are written across the app. Chosen in Settings → 外观, applied to
+/// [Fmt] at startup and on change, so one setting covers every screen and tile.
+enum DateStyle {
+  /// 2026-10-17
+  ymdDash('yyyy-MM-dd', 'MM-dd'),
+
+  /// 2026/10/17
+  ymdSlash('yyyy/MM/dd', 'MM/dd'),
+
+  /// 10/17/2026
+  mdySlash('MM/dd/yyyy', 'MM/dd'),
+
+  /// 17/10/2026
+  dmySlash('dd/MM/yyyy', 'dd/MM'),
+
+  /// 2026年10月17日
+  chinese('yyyy年M月d日', 'M月d日');
+
+  const DateStyle(this.pattern, this.shortPattern);
+
+  /// Full date pattern.
+  final String pattern;
+
+  /// Month/day only, for tight spots (tile captions).
+  final String shortPattern;
+
+  static DateStyle byName(String? name) => DateStyle.values.firstWhere(
+    (style) => style.name == name,
+    orElse: () => DateStyle.ymdDash,
+  );
+
+  /// Today's date written this way, so the settings picker needs no wording.
+  String get sample => DateFormat(pattern).format(DateTime.now());
+}
+
 class Fmt {
-  static final DateFormat _date = DateFormat('yyyy-MM-dd HH:mm');
-  static final DateFormat _day = DateFormat('yyyy-MM-dd');
+  /// How dates are written; set from the user's setting by [AppState].
+  static DateStyle dateStyle = DateStyle.ymdDash;
+
+  /// Whether times are written 24-hour (off means `1:05 PM`).
+  static bool clock24h = true;
+
+  /// Formatters are cached per pattern: these run inside list rows and tiles.
+  static final Map<String, DateFormat> _formats = <String, DateFormat>{};
+
+  static DateFormat _format(String pattern) =>
+      _formats.putIfAbsent(pattern, () => DateFormat(pattern));
+
+  static String get _timePattern => clock24h ? 'HH:mm' : 'h:mm a';
 
   static String dateTime(int millis) => millis <= 0
       ? AppStrings.current.t('未知')
-      : _date.format(DateTime.fromMillisecondsSinceEpoch(millis));
+      : '${day(millis)} ${clock(millis)}';
 
   static String day(int millis) => millis <= 0
       ? AppStrings.current.t('未知')
-      : _day.format(DateTime.fromMillisecondsSinceEpoch(millis));
+      : _format(dateStyle.pattern)
+          .format(DateTime.fromMillisecondsSinceEpoch(millis));
+
+  /// Month/day only, in the same order as the full date.
+  static String shortDate(int millis) => millis <= 0
+      ? ''
+      : _format(dateStyle.shortPattern)
+          .format(DateTime.fromMillisecondsSinceEpoch(millis));
 
   static String size(int bytes) {
     if (bytes <= 0) return AppStrings.current.t('未知');
@@ -45,11 +98,11 @@ class Fmt {
     '周日',
   ];
 
-  /// `07:30` for a timestamp.
+  /// `07:30` (or `7:30 AM`) for a timestamp.
   static String clock(int millis) {
-    final t = DateTime.fromMillisecondsSinceEpoch(millis);
-    return '${t.hour.toString().padLeft(2, '0')}:'
-        '${t.minute.toString().padLeft(2, '0')}';
+    if (millis <= 0) return '--:--';
+    return _format(_timePattern)
+        .format(DateTime.fromMillisecondsSinceEpoch(millis));
   }
 
   /// `今天` / `明天` / `周三` / `10/20` for a timestamp.
@@ -63,7 +116,7 @@ class Fmt {
     if (days == 0) return s.t('今天');
     if (days == 1) return s.t('明天');
     if (days > 1 && days < 7) return s.t(kWeekdayKeys[t.weekday - 1]);
-    return '${t.month}/${t.day}';
+    return shortDate(millis);
   }
 
   /// `3 天 4 小时` / `5 小时 20 分` / `42 分钟` — for an elapsed time.

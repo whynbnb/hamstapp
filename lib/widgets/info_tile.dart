@@ -652,7 +652,7 @@ class _InfoTileContentState extends State<InfoTileContent> {
           case TileKind.countdown:
             return _countdown(s, fg, shortest, pad, showCaption, tile);
           case TileKind.worldClock:
-            return _worldClock(s, fg, shortest, pad, showCaption, tile);
+            return _worldClock(s, fg, shortest, h, pad, showCaption, tile);
           case TileKind.note:
             return _note(s, fg, pad, tile);
           case TileKind.netSpeed:
@@ -810,11 +810,8 @@ class _InfoTileContentState extends State<InfoTileContent> {
               ),
               if (showCaption)
                 Text(
-                  s.t('{day} {m}/{d}', {
-                    'day': _weekday(s, _now),
-                    'm': _now.month,
-                    'd': _now.day,
-                  }),
+                  '${_weekday(s, _now)} '
+                  '${Fmt.shortDate(_now.millisecondsSinceEpoch)}',
                   style: TextStyle(
                     color: fg.withValues(alpha: 0.85),
                     fontSize: shortest * 0.14,
@@ -854,7 +851,8 @@ class _InfoTileContentState extends State<InfoTileContent> {
               ),
               if (showCaption)
                 Text(
-                  '${_weekday(s, _now)} · ${_now.year}/${_now.month}',
+                  '${_weekday(s, _now)} · '
+                  '${Fmt.day(_now.millisecondsSinceEpoch)}',
                   style: TextStyle(
                     color: fg.withValues(alpha: 0.85),
                     fontSize: shortest * 0.13,
@@ -1218,6 +1216,7 @@ class _InfoTileContentState extends State<InfoTileContent> {
     AppStrings s,
     Color fg,
     double shortest,
+    double height,
     double pad,
     bool showCaption,
     Tile tile,
@@ -1234,17 +1233,66 @@ class _InfoTileContentState extends State<InfoTileContent> {
         s.t('点一下选择时区'),
       );
     }
-    final at = DateTime.now().toUtc().add(Duration(minutes: offset));
+    final at = worldClockTime(offset);
     final label = tile.optionString('label');
-    return _value(
-      s,
-      fg,
-      shortest,
-      pad,
-      showCaption,
-      '${at.hour.toString().padLeft(2, '0')}:'
-          '${at.minute.toString().padLeft(2, '0')}',
-      label.isEmpty ? worldClockLabel(offset) : label,
+    final name = label.isEmpty ? worldClockLabel(offset) : label;
+    final time = '${at.hour.toString().padLeft(2, '0')}:'
+        '${at.minute.toString().padLeft(2, '0')}';
+    // The zone's date is worth seeing, but a short tile cannot fit a date and
+    // a name: there the day difference (-1 / 0 / +1) is the useful part, since
+    // it is what a bare HH:mm hides.
+    final delta = worldClockDeltaText(worldClockDayDelta(offset));
+    final showDate = tile.optionBool('showDate') && showCaption;
+    if (!showDate) {
+      return _value(s, fg, shortest, pad, showCaption, time, name);
+    }
+    // Three short lines need roughly this much room; anything smaller gets the
+    // one-line form with the day difference instead.
+    final spacious = height >= 96;
+    return Center(
+      child: Padding(
+        padding: EdgeInsets.all(pad),
+        child: FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                time,
+                style: TextStyle(
+                  color: fg,
+                  fontWeight: FontWeight.w700,
+                  fontSize: shortest * 0.34,
+                  height: 1.1,
+                ),
+              ),
+              Text(
+                spacious ? name : s.t('{name} · {delta}', {
+                  'name': name,
+                  'delta': delta,
+                }),
+                style: TextStyle(
+                  color: fg.withValues(alpha: 0.85),
+                  fontSize: shortest * 0.12,
+                  height: 1.2,
+                ),
+              ),
+              if (spacious)
+                Text(
+                  s.t('{date} · {delta}', {
+                    'date': worldClockDateText(at),
+                    'delta': delta,
+                  }),
+                  style: TextStyle(
+                    color: fg.withValues(alpha: 0.85),
+                    fontSize: shortest * 0.12,
+                    height: 1.2,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

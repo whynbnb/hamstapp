@@ -169,6 +169,35 @@ class AppState extends ChangeNotifier {
   List<Tile> tiles = <Tile>[];
   Map<String, dynamic> settings = <String, dynamic>{};
 
+  // ---- date/time format
+
+  /// How dates are written across the app.
+  DateStyle get dateStyle =>
+      DateStyle.byName(settings['date_style'] as String?);
+
+  /// Whether times are written 24-hour.
+  bool get clock24h => settings['clock_24h'] as bool? ?? true;
+
+  Future<void> setDateStyle(DateStyle value) async {
+    Fmt.dateStyle = value;
+    settings['date_style'] = value.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  Future<void> setClock24h(bool value) async {
+    Fmt.clock24h = value;
+    settings['clock_24h'] = value;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Pushes the stored format into [Fmt], which every screen formats with.
+  void _applyFormat() {
+    Fmt.dateStyle = dateStyle;
+    Fmt.clock24h = clock24h;
+  }
+
   /// Timestamped launches used for time-of-day recommendations. Bounded by
   /// [_kLaunchLogCap] / [_kLaunchLogMaxAge].
   List<LaunchEvent> launchLog = <LaunchEvent>[];
@@ -329,6 +358,7 @@ class AppState extends ChangeNotifier {
     );
     _applyLanguage();
     _applyLanguage();
+    _applyFormat();
     launchLog = await _loadLaunchLog();
     _pruneLaunchLog();
     tilePages = await _loadTilePages();

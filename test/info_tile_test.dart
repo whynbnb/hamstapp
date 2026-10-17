@@ -15,6 +15,7 @@ import 'package:hamstapp/screens/quick_launch_screen.dart';
 import 'package:hamstapp/services/device_status.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
+import 'package:hamstapp/utils/format.dart';
 import 'package:hamstapp/widgets/info_tile.dart';
 import 'package:hamstapp/widgets/info_tile_sheets.dart';
 
@@ -199,6 +200,51 @@ void main() {
       expect(worldClockLabel(-300), 'UTC-5');
       expect(worldClockLabel(330), 'UTC+5:30');
       expect(worldClockLabel(75), 'UTC+1:15');
+    });
+
+    test('the date format setting drives every date', () {
+      final at = DateTime(2026, 10, 17, 14, 5).millisecondsSinceEpoch;
+      addTearDown(() {
+        Fmt.dateStyle = DateStyle.ymdDash;
+        Fmt.clock24h = true;
+      });
+
+      expect(Fmt.day(at), '2026-10-17');
+      expect(Fmt.dateTime(at), '2026-10-17 14:05');
+      expect(Fmt.shortDate(at), '10-17');
+
+      Fmt.dateStyle = DateStyle.chinese;
+      expect(Fmt.day(at), '2026年10月17日');
+      expect(Fmt.shortDate(at), '10月17日');
+
+      Fmt.dateStyle = DateStyle.dmySlash;
+      expect(Fmt.day(at), '17/10/2026');
+      expect(Fmt.shortDate(at), '17/10');
+
+      Fmt.clock24h = false;
+      expect(Fmt.clock(at), '2:05 PM');
+      expect(Fmt.dateTime(at), '17/10/2026 2:05 PM');
+    });
+
+    test('a world clock date shows the zone day difference', () {
+      // 22:30 UTC is already the next day in UTC+8, and still the same day in
+      // UTC-5 — the numbers the tile falls back to when a date does not fit.
+      final now = DateTime.utc(2026, 10, 17, 22, 30);
+      expect(worldClockDayDelta(480, now), 1);
+      expect(worldClockDayDelta(0, now), 0);
+      expect(worldClockDayDelta(-300, now), 0);
+      // 05:30 UTC is still the previous day in UTC-8.
+      final morning = DateTime.utc(2026, 10, 18, 5, 30);
+      expect(worldClockDayDelta(-480, morning), -1);
+
+      expect(worldClockDeltaText(1), '+1');
+      expect(worldClockDeltaText(0), '0');
+      expect(worldClockDeltaText(-2), '-2');
+
+      final at = worldClockTime(480, now);
+      expect(at.hour, 6);
+      expect(at.minute, 30);
+      expect(worldClockDateText(at), '10-18 周日');
     });
 
     test('the snapshot tile diffs the newest snapshot against now', () {

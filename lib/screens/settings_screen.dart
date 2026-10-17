@@ -7,6 +7,7 @@ import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/backup_actions.dart';
+import '../utils/format.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/theme_color_picker.dart';
 import 'haptics_settings_screen.dart';
@@ -131,6 +132,37 @@ class SettingsScreen extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.event_note_outlined),
+            title: Text(context.strings.t('日期格式')),
+            subtitle: Text(
+              context.strings.t('示例：{sample}', {
+                'sample':
+                    '${state.dateStyle.sample} '
+                    '${Fmt.clock(DateTime.now().millisecondsSinceEpoch)}',
+              }),
+            ),
+            trailing: DropdownButton<DateStyle>(
+              value: state.dateStyle,
+              underline: const SizedBox.shrink(),
+              onChanged: (v) {
+                if (v != null) state.setDateStyle(v);
+              },
+              items: [
+                // The items are today's date written each way, so no wording
+                // is needed to explain them.
+                for (final style in DateStyle.values)
+                  DropdownMenuItem(value: style, child: Text(style.sample)),
+              ],
+            ),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.schedule),
+            title: Text(context.strings.t('24 小时制')),
+            subtitle: Text(context.strings.t('关闭后时间显示为 1:05 PM')),
+            value: state.clock24h,
+            onChanged: state.setClock24h,
           ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('系统')),

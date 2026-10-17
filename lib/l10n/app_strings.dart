@@ -706,6 +706,10 @@ const Map<String, String> _en = <String, String>{
       'Package snapshots, tiles, groups, backup lists and all other data into one file',
   '版本：{version}{code}': 'Version: {version}{code}',
   '确定要卸载「{name}」吗？': 'Uninstall "{name}"?',
+  '日期格式': 'Date format',
+  '示例：{sample}': 'Example: {sample}',
+  '24 小时制': '24-hour time',
+  '关闭后时间显示为 1:05 PM': 'Off shows times as 1:05 PM',
   '语言': 'Language',
   '更多': 'More',
   '跟随系统语言': 'Follow system',
@@ -1231,6 +1235,12 @@ const Map<String, String> _en = <String, String>{
   '只看安装包': 'APK only',
   '含数据与缓存（需授权）': 'Including data & cache (needs access)',
   '时区': 'Time zone',
+  '显示日期': 'Show the date',
+  '放不下整行日期时，显示与当天的差值（-1 / 0 / +1）':
+      'When a whole date does not fit, the difference from today is shown '
+      '(-1 / 0 / +1)',
+  '{name} · {delta}': '{name} · {delta}',
+  '{date} · {delta}': '{date} · {delta}',
   '号码': 'Number',
   '内容': 'Text',
   '未设置': 'Not set',

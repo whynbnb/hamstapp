@@ -169,6 +169,12 @@ class Tile {
     return v is String ? v : fallback;
   }
 
+  /// Boolean option, e.g. whether the world clock also shows its date.
+  bool optionBool(String key, [bool fallback = false]) {
+    final v = options[key];
+    return v is bool ? v : fallback;
+  }
+
   /// Integer option, e.g. how many days "new installs" looks back.
   int optionInt(String key, [int fallback = 0]) {
     final v = options[key];

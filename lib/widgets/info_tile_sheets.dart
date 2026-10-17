@@ -532,6 +532,17 @@ class _AppSearchSheetState extends State<_AppSearchSheet> {
 
 // ----------------------------------------------------------------- settings
 
+/// Weekday names, indexed by `DateTime.weekday - 1` (same list Fmt uses).
+const List<String> kWeekdayKeyList = <String>[
+  '周一',
+  '周二',
+  '周三',
+  '周四',
+  '周五',
+  '周六',
+  '周日',
+];
+
 /// Time zones the 世界时钟 tile can show (minutes from UTC).
 const List<(int, String)> kWorldClocks = <(int, String)>[
   (-480, 'UTC-8'),
@@ -559,6 +570,31 @@ String worldClockLabel(int offsetMinutes) {
   final rest = abs % 60;
   return 'UTC$sign${abs ~/ 60}'
       '${rest == 0 ? '' : ':${rest.toString().padLeft(2, '0')}'}';
+}
+
+/// The wall-clock time in the zone [offsetMinutes] from UTC. Pass [now] to make
+/// it deterministic in tests.
+DateTime worldClockTime(int offsetMinutes, [DateTime? now]) =>
+    (now ?? DateTime.now()).toUtc().add(Duration(minutes: offsetMinutes));
+
+/// Whole days between the device's calendar date and the zone's: -1 when the
+/// zone is still on yesterday, +1 when it is already on tomorrow.
+int worldClockDayDelta(int offsetMinutes, [DateTime? now]) {
+  final at = now ?? DateTime.now();
+  final zone = worldClockTime(offsetMinutes, at);
+  final deviceDay = DateTime(at.year, at.month, at.day);
+  final zoneDay = DateTime(zone.year, zone.month, zone.day);
+  return zoneDay.difference(deviceDay).inDays;
+}
+
+/// `+1` / `0` / `-1` — the zone's date relative to the device's.
+String worldClockDeltaText(int days) =>
+    days > 0 ? '+$days' : '$days';
+
+/// `10-18 周日` for a wall-clock time in another zone, in the chosen date style.
+String worldClockDateText(DateTime at) {
+  final weekday = AppStrings.current.t(kWeekdayKeyList[at.weekday - 1]);
+  return '${Fmt.shortDate(at.millisecondsSinceEpoch)} $weekday';
 }
 
 /// Whether tapping this kind does anything (drives the tile's ripple too).
@@ -757,6 +793,19 @@ void showInfoTileSettings(BuildContext context, AppState state, Tile tile) {
                 ),
               ],
               if (tile.kind == TileKind.worldClock) ...[
+                SwitchListTile(
+                  dense: true,
+                  secondary: const Icon(Icons.calendar_today_outlined),
+                  title: Text(s.t('显示日期')),
+                  subtitle: Text(
+                    s.t('放不下整行日期时，显示与当天的差值（-1 / 0 / +1）'),
+                  ),
+                  value: tile.optionBool('showDate'),
+                  onChanged: (v) {
+                    save({'showDate': v});
+                    setSheetState(() {});
+                  },
+                ),
                 _choice(
                   ctx,
                   s.t('时区'),
