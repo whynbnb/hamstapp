@@ -32,7 +32,7 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         // App version shown to the system and the user.
-        versionName = "1.0"
+        versionName = "1.1"
     }
 
     buildTypes {

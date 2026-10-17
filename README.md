@@ -15,7 +15,7 @@
   <a href="https://dart.dev"><img alt="Dart" src="https://img.shields.io/badge/Dart-3-0175C2?logo=dart&logoColor=white"></a>
   <img alt="Platform" src="https://img.shields.io/badge/Platform-Android-3DDC84?logo=android&logoColor=white">
   <img alt="minSdk" src="https://img.shields.io/badge/minSdk-24-blue">
-  <img alt="version" src="https://img.shields.io/badge/version-1.0-orange">
+  <img alt="version" src="https://img.shields.io/badge/version-1.1-orange">
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-yellow.svg"></a>
 </p>
 
@@ -44,6 +44,17 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 ### 🚀 Launch
 - **Tile board** — a free-form grid where each app is a tile you can move and resize (1×1 up to 6×6).
   Multiple pages, per-tile label / padding / border, and two looks: **Colorful** and **Glass**.
+- **Info tiles** — 30 kinds of live tiles that need no app behind them, in five groups the picker can
+  filter by (Readings / Apps / 囤囤 / Tools / Actions):
+  - *Readings* — clock, date, battery (level, temperature or both), storage, RAM, today's screen time,
+    this month's mobile + Wi-Fi data, the next alarm, uptime, live network speed, unread total.
+  - *Apps* — recently used, most used (or suggested for this time of day), new installs, long unused,
+    favourites, biggest, and **folders** (a category, or a hand-picked set, opening as a grid).
+  - *囤囤* — the latest snapshot and what changed since, apps still to sort out, the download cache,
+    and a backup list's installed / missing counts.
+  - *Tools* — torch, quick dial, countdown, world clock (optional date, or its difference from today),
+    a note, and a battery / RAM / storage / data overview.
+  - *Actions* — scan apps, take a snapshot, search apps, open the storage manager.
 - **Categories** — group apps with an emoji and a colour; reorder by hand or by name / count.
 - **Favorites** — a quick grid of the apps you starred.
 - **Recent** — launch history with *all / today / 7-day / 30-day* filters, sorted by recency or frequency,
@@ -52,16 +63,49 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   get an unread bubble: choose **count / dot / hidden**, set separately for the tile board and the rest.
   Badges follow **unread** semantics: dismissing a notification keeps the bubble, which clears when you
   open it, the app withdraws it, or you launch the app from 囤囤.
+- **Launcher shortcuts** — long-press 囤囤's own icon for *Scan apps*, *Recent* and *Tiles*.
 
 ### 📦 App manager
 - Scan installed apps (optionally including system apps); the list is cached for instant launch.
 - Search by **name, package, pinyin initials, full pinyin** or fuzzy subsequence.
 - Filter by scope (all / user / system), by state (favorite, categorised, has a reason, unorganized,
-  uninstalled…) and by category; sort by name, install time, update time or size.
+  uninstalled…) and by category; sort by name, install time, update time or size. The filter and sort
+  you leave behind are remembered.
 - Per-app page: launch, favourite, pin to tiles, install **reason**, **note**, categories, usage stats,
-  APK analysis, export / share the APK, open the system app-info screen, uninstall.
+  APK analysis, export / share the APK, open the system app-info screen, uninstall — plus three cards:
+  - **Storage** — APK, data and cache, a proportion bar, and a shortcut into the system screen to clear it.
+  - **Permissions** — everything the app requests, sensitive and granted ones first, with a tap into the
+    system permission screen.
+  - **Signature** — the certificate fingerprint (tap to copy), subject, validity, and flags for
+    self-signed / multiple signers / rotated keys.
 - **Uninstall records** — when an app disappears it is kept together with the reason you give,
   so reinstalls and snapshots stay meaningful.
+
+### 🔐 Permissions & storage
+- **Permission audit** — the other direction: for each capability, who holds it. Microphone, camera,
+  location (and background location), contacts, phone & call log, SMS, photos / music / files, calendar,
+  body sensors, notifications, draw-over-other-apps, install-unknown-apps, modify system settings,
+  usage access, notification access, accessibility and the battery-optimisation whitelist — each entry
+  taps through to the app.
+- **Storage manager** — what 囤囤 itself is using (icon cache, scan cache, downloaded APKs, scratch files,
+  other data), with per-row clearing, plus an **app usage ranking** (APK + data + cache per app, biggest
+  first, straight to the system clear screen).
+- Where Android requires a grant — *usage access* for per-app sizes, screen time and data — the screen
+  says so and offers the switch instead of showing zeros.
+
+### 🌐 Web apps
+- Installed **web apps** (WebAPK / Trusted Web Activity) are detected during a scan and marked with a 🌐,
+  and can be inspected from Settings → 网页应用检测.
+- Add a website by hand and it becomes a first-class entry: same list, tiles, favourites, categories,
+  search and usage log as an app, with its own icon.
+- 囤囤 reads the site's **web app manifest** (name, start URL, scope, display mode, theme / background
+  colour, icons) and opens it the way the site asks for: a **standalone window** (its own task, no address
+  bar, per-entry status-bar behaviour), or handed to a **browser you choose**.
+- Leave the manifest's scope and the window stays, but shows an address bar — the standard's rule for
+  sign-in pages on another host — so logins keep the same session instead of being thrown to a browser.
+- This is 囤囤's own WebView host, so it does not share cookies with your browser; when a tap needs a real
+  browser, 囤囤 asks the system where the URL would go and prefers an installed web app, so it can open in
+  the browser's own app window when one exists.
 
 ### 🗂 Snapshots & backup
 - **Snapshots** capture the installed list and all your annotations (including app icons), so you can
@@ -90,6 +134,9 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 
 ### 🎨 Interface
 - Light / dark / system theme, custom seed colour, **Chinese & English**.
+- **Date format** — five styles (`2026-10-17`, `2026/10/17`, `10/17/2026`, `17/10/2026`,
+  `2026年10月17日`) and 24-hour or `1:05 PM`; one setting drives every screen and tile.
+  Relative times (`3 days ago`, `today`) stay relative.
 - Navigation: bottom bar, side rail, or a collapsed button.
 - Adjustable haptics, optional full-screen (hide the status bar), remember last position.
 
@@ -97,6 +144,10 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 
 Download the latest `hamstapp-*-arm64-v8a.apk` from the [Releases](https://github.com/whynbnb/hamstapp/releases)
 page and install it on an **arm64-v8a** device running **Android 7.0+ (API 24)**.
+
+Some features ask for extra grants and work without them: **notification access** (unread badges),
+**usage access** (per-app sizes, screen time, data), **install unknown apps** (installing from a source),
+and **all-files / package visibility** for the scan.
 
 ## 🛠 Build from source
 
@@ -120,8 +171,18 @@ bash scripts/release.sh
   `lpinyin` for search and `file_picker` for import/export.
 - A small **Kotlin** `MethodChannel` plugin on top of the Android `PackageManager`:
   app scan & icons, launching, install / uninstall / share, APK parsing & signing,
-  FTP (`commons-net`), SMB (`jcifs-ng`) and vibration.
+  storage & usage statistics, permissions and app-ops, camera torch, FTP (`commons-net`),
+  SMB (`jcifs-ng`) and vibration.
 - **WebDAV** is implemented in Dart over HTTP.
+
+## 📝 Changelog
+
+- **1.1** — permission audit; per-app storage / permissions / signature cards; storage manager and app
+  usage ranking; 30 info tiles with their own settings; web-app entries with a standalone window or a
+  browser of your choice; launcher shortcuts; date-format and 24-hour settings; “unsupported tile”
+  handling instead of silent removal.
+- **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
+  remote APK sources with the APK analyzer, usage insights, export / import.
 
 ## 📄 License
 

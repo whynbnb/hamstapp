@@ -19,7 +19,7 @@ import 'sync_screen.dart';
 import 'web_app_check_screen.dart';
 
 /// App version shown in Settings and the About dialog.
-const String kAppVersion = '1.0';
+const String kAppVersion = '1.1';
 
 /// Project repository, opened from the About dialog.
 const String kProjectUrl = 'https://github.com/whynbnb/hamstapp';
