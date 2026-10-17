@@ -8,6 +8,7 @@ import '../utils/actions.dart';
 import '../utils/format.dart';
 import '../utils/usage_stats.dart';
 import '../widgets/app_icon.dart';
+import 'app_usage_screen.dart';
 import 'app_detail_screen.dart';
 
 /// Usage trends built from the timestamped launch log: what gets opened the
@@ -46,6 +47,16 @@ class _UsageStatsScreenState extends State<UsageStatsScreen> {
           s.t('使用趋势'),
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
+        actions: [
+          IconButton(
+            tooltip: s.t('使用时长与流量（系统记录）'),
+            icon: const Icon(Icons.insights_outlined),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AppUsageScreen()),
+            ),
+          ),
+        ],
       ),
       body: state.launchLog.isEmpty
           ? _EmptyHint(s: s)

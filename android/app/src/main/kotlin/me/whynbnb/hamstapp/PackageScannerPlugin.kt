@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.AppOpsManager
 import android.app.WallpaperManager
+import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
 import android.app.usage.StorageStats
 import android.app.usage.StorageStatsManager
@@ -14,6 +15,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ApplicationInfo
+import android.content.pm.LauncherApps
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.PermissionInfo
@@ -47,6 +49,7 @@ import android.service.notification.NotificationListenerService
 import android.util.Base64
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
+import org.xmlpull.v1.XmlPullParser
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import jcifs.CIFSContext
@@ -128,24 +131,75 @@ class PackageScannerPlugin(
                 val pkg = call.argument<String>("packageName")
                 val size = call.argument<Int>("size") ?: 144
                 val activity = call.argument<String>("activity")
+                val iconPack = call.argument<String>("iconPack") ?: ""
                 if (pkg == null) {
                     result.error("BAD_ARGS", "packageName is required", null)
                     return
                 }
-                val cacheKey = "$pkg|${activity ?: ""}@$size"
+                val cacheKey = "$pkg|${activity ?: ""}|$iconPack@$size"
                 iconCache[cacheKey]?.let {
                     result.success(it)
                     return
                 }
                 executor.execute {
                     try {
-                        val bytes = loadIcon(pkg, size, activity)
+                        val bytes = loadIcon(pkg, size, activity, iconPack)
                         if (bytes != null) iconCache[cacheKey] = bytes
                         mainHandler.post { result.success(bytes) }
                     } catch (t: Throwable) {
                         mainHandler.post { result.error("ICON_FAILED", t.message, null) }
                     }
                 }
+            }
+            // Installed icon packs (ADW/Nova/Lawnchair-compatible themes).
+            "iconPacks" -> executor.execute {
+                val packs = runCatching { iconPacks() }
+                    .getOrDefault(emptyList<Map<String, Any?>>())
+                mainHandler.post { result.success(packs) }
+            }
+            // Per-app foreground time for today / 7 / 30 days, plus the last
+            // time it was used. Needs the same usage-access grant as the rest
+            // of the statistics.
+            "appUsageStats" -> executor.execute {
+                val stats = runCatching { appUsageStats() }.getOrElse {
+                    mapOf("permitted" to false, "apps" to emptyList<Map<String, Any?>>())
+                }
+                mainHandler.post { result.success(stats) }
+            }
+            // This month's traffic per app (by uid).
+            "appTraffic" -> executor.execute {
+                val stats = runCatching { appTraffic() }.getOrElse {
+                    mapOf("permitted" to false, "apps" to emptyList<Map<String, Any?>>())
+                }
+                mainHandler.post { result.success(stats) }
+            }
+            // An app's own long-press shortcuts. The platform only reveals
+            // another app's shortcuts to the current launcher, so the reply says
+            // whether we are allowed to see them at all.
+            "appShortcuts" -> {
+                val pkg = call.argument<String>("packageName") ?: ""
+                executor.execute {
+                    val info = runCatching { appShortcuts(pkg) }.getOrElse {
+                        mapOf("permitted" to false, "shortcuts" to emptyList<Map<String, Any?>>())
+                    }
+                    mainHandler.post { result.success(info) }
+                }
+            }
+            "startAppShortcut" -> {
+                val pkg = call.argument<String>("packageName") ?: ""
+                val id = call.argument<String>("shortcutId") ?: ""
+                mainHandler.post { result.success(startAppShortcut(pkg, id)) }
+            }
+            "openHomeSettings" -> mainHandler.post {
+                result.success(
+                    runCatching {
+                        context.startActivity(
+                            Intent(Settings.ACTION_HOME_SETTINGS)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                        true
+                    }.getOrDefault(false)
+                )
             }
             "launchApp" -> {
                 val pkg = call.argument<String>("packageName")
@@ -581,6 +635,246 @@ class PackageScannerPlugin(
         }
     }.getOrNull()
 
+    // ------------------------------------------------------------ icon packs
+
+    private val iconPackMaps = HashMap<String, Map<String, String>>()
+
+    /**
+     * The icon pack's `appfilter.xml`, as `package/activity -> drawable` (and
+     * `package -> drawable` for packs that map whole packages). Parsed once per
+     * pack and kept in memory: the file has hundreds of entries.
+     *
+     * The lookup file and the intent are the de-facto launcher icon-pack
+     * conventions, not anything vendor specific.
+     */
+    private fun iconPackMap(pack: String): Map<String, String> {
+        iconPackMaps[pack]?.let { return it }
+        val out = HashMap<String, String>()
+        runCatching {
+            val res = context.packageManager.getResourcesForApplication(pack)
+            val id = res.getIdentifier("appfilter", "xml", pack)
+            if (id != 0) {
+                val parser = res.getXml(id)
+                while (parser.eventType != XmlPullParser.END_DOCUMENT) {
+                    if (parser.next() != XmlPullParser.START_TAG) continue
+                    if (parser.name != "item") continue
+                    val drawable = parser.getAttributeValue(null, "drawable")
+                        ?: continue
+                    val component = parser.getAttributeValue(null, "component")
+                    val onlyPackage = parser.getAttributeValue(null, "package")
+                    if (component != null) {
+                        out[component
+                            .replace("ComponentInfo{", "")
+                            .replace("}", "")
+                            .trim()] = drawable
+                    }
+                    if (onlyPackage != null) out[onlyPackage.trim()] = drawable
+                }
+            }
+        }
+        iconPackMaps[pack] = out
+        return out
+    }
+
+    /** The drawable a pack provides for this app/entry, or null. */
+    private fun iconFromPack(
+        pack: String,
+        packageName: String,
+        activity: String?,
+    ): Drawable? {
+        val map = iconPackMap(pack)
+        if (map.isEmpty()) return null
+        val cls = activity?.takeIf { it.isNotEmpty() }
+            ?: runCatching { launcherClass(context.packageManager, packageName) }
+                .getOrDefault("")
+        val name = (if (cls.isNotEmpty()) map["$packageName/$cls"] else null)
+            ?: map[packageName]
+            ?: return null
+        val res = context.packageManager.getResourcesForApplication(pack)
+        var id = res.getIdentifier(name, "drawable", pack)
+        if (id == 0) id = res.getIdentifier(name, "mipmap", pack)
+        if (id == 0) return null
+        return runCatching { res.getDrawable(id, context.theme) }.getOrNull()
+    }
+
+    /** Installed icon packs, most complete first. */
+    private fun iconPacks(): List<Map<String, Any?>> {
+        val pm = context.packageManager
+        val found = LinkedHashMap<String, Map<String, Any?>>()
+        for (action in listOf("org.adw.launcher.THEMES", "com.gau.go.launcherex.theme")) {
+            val resolved = runCatching {
+                if (Build.VERSION.SDK_INT >= 33) {
+                    pm.queryIntentActivities(
+                        Intent(action),
+                        PackageManager.ResolveInfoFlags.of(0)
+                    )
+                } else {
+                    @Suppress("DEPRECATION")
+                    pm.queryIntentActivities(Intent(action), 0)
+                }
+            }.getOrDefault(emptyList())
+            for (ri in resolved) {
+                val pkg = ri.activityInfo?.packageName ?: continue
+                if (found.containsKey(pkg)) continue
+                val label = runCatching {
+                    pm.getApplicationInfo(pkg, 0).loadLabel(pm).toString()
+                }.getOrDefault(pkg)
+                found[pkg] = mapOf(
+                    "packageName" to pkg,
+                    "name" to label,
+                    "icons" to iconPackMap(pkg).size
+                )
+            }
+        }
+        return found.values.sortedByDescending { (it["icons"] as? Int) ?: 0 }
+    }
+
+    // ------------------------------------------------------- usage & traffic
+
+    /** Foreground time per app for today, the last 7 and the last 30 days. */
+    private fun appUsageStats(): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < 23 || !hasUsageAccess()) {
+            return mapOf("permitted" to false, "apps" to emptyList<Map<String, Any?>>())
+        }
+        val usage = context.getSystemService(Context.USAGE_STATS_SERVICE)
+            as? UsageStatsManager
+            ?: return mapOf("permitted" to false, "apps" to emptyList<Map<String, Any?>>())
+        val now = System.currentTimeMillis()
+        fun window(since: Long): Map<String, android.app.usage.UsageStats> =
+            runCatching { usage.queryAndAggregateUsageStats(since, now) }
+                .getOrDefault(emptyMap())
+
+        val today = window(startOfToday())
+        val week = window(now - 7L * 24 * 60 * 60 * 1000)
+        val month = window(now - 30L * 24 * 60 * 60 * 1000)
+        val packages = LinkedHashSet<String>()
+        packages.addAll(today.keys)
+        packages.addAll(week.keys)
+        packages.addAll(month.keys)
+        val out = ArrayList<Map<String, Any?>>(packages.size)
+        for (pkg in packages) {
+            val todayMillis = today[pkg]?.totalTimeInForeground ?: 0L
+            val weekMillis = week[pkg]?.totalTimeInForeground ?: 0L
+            val monthMillis = month[pkg]?.totalTimeInForeground ?: 0L
+            val lastUsed = maxOf(
+                today[pkg]?.lastTimeUsed ?: 0L,
+                week[pkg]?.lastTimeUsed ?: 0L,
+                month[pkg]?.lastTimeUsed ?: 0L
+            )
+            if (monthMillis <= 0 && lastUsed <= 0) continue
+            out.add(
+                mapOf(
+                    "packageName" to pkg,
+                    "todayMillis" to todayMillis,
+                    "weekMillis" to weekMillis,
+                    "monthMillis" to monthMillis,
+                    "lastUsed" to lastUsed
+                )
+            )
+        }
+        out.sortByDescending { (it["monthMillis"] as? Long) ?: 0L }
+        return mapOf("permitted" to true, "apps" to out)
+    }
+
+    /** This month's mobile + Wi-Fi traffic per app (by uid). */
+    private fun appTraffic(): Map<String, Any?> {
+        if (Build.VERSION.SDK_INT < 23 || !hasUsageAccess()) {
+            return mapOf("permitted" to false, "apps" to emptyList<Map<String, Any?>>())
+        }
+        val manager = context.getSystemService(Context.NETWORK_STATS_SERVICE)
+            as? NetworkStatsManager
+            ?: return mapOf("permitted" to false, "apps" to emptyList<Map<String, Any?>>())
+        val start = startOfMonth()
+        val end = System.currentTimeMillis()
+        val perUid = HashMap<Int, Long>()
+        for (type in intArrayOf(ConnectivityManager.TYPE_MOBILE, ConnectivityManager.TYPE_WIFI)) {
+            runCatching {
+                manager.querySummary(type, null, start, end)?.use { stats ->
+                    val bucket = NetworkStats.Bucket()
+                    while (stats.hasNextBucket()) {
+                        stats.getNextBucket(bucket)
+                        perUid[bucket.uid] =
+                            (perUid[bucket.uid] ?: 0L) + bucket.rxBytes + bucket.txBytes
+                    }
+                }
+            }
+        }
+        if (perUid.isEmpty()) return mapOf("permitted" to true, "apps" to emptyList<Map<String, Any?>>())
+        // One package per uid; a shared uid keeps the first installed one.
+        val uidToPackage = HashMap<Int, String>()
+        for (info in context.packageManager.getInstalledPackages(0)) {
+            val app = info.applicationInfo ?: continue
+            if (uidToPackage.containsKey(app.uid)) continue
+            uidToPackage[app.uid] = info.packageName
+        }
+        val out = ArrayList<Map<String, Any?>>()
+        for ((uid, bytes) in perUid) {
+            if (bytes <= 0) continue
+            val pkg = uidToPackage[uid] ?: continue
+            out.add(mapOf("packageName" to pkg, "bytes" to bytes))
+        }
+        out.sortByDescending { (it["bytes"] as? Long) ?: 0L }
+        return mapOf("permitted" to true, "apps" to out)
+    }
+
+    // ------------------------------------------------------- app shortcuts
+
+    private fun launcherApps(): LauncherApps? =
+        context.getSystemService(Context.LAUNCHER_APPS_SERVICE) as? LauncherApps
+
+    /**
+     * An app's own shortcuts (dynamic, manifest and pinned). Android only shows
+     * another app's shortcuts to the current launcher, so [permitted] is false
+     * unless 囤囤 is the default home app; the UI explains that instead of
+     * showing an empty menu.
+     */
+    private fun appShortcuts(packageName: String): Map<String, Any?> {
+        val empty = mapOf(
+            "permitted" to false,
+            "shortcuts" to emptyList<Map<String, Any?>>()
+        )
+        if (Build.VERSION.SDK_INT < 25 || packageName.isEmpty()) return empty
+        val apps = launcherApps() ?: return empty
+        if (Build.VERSION.SDK_INT >= 26 && !apps.hasShortcutHostPermission()) {
+            return empty
+        }
+        val query = LauncherApps.ShortcutQuery()
+            .setPackage(packageName)
+            .setQueryFlags(
+                LauncherApps.ShortcutQuery.FLAG_MATCH_DYNAMIC or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_MANIFEST or
+                    LauncherApps.ShortcutQuery.FLAG_MATCH_PINNED
+            )
+        val list = runCatching {
+            apps.getShortcuts(query, Process.myUserHandle())
+        }.getOrNull() ?: return empty
+        return mapOf(
+            "permitted" to true,
+            "shortcuts" to list.map {
+                mapOf(
+                    "id" to it.id,
+                    "shortLabel" to (it.shortLabel?.toString() ?: ""),
+                    "longLabel" to (it.longLabel?.toString() ?: "")
+                )
+            }
+        )
+    }
+
+    private fun startAppShortcut(packageName: String, shortcutId: String): Boolean {
+        if (Build.VERSION.SDK_INT < 25) return false
+        if (packageName.isEmpty() || shortcutId.isEmpty()) return false
+        return runCatching {
+            launcherApps()?.startShortcut(
+                packageName,
+                shortcutId,
+                null,
+                null,
+                Process.myUserHandle()
+            )
+            true
+        }.getOrDefault(false)
+    }
+
     /**
      * Per-package facts captured with a snapshot, keyed by package name. The
      * requested permissions are the declared ones (not the grant state), which
@@ -912,9 +1206,16 @@ class PackageScannerPlugin(
         packageName: String,
         sizePx: Int,
         activity: String? = null,
+        iconPack: String = "",
     ): ByteArray? {
         val pm = context.packageManager
-        val drawable: Drawable = (if (activity.isNullOrEmpty()) {
+        // A chosen icon pack wins over the launcher icon when it maps this app.
+        val packed = if (iconPack.isEmpty()) {
+            null
+        } else {
+            runCatching { iconFromPack(iconPack, packageName, activity) }.getOrNull()
+        }
+        val drawable: Drawable = packed ?: (if (activity.isNullOrEmpty()) {
             null
         } else {
             runCatching {

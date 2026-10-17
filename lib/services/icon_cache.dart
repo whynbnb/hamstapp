@@ -22,6 +22,20 @@ class IconCache extends ChangeNotifier {
 
   final Map<String, Uint8List> _bytes = <String, Uint8List>{};
 
+  /// The icon pack the user chose (a package name), or '' for the launcher
+  /// icons. Leaf widgets read it when they fetch a missing icon; changing it
+  /// clears the cache, because every key now means a different picture.
+  String iconPack = '';
+
+  void setIconPack(String pack) {
+    if (iconPack == pack) return;
+    iconPack = pack;
+    _bytes.clear();
+    _dirty = true;
+    notifyListeners();
+    onDirty?.call();
+  }
+
   /// Which launcher entry's icon to show per package, when the user pinned one
   /// of several. Owned by [AppState] (it mirrors each app's pinned entry), kept
   /// here so leaf widgets can resolve an icon without a provider lookup.

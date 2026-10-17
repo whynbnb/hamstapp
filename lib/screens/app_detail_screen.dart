@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -24,9 +25,14 @@ class AppDetailScreen extends StatefulWidget {
     super.key,
     required this.packageName,
     this.fromTileBoard = false,
+    this.embedded = false,
   });
 
   final String packageName;
+
+  /// True when the page is shown in the wide-screen side pane instead of being
+  /// pushed: it then hides its own back button.
+  final bool embedded;
 
   /// True when this screen was opened from the 磁贴 board, which enables the
   /// quick "pin to the current page" switch.
@@ -365,6 +371,28 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
       ..showSnackBar(SnackBar(content: Text(text)));
   }
 
+  /// Lets the user pick a square image and stores it as this app's icon. The
+  /// image is shrunk before it is saved, so a photo does not bloat the data.
+  Future<void> _pickCustomIcon(AppState state) async {
+    try {
+      final picked = await FilePicker.pickFile(
+        dialogTitle: context.strings.t('选择图标图片'),
+        type: FileType.image,
+      );
+      if (picked == null) return;
+      final bytes = await picked.readAsBytes();
+      final ok = await state.setCustomIcon(widget.packageName, bytes);
+      if (!mounted) return;
+      _snack(
+        ok
+            ? context.strings.t('图标已更换')
+            : context.strings.t('无法读取这张图片'),
+      );
+    } catch (e) {
+      if (mounted) _snack(context.strings.t('无法读取这张图片'));
+    }
+  }
+
   /// Copies the installed APK to a temp dir and opens the system share sheet.
   Future<void> _exportApk(AppInfo? app) async {
     if (_exporting) return;
@@ -399,6 +427,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
 
     return Scaffold(
       appBar: AppBar(
+        automaticallyImplyLeading: !widget.embedded,
         title: Text(name, overflow: TextOverflow.ellipsis),
         actions: [
           if (app != null && !app.isWebEntry)
@@ -433,7 +462,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                   )
                 : PopupMenuButton<String>(
                     tooltip: context.strings.t('更多'),
-                    onSelected: (v) {
+                    onSelected: (v) async {
                       switch (v) {
                         case 'export':
                           _exportApk(app);
@@ -453,10 +482,49 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                           );
                         case 'removeWeb':
                           _removeWebEntry(state);
+                        case 'hide':
+                          await state.setHidden(
+                            widget.packageName,
+                            !meta.hidden,
+                          );
+                          if (context.mounted) {
+                            _snack(
+                              meta.hidden
+                                  ? context.strings.t('已取消隐藏')
+                                  : context.strings.t('已隐藏，可在「隐藏」筛选里找到'),
+                            );
+                          }
+                        case 'icon':
+                          await _pickCustomIcon(state);
+                        case 'resetIcon':
+                          await state.clearCustomIcon(widget.packageName);
                       }
                     },
                     itemBuilder: (ctx) => app.isWebEntry
                         ? [
+                            if (!app.isWebEntry)
+                              PopupMenuItem(
+                                value: 'icon',
+                                child: ListTile(
+                                  leading: const Icon(Icons.image_outlined),
+                                  title: Text(ctx.strings.t('更换图标')),
+                                ),
+                              ),
+                            PopupMenuItem(
+                              value: 'hide',
+                              child: ListTile(
+                                leading: Icon(
+                                  meta.hidden
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                                title: Text(
+                                  meta.hidden
+                                      ? ctx.strings.t('取消隐藏')
+                                      : ctx.strings.t('隐藏应用'),
+                                ),
+                              ),
+                            ),
                             PopupMenuItem(
                               value: 'editWeb',
                               child: ListTile(
@@ -485,6 +553,36 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                               child: ListTile(
                                 leading: const Icon(Icons.info_outline),
                                 title: Text(ctx.strings.t('应用信息')),
+                              ),
+                            ),
+                            PopupMenuItem(
+                              value: 'icon',
+                              child: ListTile(
+                                leading: const Icon(Icons.image_outlined),
+                                title: Text(ctx.strings.t('更换图标')),
+                              ),
+                            ),
+                            if (meta.customIcon.isNotEmpty)
+                              PopupMenuItem(
+                                value: 'resetIcon',
+                                child: ListTile(
+                                  leading: const Icon(Icons.restart_alt),
+                                  title: Text(ctx.strings.t('恢复默认图标')),
+                                ),
+                              ),
+                            PopupMenuItem(
+                              value: 'hide',
+                              child: ListTile(
+                                leading: Icon(
+                                  meta.hidden
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                                title: Text(
+                                  meta.hidden
+                                      ? ctx.strings.t('取消隐藏')
+                                      : ctx.strings.t('隐藏应用'),
+                                ),
                               ),
                             ),
                             if (!app.isSystem)

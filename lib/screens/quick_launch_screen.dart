@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +10,7 @@ import '../models/app_info.dart';
 import '../models/tile.dart';
 import '../models/tile_page.dart';
 import '../services/device_status.dart';
+import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
@@ -23,6 +26,7 @@ import '../widgets/info_tile.dart';
 import '../widgets/info_tile_sheets.dart';
 import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
+import 'global_search_screen.dart';
 import 'categories_tab.dart';
 import 'tile_pages_screen.dart';
 import 'usage_stats_screen.dart';
@@ -66,12 +70,13 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
       _tabCount - 1,
     );
     _lastTab = start;
-    _haptics = PagerHaptics(
-      () => context.read<AppState>().haptic(HapticTrigger.launchTabs),
-    )
-      ..align(start)
-      ..setPageCount(_tabCount)
-      ..setPageMapper((raw) => ((raw % _tabCount) + _tabCount) % _tabCount);
+    _haptics =
+        PagerHaptics(
+            () => context.read<AppState>().haptic(HapticTrigger.launchTabs),
+          )
+          ..align(start)
+          ..setPageCount(_tabCount)
+          ..setPageMapper((raw) => ((raw % _tabCount) + _tabCount) % _tabCount);
     _tabs = TabController(length: _tabCount, vsync: this, initialIndex: start)
       ..addListener(_onTabChanged);
     _tabPager = PageController(initialPage: _tabVirtual(start));
@@ -294,6 +299,13 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
             MaterialPageRoute(builder: (_) => TilePagesScreen(state: state)),
           ),
         ),
+        IconButton(
+          tooltip: s.t('锁定布局'),
+          icon: const Icon(Icons.lock_outline),
+          onPressed: () async {
+            await state.setLayoutLocked(true);
+          },
+        ),
         TextButton.icon(
           onPressed: () => state.setTileEditMode(false),
           icon: const Icon(Icons.check, size: 18),
@@ -302,9 +314,18 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
         const SizedBox(width: 4),
       ];
     }
+    final search = IconButton(
+      tooltip: s.t('全局搜索'),
+      icon: const Icon(Icons.search),
+      onPressed: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const GlobalSearchScreen()),
+      ),
+    );
     switch (_tabs.index) {
       case 0: // 最近
         return [
+          search,
           IconButton(
             tooltip: s.t('排序 / 时间筛选'),
             icon: const Icon(Icons.tune),
@@ -313,19 +334,26 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
         ];
       case 1: // 磁贴
         return [
+          search,
           IconButton(
             tooltip: s.t('编辑磁贴（添加/拖动/缩放）'),
             icon: const Icon(Icons.edit_outlined),
             onPressed: () {
+              if (state.layoutLocked) {
+                ScaffoldMessenger.of(context)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(content: Text(s.t('布局已锁定：先在设置里关闭「锁定磁贴布局」再编辑'))),
+                  );
+                return;
+              }
               state.setTileEditMode(true);
               ScaffoldMessenger.of(context)
                 ..hideCurrentSnackBar()
                 ..showSnackBar(
                   SnackBar(
                     content: Text(
-                      s.t(
-                        '编辑模式：点右上角 ➕ 置顶应用或添加信息磁贴，长按拖动移动，拖右下角缩放；完成后点「完成」',
-                      ),
+                      s.t('编辑模式：点右上角 ➕ 置顶应用或添加信息磁贴，长按拖动移动，拖右下角缩放；完成后点「完成」'),
                     ),
                     behavior: SnackBarBehavior.floating,
                     duration: const Duration(seconds: 2),
@@ -336,6 +364,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
         ];
       case 2: // 分类
         return [
+          search,
           IconButton(
             tooltip: s.t('新建分类'),
             icon: const Icon(Icons.add),
@@ -344,6 +373,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
         ];
       default: // 收藏
         return [
+          search,
           IconButton(
             tooltip: s.t('添加收藏'),
             icon: const Icon(Icons.add),
@@ -447,9 +477,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
                     if (mounted) setState(() {});
                   },
                   title: Text(s.t('智能推荐')),
-                  subtitle: Text(
-                    s.t('根据常用时间段，在「最近」顶部推荐此刻可能想用的应用'),
-                  ),
+                  subtitle: Text(s.t('根据常用时间段，在「最近」顶部推荐此刻可能想用的应用')),
                 ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -470,9 +498,7 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
                       context: ctx,
                       builder: (dctx) => AlertDialog(
                         title: Text(s.t('清除启动记录')),
-                        content: Text(
-                          s.t('将删除全部启动时间记录与启动次数，且无法恢复。确定吗？'),
-                        ),
+                        content: Text(s.t('将删除全部启动时间记录与启动次数，且无法恢复。确定吗？')),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(dctx, false),
@@ -560,6 +586,10 @@ class _TilesTabState extends State<_TilesTab> {
   /// sub-tab. [_holdMoved] latches so one hold yields at most one switch.
   bool _holdMoved = false;
 
+  /// Multi-select state for the board (edit mode only).
+  bool _selectMode = false;
+  final Set<String> _selected = <String>{};
+
   /// Horizontal travel (logical px) after a long press before it switches tab.
   static const double _holdThreshold = 48;
 
@@ -587,9 +617,7 @@ class _TilesTabState extends State<_TilesTab> {
     _base = _n * 1000;
     _index = _clamp(widget.state.currentTilePageIndex);
     widget.state.currentTilePageIndex = _index;
-    _haptics = PagerHaptics(
-      () => widget.state.haptic(HapticTrigger.tilePages),
-    )
+    _haptics = PagerHaptics(() => widget.state.haptic(HapticTrigger.tilePages))
       ..align(_index)
       ..setPageCount(_n <= 0 ? 1 : _n)
       ..setPageMapper(_logicalOf);
@@ -719,8 +747,9 @@ class _TilesTabState extends State<_TilesTab> {
           onLongPressMoveUpdate: canHold ? _onHoldMove : null,
           onLongPressEnd: canHold ? _onHoldEnd : null,
           onLongPressCancel: canHold ? () => _holdMoved = false : null,
-          onHorizontalDragStart:
-              canSplit ? (d) => _onSplitStart(d, half) : null,
+          onHorizontalDragStart: canSplit
+              ? (d) => _onSplitStart(d, half)
+              : null,
           onHorizontalDragUpdate: canSplit ? _onSplitUpdate : null,
           onHorizontalDragEnd: canSplit ? _onSplitEnd : null,
           child: child,
@@ -768,6 +797,151 @@ class _TilesTabState extends State<_TilesTab> {
     );
   }
 
+  // ---- multi-select --------------------------------------------------------
+
+  Widget _selectToggle(AppState state) {
+    final s = context.strings;
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 3,
+      borderRadius: BorderRadius.circular(20),
+      color: scheme.surfaceContainerHigh,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => setState(() => _selectMode = true),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.checklist, size: 16),
+              const SizedBox(width: 5),
+              Text(
+                s.t('多选'),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _selectionBar(AppState state) {
+    final s = context.strings;
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      elevation: 8,
+      borderRadius: BorderRadius.circular(16),
+      color: scheme.surfaceContainerHigh,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        child: Row(
+          children: [
+            Text(
+              s.t('已选 {n}', {'n': _selected.length}),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            IconButton(
+              tooltip: s.t('全选本页'),
+              icon: const Icon(Icons.select_all),
+              onPressed: _selectAll,
+            ),
+            IconButton(
+              tooltip: s.t('移到页面'),
+              icon: const Icon(Icons.drive_file_move_outline),
+              onPressed: _selected.isEmpty ? null : () => _moveSelection(state),
+            ),
+            IconButton(
+              tooltip: s.t('删除'),
+              icon: const Icon(Icons.delete_outline),
+              onPressed: _selected.isEmpty
+                  ? null
+                  : () => _deleteSelection(state),
+            ),
+            IconButton(
+              tooltip: s.t('退出多选'),
+              icon: const Icon(Icons.close),
+              onPressed: () => setState(() {
+                _selectMode = false;
+                _selected.clear();
+              }),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _selectAll() {
+    final state = widget.state;
+    if (state.tilePages.isEmpty) return;
+    final page = state.tilePages[_clamp(_index)];
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(state.tilesOnPage(page).map((t) => t.id));
+    });
+  }
+
+  Future<void> _moveSelection(AppState state) async {
+    if (_selected.isEmpty) return;
+    final s = context.strings;
+    final target = await showDialog<TilePage>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        title: Text(s.t('移到页面')),
+        children: [
+          for (final page in state.tilePages)
+            SimpleDialogOption(
+              onPressed: () => Navigator.pop(ctx, page),
+              child: Text(page.name),
+            ),
+        ],
+      ),
+    );
+    if (target == null) return;
+    await state.moveTilesToPage(_selected, target.id);
+    if (!mounted) return;
+    setState(() {
+      _selectMode = false;
+      _selected.clear();
+    });
+  }
+
+  Future<void> _deleteSelection(AppState state) async {
+    if (_selected.isEmpty) return;
+    final s = context.strings;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(s.t('删除磁贴')),
+        content: Text(s.t('删除选中的 {n} 块磁贴？应用本身不会被卸载。', {'n': _selected.length})),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.t('删除')),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await state.removeTiles(_selected);
+    if (!mounted) return;
+    setState(() {
+      _selectMode = false;
+      _selected.clear();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = widget.state;
@@ -784,25 +958,54 @@ class _TilesTabState extends State<_TilesTab> {
       );
     }
     if (_index >= pages.length) _index = pages.length - 1;
+    // Leaving edit mode (or locking the layout) also leaves multi-select; the
+    // build that does so already renders without the bar.
+    if (!state.tileEditMode && _selectMode) {
+      _selectMode = false;
+      _selected.clear();
+    }
 
     return Column(
       children: [
         Expanded(
-          child: _boardGestures(
-            NotificationListener<ScrollNotification>(
-              onNotification: _onPagesScroll,
-              child: PageView.builder(
-                controller: _controller,
-                physics: state.tileEditMode ||
-                        state.tileSwipeMode != TileSwipeMode.holdDrag
-                    ? const NeverScrollableScrollPhysics()
-                    : const PageScrollPhysics(),
-                itemCount: null,
-                onPageChanged: (v) => _setIndex(_logicalOf(v)),
-                itemBuilder: (context, v) =>
-                    _TileBoard(state: state, page: pages[_logicalOf(v)]),
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: _boardGestures(
+                  NotificationListener<ScrollNotification>(
+                    onNotification: _onPagesScroll,
+                    child: PageView.builder(
+                      controller: _controller,
+                      physics:
+                          state.tileEditMode ||
+                              state.tileSwipeMode != TileSwipeMode.holdDrag
+                          ? const NeverScrollableScrollPhysics()
+                          : const PageScrollPhysics(),
+                      itemCount: null,
+                      onPageChanged: (v) => _setIndex(_logicalOf(v)),
+                      itemBuilder: (context, v) => _TileBoard(
+                        state: state,
+                        page: pages[_logicalOf(v)],
+                        selectMode: _selectMode,
+                        selectedIds: _selected,
+                        onToggleSelect: (id) => setState(() {
+                          if (!_selected.remove(id)) _selected.add(id);
+                        }),
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              if (state.tileEditMode && !_selectMode)
+                Positioned(top: 6, right: 8, child: _selectToggle(state)),
+              if (_selectMode)
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: 8,
+                  child: _selectionBar(state),
+                ),
+            ],
           ),
         ),
         _PageBar(
@@ -844,9 +1047,22 @@ class _TilesTabState extends State<_TilesTab> {
 /// A scrollable 6-column board. Tiles can be freely positioned and sized
 /// (1x1 up to 6x6); long-press to drag, tap the corner button for options.
 class _TileBoard extends StatefulWidget {
-  const _TileBoard({required this.state, required this.page});
+  const _TileBoard({
+    required this.state,
+    required this.page,
+    this.selectMode = false,
+    this.selectedIds = const <String>{},
+    this.onToggleSelect,
+  });
+
   final AppState state;
   final TilePage page;
+
+  /// Multi-select mode (edit mode only): taps toggle tiles instead of opening
+  /// their menu.
+  final bool selectMode;
+  final Set<String> selectedIds;
+  final ValueChanged<String>? onToggleSelect;
 
   @override
   State<_TileBoard> createState() => _TileBoardState();
@@ -879,6 +1095,10 @@ class _TileBoardState extends State<_TileBoard> {
   /// Last pointer-down position on a tile, captured by [_Tile]'s Listener.
   Offset _downGlobal = Offset.zero;
 
+  /// The cells currently occupied by each tile, refreshed on every layout.
+  /// Used to find what a dragged tile was dropped on.
+  Map<String, TilePlacement> _placements = <String, TilePlacement>{};
+
   void _startDrag(String tileId, int col, int row) {
     final t = widget.state.tileById(tileId);
     if (t == null) return;
@@ -909,9 +1129,89 @@ class _TileBoardState extends State<_TileBoard> {
     }
   }
 
+  /// The tile under the dragged cell, if any.
+  Tile? _tileAt(int col, int row, {String? ignore}) {
+    for (final t in widget.state.tilesOnPage(widget.page)) {
+      if (t.id == ignore) continue;
+      final p = _placements[t.id];
+      if (p == null) continue;
+      final overlaps =
+          !(col + 1 <= p.col ||
+              p.col + p.w <= col ||
+              row + 1 <= p.row ||
+              p.row + p.h <= row);
+      if (overlaps) return t;
+    }
+    return null;
+  }
+
   void _endDrag(String tileId) {
-    widget.state.moveTile(tileId, _dragCol, _dragRow, cols: _cols);
+    final dragged = widget.state.tileById(tileId);
+    final target = _tileAt(_dragCol, _dragRow, ignore: tileId);
     setState(() => _dragId = null);
+    if (dragged != null &&
+        target != null &&
+        dragged.kind == TileKind.app &&
+        (target.kind == TileKind.app || target.kind == TileKind.folder)) {
+      unawaited(_offerFolder(dragged, target));
+      return;
+    }
+    widget.state.moveTile(tileId, _dragCol, _dragRow, cols: _cols);
+  }
+
+  /// Dropping one tile on another combines them into a folder (or adds the app
+  /// to an existing folder). A category folder cannot take extra apps, so that
+  /// case falls back to a plain move.
+  Future<void> _offerFolder(Tile dragged, Tile target) async {
+    final s = context.strings;
+    final draggedName = widget.state.displayNameFor(dragged.packageName);
+    final targetName = target.kind == TileKind.folder
+        ? s.t('这个文件夹')
+        : widget.state.displayNameFor(target.packageName);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(
+          target.kind == TileKind.folder ? s.t('加入文件夹？') : s.t('放进同一个文件夹？'),
+        ),
+        content: Text(
+          target.kind == TileKind.folder
+              ? s.t('把「{app}」放进{target}。', {
+                  'app': draggedName,
+                  'target': targetName,
+                })
+              : s.t('把「{a}」和「{b}」放进一个文件夹，之后可以像其它磁贴一样移动和缩放。', {
+                  'a': draggedName,
+                  'b': targetName,
+                }),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(s.t('取消')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(s.t('放进文件夹')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (ok != true) {
+      await widget.state.moveTile(dragged.id, _dragCol, _dragRow, cols: _cols);
+      return;
+    }
+    final folder = await widget.state.combineIntoFolder(dragged.id, target.id);
+    if (folder == null && mounted) {
+      await widget.state.moveTile(dragged.id, _dragCol, _dragRow, cols: _cols);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(s.t('这个文件夹是按分类生成的，不能直接加入应用；可以换成「自选应用」文件夹'))),
+        );
+    }
   }
 
   void _cancelDrag() {
@@ -966,6 +1266,7 @@ class _TileBoardState extends State<_TileBoard> {
           );
         }).toList();
         final layout = resolveTileLayout(specs, cols: cols);
+        _placements = layout.placements;
         final rows = layout.rows;
         // While dragging, extend the board so the highlighted target row is
         // always reachable (and the grid keeps drawing behind it).
@@ -1040,16 +1341,13 @@ class _TileBoardState extends State<_TileBoard> {
                             ? const SizedBox.shrink()
                             : DecoratedBox(
                                 decoration: BoxDecoration(
-                                  color: (glass
-                                          ? scheme.primary
-                                          : Colors.white)
+                                  color: (glass ? scheme.primary : Colors.white)
                                       .withValues(alpha: 0.18),
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                    color: (glass
-                                            ? scheme.primary
-                                            : Colors.white)
-                                        .withValues(alpha: 0.9),
+                                    color:
+                                        (glass ? scheme.primary : Colors.white)
+                                            .withValues(alpha: 0.9),
                                     width: 2,
                                   ),
                                 ),
@@ -1086,6 +1384,11 @@ class _TileBoardState extends State<_TileBoard> {
                             onDragUpdate: (pos) => _updateDrag(t.id, pos),
                             onDragEnd: () => _endDrag(t.id),
                             onDragCancel: _cancelDrag,
+                            selectMode: widget.selectMode,
+                            selected: widget.selectedIds.contains(t.id),
+                            onSelect: widget.onToggleSelect == null
+                                ? null
+                                : () => widget.onToggleSelect!(t.id),
                           ),
                         );
                       },
@@ -1566,10 +1869,7 @@ Future<TilePage?> _promptAddPage(BuildContext context, AppState state) async {
         decoration: InputDecoration(labelText: s.t('页面名称')),
       ),
       actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx),
-          child: Text(s.t('取消')),
-        ),
+        TextButton(onPressed: () => Navigator.pop(ctx), child: Text(s.t('取消'))),
         FilledButton(
           onPressed: () => Navigator.pop(ctx, controller.text.trim()),
           child: Text(s.t('创建')),
@@ -1593,103 +1893,127 @@ void _pageMenu(
   final canRight = index < state.tilePages.length - 1;
   showModalBottomSheet(
     context: context,
+    isScrollControlled: true,
     builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    page.name,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        page.name,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
                     ),
-                  ),
-                ),
-                Text(
-                  s.t('第 {index} / {total} 页', {
-                    'index': index + 1,
-                    'total': state.tilePages.length,
-                  }),
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                ),
-              ],
-            ),
-          ),
-          ListTile(
-            leading: const Icon(Icons.arrow_back),
-            title: Text(s.t('左移（手动排序）')),
-            enabled: canLeft,
-            onTap: canLeft
-                ? () async {
-                    Navigator.pop(ctx);
-                    await state.moveTilePage(index, -1);
-                    onChanged();
-                  }
-                : null,
-          ),
-          ListTile(
-            leading: const Icon(Icons.arrow_forward),
-            title: Text(s.t('右移（手动排序）')),
-            enabled: canRight,
-            onTap: canRight
-                ? () async {
-                    Navigator.pop(ctx);
-                    await state.moveTilePage(index, 1);
-                    onChanged();
-                  }
-                : null,
-          ),
-          const Divider(height: 1),
-          ListTile(
-            leading: const Icon(Icons.drive_file_rename_outline),
-            title: Text(s.t('重命名页面')),
-            onTap: () async {
-              Navigator.pop(ctx);
-              final controller = TextEditingController(text: page.name);
-              final name = await showDialog<String>(
-                context: context,
-                builder: (dctx) => AlertDialog(
-                  title: Text(s.t('重命名页面')),
-                  content: TextField(controller: controller, autofocus: true),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(dctx),
-                      child: Text(s.t('取消')),
-                    ),
-                    FilledButton(
-                      onPressed: () =>
-                          Navigator.pop(dctx, controller.text.trim()),
-                      child: Text(s.t('保存')),
+                    Text(
+                      s.t('第 {index} / {total} 页', {
+                        'index': index + 1,
+                        'total': state.tilePages.length,
+                      }),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade600,
+                      ),
                     ),
                   ],
                 ),
-              );
-              if (name != null && name.isNotEmpty) {
-                await state.renameTilePage(page.id, name);
-                onChanged();
-              }
-            },
-          ),
-          if (state.tilePages.length > 1)
-            ListTile(
-              leading: const Icon(Icons.delete_outline),
-              title: Text(s.t('删除页面')),
-              subtitle: Text(s.t('页面上的磁贴也会一并删除')),
-              onTap: () async {
-                Navigator.pop(ctx);
-                // Deleting a page needs a second confirmation.
-                if (await confirmDeleteTilePage(context, state, page)) {
-                  await state.deleteTilePage(page.id);
+              ),
+              ListTile(
+                leading: const Icon(Icons.arrow_back),
+                title: Text(s.t('左移（手动排序）')),
+                enabled: canLeft,
+                onTap: canLeft
+                    ? () async {
+                        Navigator.pop(ctx);
+                        await state.moveTilePage(index, -1);
+                        onChanged();
+                      }
+                    : null,
+              ),
+              ListTile(
+                leading: const Icon(Icons.arrow_forward),
+                title: Text(s.t('右移（手动排序）')),
+                enabled: canRight,
+                onTap: canRight
+                    ? () async {
+                        Navigator.pop(ctx);
+                        await state.moveTilePage(index, 1);
+                        onChanged();
+                      }
+                    : null,
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.copy_all_outlined),
+                title: Text(s.t('复制页面')),
+                subtitle: Text(s.t('连同这一页的磁贴一起复制到新的一页')),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  await state.copyTilePage(page.id);
                   onChanged();
-                }
-              },
-            ),
-        ],
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.drive_file_rename_outline),
+                title: Text(s.t('重命名页面')),
+                onTap: () async {
+                  Navigator.pop(ctx);
+                  final controller = TextEditingController(text: page.name);
+                  final name = await showDialog<String>(
+                    context: context,
+                    builder: (dctx) => AlertDialog(
+                      title: Text(s.t('重命名页面')),
+                      content: TextField(
+                        controller: controller,
+                        autofocus: true,
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(dctx),
+                          child: Text(s.t('取消')),
+                        ),
+                        FilledButton(
+                          onPressed: () =>
+                              Navigator.pop(dctx, controller.text.trim()),
+                          child: Text(s.t('保存')),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (name != null && name.isNotEmpty) {
+                    await state.renameTilePage(page.id, name);
+                    onChanged();
+                  }
+                },
+              ),
+              if (state.tilePages.length > 1)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline),
+                  title: Text(s.t('删除页面')),
+                  subtitle: Text(s.t('页面上的磁贴也会一并删除')),
+                  onTap: () async {
+                    Navigator.pop(ctx);
+                    // Deleting a page needs a second confirmation.
+                    if (await confirmDeleteTilePage(context, state, page)) {
+                      await state.deleteTilePage(page.id);
+                      onChanged();
+                    }
+                  },
+                ),
+            ],
+          ),
+        ),
       ),
     ),
   );
@@ -1709,6 +2033,9 @@ class _Tile extends StatelessWidget {
     required this.onDragUpdate,
     required this.onDragEnd,
     required this.onDragCancel,
+    this.selectMode = false,
+    this.selected = false,
+    this.onSelect,
   });
 
   final Tile tile;
@@ -1725,8 +2052,52 @@ class _Tile extends StatelessWidget {
   final VoidCallback onDragEnd;
   final VoidCallback onDragCancel;
 
+  /// Multi-select mode: a tap toggles this tile instead of opening its menu.
+  final bool selectMode;
+  final bool selected;
+  final VoidCallback? onSelect;
+
   @override
   Widget build(BuildContext context) {
+    // A small step back when arranging: the board visibly "picks up" the tiles
+    // instead of the outline simply appearing.
+    final body = AnimatedScale(
+      scale: editable && !selectMode ? 0.97 : 1.0,
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+      child: _buildTile(context),
+    );
+    if (!selectMode) return body;
+    final scheme = Theme.of(context).colorScheme;
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Positioned.fill(child: body),
+        Positioned(
+          top: 4,
+          right: 4,
+          child: Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: selected
+                  ? scheme.primary
+                  : Colors.black.withValues(alpha: 0.35),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white70, width: 1.5),
+            ),
+            child: Icon(
+              selected ? Icons.check : Icons.add,
+              size: 15,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTile(BuildContext context) {
     final width = tile.w * cellW + (tile.w - 1) * gap;
     final height = tile.h * cellW + (tile.h - 1) * gap;
 
@@ -1818,8 +2189,11 @@ class _Tile extends StatelessWidget {
     final ink = InkWell(
       // Outside edit mode a tap launches the app and a long press opens the
       // app's details (same gesture as the favourites/recent lists); in edit
-      // mode a tap opens the tile menu and a long press drags the tile.
-      onTap: editable
+      // mode a tap opens the tile menu and a long press drags the tile. In
+      // multi-select mode a tap only toggles the tile.
+      onTap: selectMode
+          ? onSelect
+          : editable
           ? () => _showTileMenu(context)
           : _browseTap(context, packageName),
       // Handled here rather than left to the board, so the blank-area long
@@ -1838,6 +2212,28 @@ class _Tile extends StatelessWidget {
       child: _inner(context, glass: glass, frameless: frameless),
     );
 
+    // Per-tile gestures. Only installed when an action is configured, because
+    // a double-tap recognizer makes every single tap wait for its timeout —
+    // a tile without the gesture keeps launching instantly.
+    final doubleTap = tile.optionString('doubleTap');
+    final swipeUp = tile.optionString('swipeUp');
+    final surface =
+        (editable || selectMode || (doubleTap.isEmpty && swipeUp.isEmpty))
+        ? ink
+        : GestureDetector(
+            onDoubleTap: doubleTap.isEmpty
+                ? null
+                : () => _runGesture(context, doubleTap),
+            onVerticalDragEnd: swipeUp.isEmpty
+                ? null
+                : (details) {
+                    if ((details.primaryVelocity ?? 0) < -180) {
+                      _runGesture(context, swipeUp);
+                    }
+                  },
+            child: ink,
+          );
+
     // No backdrop: show only the content. App icons carry their own rounded/
     // transparent corners, so a colored backdrop with a different corner radius
     // could poke out behind them; without a backdrop the icon's own shape
@@ -1846,7 +2242,7 @@ class _Tile extends StatelessWidget {
       final bare = Material(
         key: const ValueKey('bare-tile'),
         type: MaterialType.transparency,
-        child: ink,
+        child: surface,
       );
       return editable ? _editFrame(bare, radius, scheme.primary) : bare;
     }
@@ -1856,7 +2252,7 @@ class _Tile extends StatelessWidget {
         color: color,
         borderRadius: radius,
         clipBehavior: Clip.antiAlias,
-        child: ink,
+        child: surface,
       );
       return editable ? _editFrame(tappable, radius, Colors.white) : tappable;
     }
@@ -1882,7 +2278,7 @@ class _Tile extends StatelessWidget {
           ),
         ],
       ),
-      child: Material(type: MaterialType.transparency, child: ink),
+      child: Material(type: MaterialType.transparency, child: surface),
     );
     return editable ? _editFrame(tappable, radius, scheme.primary) : tappable;
   }
@@ -1917,9 +2313,9 @@ class _Tile extends StatelessWidget {
     final dark = theme.brightness == Brightness.dark;
     final surface = theme.colorScheme.surface;
     Color fill(double tintA, double surfA) => Color.alphaBlend(
-          tint.withValues(alpha: tintA),
-          surface.withValues(alpha: surfA),
-        );
+      tint.withValues(alpha: tintA),
+      surface.withValues(alpha: surfA),
+    );
     return LinearGradient(
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
@@ -1953,8 +2349,7 @@ class _Tile extends StatelessWidget {
     final name = state.displayNameFor(packageName);
     // Without a backdrop the label sits on the page background, so use the
     // theme's on-surface color instead of the solid style's white.
-    final labelColor =
-        (glass || frameless) ? scheme.onSurface : Colors.white;
+    final labelColor = (glass || frameless) ? scheme.onSurface : Colors.white;
     return LayoutBuilder(
       builder: (context, constraints) {
         final w = constraints.maxWidth;
@@ -2058,105 +2453,335 @@ class _Tile extends StatelessWidget {
     return () => handleInfoTileTap(context, state, tile);
   }
 
+  /// Runs a gesture action configured for this tile.
+  void _runGesture(BuildContext context, String action) {
+    if (action == 'details') {
+      if (tile.isInfo) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => AppDetailScreen(
+            packageName: tile.packageName,
+            fromTileBoard: true,
+          ),
+        ),
+      );
+      return;
+    }
+    if (action == 'launch') {
+      if (tile.isInfo || tile.packageName.isEmpty) return;
+      launchApp(context, tile.packageName);
+      return;
+    }
+    if (action == 'search') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const GlobalSearchScreen()),
+      );
+      return;
+    }
+    if (action.startsWith('page:')) {
+      final id = action.substring(5);
+      final index = state.tilePages.indexWhere((p) => p.id == id);
+      if (index >= 0) state.setCurrentTilePage(index);
+    }
+  }
+
+  /// Picks what a double tap / an upward swipe on this tile does.
+  Future<void> _showGestureSettings(BuildContext context) async {
+    final s = context.strings;
+    final actions = <(String, String)>[
+      ('', s.t('不设置')),
+      if (!tile.isInfo) ('details', s.t('查看详情')),
+      if (!tile.isInfo) ('launch', s.t('启动应用')),
+      ('search', s.t('打开搜索')),
+      for (final page in state.tilePages)
+        ('page:${page.id}', s.t('跳到「{name}」', {'name': page.name})),
+    ];
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheet) {
+          Widget editor(String label, String optionKey) {
+            final current =
+                state.tileById(tile.id)?.optionString(optionKey) ?? '';
+            return Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 6),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final (value, text) in actions)
+                        ChoiceChip(
+                          label: Text(text),
+                          selected: current == value,
+                          onSelected: (_) async {
+                            await state.setTileOptions(tile.id, {
+                              optionKey: value.isEmpty ? null : value,
+                            });
+                            if (ctx.mounted) setSheet(() {});
+                          },
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          }
+
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.8,
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+                      child: Text(
+                        s.t('磁贴手势'),
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: Text(
+                        s.t('默认点击就是启动；这里给双击和上滑各绑定一个动作。设置后单击会等一小会儿再响应。'),
+                        style: const TextStyle(fontSize: 12.5, height: 1.35),
+                      ),
+                    ),
+                    editor(s.t('双击'), 'doubleTap'),
+                    editor(s.t('上滑'), 'swipeUp'),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  /// Lists the app's own long-press shortcuts (the ones the launcher shows).
+  Future<void> _showAppShortcuts(BuildContext context) async {
+    final s = context.strings;
+    if (tile.isInfo || tile.packageName.isEmpty) return;
+    final result = await NativeApps.appShortcuts(tile.packageName);
+    if (!context.mounted) return;
+    if (!result.permitted) {
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(s.t('需要把囤囤设为默认桌面')),
+          content: Text(
+            s.t(
+              'Android 只向当前桌面应用提供其它应用的快捷方式。把囤囤设为默认桌面后，这里的「扫一扫」之类的入口就能用；不设置也不影响其它功能。',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text(s.t('取消')),
+            ),
+            FilledButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                await NativeApps.openHomeSettings();
+              },
+              child: Text(s.t('去设置')),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+    if (result.shortcuts.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(s.t('这个应用没有提供快捷方式'))));
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                s.t('应用快捷方式'),
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            for (final shortcut in result.shortcuts)
+              ListTile(
+                leading: const Icon(Icons.bolt_outlined),
+                title: Text(
+                  shortcut.label.isEmpty ? shortcut.id : shortcut.label,
+                ),
+                onTap: () async {
+                  final ok = await NativeApps.startAppShortcut(
+                    tile.packageName,
+                    shortcut.id,
+                  );
+                  if (!ctx.mounted) return;
+                  Navigator.pop(ctx);
+                  if (!ok) {
+                    ScaffoldMessenger.of(context)
+                      ..hideCurrentSnackBar()
+                      ..showSnackBar(
+                        SnackBar(content: Text(s.t('无法打开这个快捷方式'))),
+                      );
+                  }
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _showTileMenu(BuildContext context) {
     showModalBottomSheet(
       context: context,
+      // The menu grew (gestures, app shortcuts); the default 9/16 height cut
+      // the last entries off on shorter screens.
+      isScrollControlled: true,
       builder: (ctx) => SafeArea(
-        child: SingleChildScrollView(
-          // Rebuild the sheet when the tile is toggled so the switch reflects
-          // the new value without closing the sheet.
-          child: ListenableBuilder(
-            listenable: state,
-            builder: (ctx, _) => Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                SwitchListTile(
-                  secondary: const Icon(Icons.label_outline),
-                  title: Text(
-                    context.strings.t(
-                      tile.isInfo ? '显示说明文字' : '显示应用名称',
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(ctx).size.height * 0.85,
+          ),
+          child: SingleChildScrollView(
+            // Rebuild the sheet when the tile is toggled so the switch reflects
+            // the new value without closing the sheet.
+            child: ListenableBuilder(
+              listenable: state,
+              builder: (ctx, _) => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SwitchListTile(
+                    secondary: const Icon(Icons.label_outline),
+                    title: Text(
+                      context.strings.t(tile.isInfo ? '显示说明文字' : '显示应用名称'),
                     ),
-                  ),
-                  subtitle: Text(
-                    context.strings.t(
-                      tile.isInfo ? '关闭后只显示数值' : '关闭后磁贴只显示图标',
-                    ),
-                  ),
-                  value: state.tileById(tile.id)?.showLabel ?? true,
-                  onChanged: (v) => state.setTileShowLabel(tile.id, v),
-                ),
-                SwitchListTile(
-                  secondary: const Icon(Icons.crop_free),
-                  title: Text(context.strings.t('内边距')),
-                  subtitle: Text(context.strings.t('关闭后内容填满磁贴')),
-                  value: state.tileById(tile.id)?.innerPadding ?? true,
-                  onChanged: (v) => state.setTileInnerPadding(tile.id, v),
-                ),
-                SwitchListTile(
-                  secondary: const Icon(Icons.border_clear),
-                  title: Text(context.strings.t('显示边框')),
-                  subtitle: Text(context.strings.t('关闭后只显示图标/文字，无底板')),
-                  value: state.tileById(tile.id)?.border ?? true,
-                  onChanged: (v) => state.setTileBorder(tile.id, v),
-                ),
-                if (tile.isInfo && infoTileHasSettings(tile.kind))
-                  ListTile(
-                    leading: const Icon(Icons.tune),
-                    title: Text(context.strings.t('磁贴设置')),
                     subtitle: Text(
-                      context.strings.t('选内容、范围或动作'),
+                      context.strings.t(
+                        tile.isInfo ? '关闭后只显示数值' : '关闭后磁贴只显示图标',
+                      ),
                     ),
+                    value: state.tileById(tile.id)?.showLabel ?? true,
+                    onChanged: (v) => state.setTileShowLabel(tile.id, v),
+                  ),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.crop_free),
+                    title: Text(context.strings.t('内边距')),
+                    subtitle: Text(context.strings.t('关闭后内容填满磁贴')),
+                    value: state.tileById(tile.id)?.innerPadding ?? true,
+                    onChanged: (v) => state.setTileInnerPadding(tile.id, v),
+                  ),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.border_clear),
+                    title: Text(context.strings.t('显示边框')),
+                    subtitle: Text(context.strings.t('关闭后只显示图标/文字，无底板')),
+                    value: state.tileById(tile.id)?.border ?? true,
+                    onChanged: (v) => state.setTileBorder(tile.id, v),
+                  ),
+                  if (tile.isInfo && infoTileHasSettings(tile.kind))
+                    ListTile(
+                      leading: const Icon(Icons.tune),
+                      title: Text(context.strings.t('磁贴设置')),
+                      subtitle: Text(context.strings.t('选内容、范围或动作')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        showInfoTileSettings(context, state, tile);
+                      },
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.gesture),
+                    title: Text(context.strings.t('磁贴手势')),
+                    subtitle: Text(context.strings.t('双击 / 上滑绑定一个动作')),
                     onTap: () {
                       Navigator.pop(ctx);
-                      showInfoTileSettings(context, state, tile);
+                      _showGestureSettings(context);
                     },
                   ),
-                if (!tile.isInfo)
-                  ListTile(
-                    leading: const Icon(Icons.info_outline),
-                    title: Text(context.strings.t('应用详情')),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => AppDetailScreen(
-                            packageName: app?.packageName ?? '',
-                            fromTileBoard: true,
+                  if (!tile.isInfo)
+                    ListTile(
+                      leading: const Icon(Icons.bolt_outlined),
+                      title: Text(context.strings.t('应用快捷方式')),
+                      subtitle: Text(context.strings.t('系统长按菜单里的入口')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _showAppShortcuts(context);
+                      },
+                    ),
+                  if (!tile.isInfo)
+                    ListTile(
+                      leading: const Icon(Icons.info_outline),
+                      title: Text(context.strings.t('应用详情')),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AppDetailScreen(
+                              packageName: app?.packageName ?? '',
+                              fromTileBoard: true,
+                            ),
                           ),
+                        );
+                      },
+                    ),
+                  ListTile(
+                    leading: const Icon(Icons.push_pin_outlined),
+                    title: Text(context.strings.t('移除该磁贴')),
+                    onTap: () async {
+                      Navigator.pop(ctx);
+                      // Removing a tile needs a second confirmation.
+                      final ok = await showDialog<bool>(
+                        context: context,
+                        builder: (dctx) => AlertDialog(
+                          title: Text(context.strings.t('移除该磁贴')),
+                          content: Text(context.strings.t('确定移除这个磁贴吗？')),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dctx, false),
+                              child: Text(context.strings.t('取消')),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(dctx, true),
+                              child: Text(context.strings.t('移除')),
+                            ),
+                          ],
                         ),
                       );
+                      if (ok == true) state.removeTile(tile.id);
                     },
                   ),
-                ListTile(
-                  leading: const Icon(Icons.push_pin_outlined),
-                  title: Text(context.strings.t('移除该磁贴')),
-                  onTap: () async {
-                    Navigator.pop(ctx);
-                    // Removing a tile needs a second confirmation.
-                    final ok = await showDialog<bool>(
-                      context: context,
-                      builder: (dctx) => AlertDialog(
-                        title: Text(context.strings.t('移除该磁贴')),
-                        content: Text(
-                          context.strings.t('确定移除这个磁贴吗？'),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(dctx, false),
-                            child: Text(context.strings.t('取消')),
-                          ),
-                          FilledButton(
-                            onPressed: () => Navigator.pop(dctx, true),
-                            child: Text(context.strings.t('移除')),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (ok == true) state.removeTile(tile.id);
-                  },
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -2241,10 +2866,7 @@ class _FavoriteSheetState extends State<_FavoriteSheet> {
                 final fav = state.metaFor(app.packageName).favorite;
                 final name = state.displayNameFor(app.packageName);
                 return ListTile(
-                  leading: AppIcon(
-                    packageName: app.packageName,
-                    label: name,
-                  ),
+                  leading: AppIcon(packageName: app.packageName, label: name),
                   title: Text(name),
                   subtitle: Text(
                     app.packageName,
@@ -2306,11 +2928,7 @@ class _FavoritesTab extends StatelessWidget {
           ),
           child: Column(
             children: [
-              AppIcon(
-                packageName: app.packageName,
-                label: name,
-                size: 56,
-              ),
+              AppIcon(packageName: app.packageName, label: name, size: 56),
               const SizedBox(height: 8),
               Text(
                 name,
@@ -2361,7 +2979,9 @@ class _RecentTab extends StatelessWidget {
             child: _RecommendationSection(state: state, items: recs),
           ),
         if (apps.isNotEmpty) ...[
-          SliverToBoxAdapter(child: _SectionLabel(text: context.strings.t('最近'))),
+          SliverToBoxAdapter(
+            child: _SectionLabel(text: context.strings.t('最近')),
+          ),
           SliverList.builder(
             itemCount: apps.length,
             itemBuilder: (context, i) => _recentTile(context, apps[i]),
@@ -2436,8 +3056,9 @@ class _RecommendationSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = context.strings;
     final scheme = Theme.of(context).colorScheme;
-    final shown =
-        items.length > _maxItems ? items.sublist(0, _maxItems) : items;
+    final shown = items.length > _maxItems
+        ? items.sublist(0, _maxItems)
+        : items;
     // Fill the border evenly: one equal-width column per item, capping at four
     // per row so up to eight items form a balanced two-row grid.
     final columns = shown.length < 4 ? shown.length : 4;
@@ -2498,8 +3119,7 @@ class _RecommendationItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name =
-        state.displayNameFor(rec.packageName);
+    final name = state.displayNameFor(rec.packageName);
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => launchApp(context, rec.packageName),

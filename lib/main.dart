@@ -49,8 +49,29 @@ class _AppRoot extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       themeMode: _themeMode(state.themeMode),
-      theme: _buildTheme(Brightness.light, Color(state.themeColor)),
-      darkTheme: _buildTheme(Brightness.dark, Color(state.themeColor)),
+      theme: _buildTheme(
+        Brightness.light,
+        Color(state.themeColor),
+        compact: state.compactDensity,
+      ),
+      darkTheme: _buildTheme(
+        Brightness.dark,
+        Color(state.themeColor),
+        compact: state.compactDensity,
+      ),
+      // One text scale for the whole app. The device's own scale is kept as a
+      // factor, so an accessibility setting is not overridden — it is added to.
+      builder: (context, child) {
+        if (child == null) return const SizedBox.shrink();
+        final media = MediaQuery.of(context);
+        final system = media.textScaler.scale(14) / 14;
+        return MediaQuery(
+          data: media.copyWith(
+            textScaler: TextScaler.linear(system * state.fontScale),
+          ),
+          child: child,
+        );
+      },
       home: const HomeScreen(),
     );
   }
@@ -67,7 +88,11 @@ class _AppRoot extends StatelessWidget {
   }
 }
 
-ThemeData _buildTheme(Brightness brightness, Color seed) {
+ThemeData _buildTheme(
+  Brightness brightness,
+  Color seed, {
+  bool compact = false,
+}) {
   final scheme = ColorScheme.fromSeed(
     seedColor: seed,
     brightness: brightness,
@@ -75,6 +100,7 @@ ThemeData _buildTheme(Brightness brightness, Color seed) {
   return ThemeData(
     useMaterial3: true,
     colorScheme: scheme,
+    visualDensity: compact ? VisualDensity.compact : VisualDensity.standard,
     scaffoldBackgroundColor: brightness == Brightness.light
         ? const Color(0xFFF7F6F3)
         : null,

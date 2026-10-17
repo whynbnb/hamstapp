@@ -36,6 +36,15 @@ class AppMeta {
   /// (and showing its icon).
   bool nameFollowsEntry;
 
+  /// Hidden from the app list. Everything the user put into the app — the
+  /// category, reason, notes — is kept; the 应用 page simply leaves it out
+  /// unless the 「隐藏」 filter is on.
+  bool hidden;
+
+  /// Non-empty when the user chose an icon for this app; the PNG itself lives
+  /// in [CustomIcons] (kept out of this map so the metadata stays readable).
+  String customIcon;
+
   /// Which tile page this pinned app lives on ('' = default/first page).
   String tilePageId;
 
@@ -61,6 +70,8 @@ class AppMeta {
     this.launchActivity = '',
     this.launchEntryLabel = '',
     this.nameFollowsEntry = true,
+    this.hidden = false,
+    this.customIcon = '',
     this.tilePageId = '',
     this.tileCol = -1,
     this.tileRow = -1,
@@ -86,6 +97,8 @@ class AppMeta {
         launchActivity: map['launchActivity'] as String? ?? '',
         launchEntryLabel: map['launchEntryLabel'] as String? ?? '',
         nameFollowsEntry: map['nameFollowsEntry'] as bool? ?? true,
+        hidden: map['hidden'] as bool? ?? false,
+        customIcon: map['customIcon'] as String? ?? '',
         tilePageId: map['tilePageId'] as String? ?? '',
         tileCol: map['tileCol'] as int? ?? -1,
         tileRow: map['tileRow'] as int? ?? -1,
@@ -109,6 +122,8 @@ class AppMeta {
         'launchActivity': launchActivity,
         'launchEntryLabel': launchEntryLabel,
         'nameFollowsEntry': nameFollowsEntry,
+        'hidden': hidden,
+        'customIcon': customIcon,
         'tilePageId': tilePageId,
         'tileCol': tileCol,
         'tileRow': tileRow,
@@ -124,5 +139,7 @@ class AppMeta {
       favorite ||
       pinned ||
       categoryIds.isNotEmpty ||
-      uninstallReason.isNotEmpty;
+      uninstallReason.isNotEmpty ||
+      hidden ||
+      customIcon.isNotEmpty;
 }

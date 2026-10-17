@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import '../l10n/app_strings.dart';
 import '../models/remote_source.dart';
@@ -28,6 +29,90 @@ class RemoteClient {
   static Future<List<Map<String, dynamic>>> list(RemoteSource source) {
     if (source.isWebdav) return _webdavList(source);
     return NativeApps.remoteList(source.toChannelArgs());
+  }
+
+  /// JSON backups written by [putText], newest name first. WebDAV only: a
+  /// backup is a plain file, not an APK, so it does not go through the APK
+  /// cache.
+  static Future<List<Map<String, dynamic>>> listBackups(
+    RemoteSource source,
+  ) async {
+    if (!source.isWebdav) return const <Map<String, dynamic>>[];
+    final files = await _webdavList(source, extensions: const {'.json'});
+    files.sort(
+      (a, b) => ((b['name'] as String?) ?? '')
+          .compareTo((a['name'] as String?) ?? ''),
+    );
+    return files;
+  }
+
+  /// Uploads a UTF-8 text file into the source's directory. Returns the remote
+  /// path that was written.
+  static Future<String> putText(
+    RemoteSource source,
+    String name,
+    String content,
+  ) async {
+    final client = _client();
+    Uri? target;
+    try {
+      target = _rootUri(source).resolve(Uri.encodeComponent(name));
+      final req = await client.openUrl('PUT', target)
+        ..followRedirects = false
+        ..persistentConnection = false;
+      _applyAuth(req, source);
+      final bytes = utf8.encode(content);
+      req.headers.contentType = ContentType.json;
+      req.headers.contentLength = bytes.length;
+      req.add(bytes);
+      final resp = await req.close();
+      await resp.drain<void>();
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return target.path;
+      }
+      throw HttpException(
+        AppStrings.current.t(
+          'HTTP {code}（写入被拒绝，目录是否存在、是否有写权限？）',
+          {'code': resp.statusCode},
+        ),
+        uri: target,
+      );
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Reads a text file from the source. [remotePath] is what [putText] (or a
+  /// listing) returned.
+  static Future<String> getText(
+    RemoteSource source,
+    String remotePath,
+  ) async {
+    final client = _client();
+    try {
+      final base = _rootUri(source);
+      final target = remotePath.startsWith('/')
+          ? base.replace(path: remotePath)
+          : base.resolve(remotePath);
+      final req = await client.getUrl(target)
+        ..followRedirects = false
+        ..persistentConnection = false;
+      _applyAuth(req, source);
+      final resp = await req.close();
+      final builder = BytesBuilder(copy: false);
+      await for (final chunk in resp) {
+        builder.add(chunk);
+      }
+      if (resp.statusCode >= 200 && resp.statusCode < 300) {
+        return utf8.decode(builder.takeBytes());
+      }
+      throw HttpException(
+        AppStrings.current.t('HTTP {code}', {'code': resp.statusCode}),
+        uri: target,
+      );
+    } finally {
+      client.close(force: true);
+    }
   }
 
   /// Downloads one listed entry (or reuses the cached copy) and returns the
@@ -146,7 +231,9 @@ class RemoteClient {
   }
 
   static Future<List<Map<String, dynamic>>> _webdavList(
-      RemoteSource source) async {
+    RemoteSource source, {
+    Set<String> extensions = const {'.apk'},
+  }) async {
     final client = _client();
     try {
       final root = _rootUri(source);
@@ -174,8 +261,9 @@ class RemoteClient {
             }
           } else {
             final name = e['name'] as String;
+            final lower = name.toLowerCase();
             if (name.startsWith('.') ||
-                !name.toLowerCase().endsWith('.apk')) {
+                !extensions.any(lower.endsWith)) {
               continue;
             }
             final rel = Uri.decodeComponent(target.path.startsWith(rootPath)

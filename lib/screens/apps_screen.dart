@@ -13,6 +13,7 @@ import '../utils/app_grouping.dart';
 import '../widgets/web_app_editor.dart';
 import 'app_detail_screen.dart';
 import 'apk_analyzer_screen.dart';
+import 'health_screen.dart';
 import 'sync_screen.dart';
 
 class AppsScreen extends StatefulWidget {
@@ -25,6 +26,9 @@ class AppsScreen extends StatefulWidget {
 class _AppsScreenState extends State<AppsScreen> {
   late final AppState _state;
   bool _wasScanning = false;
+
+  /// The app shown in the wide-screen side pane.
+  String? _selectedPackage;
 
   @override
   void initState() {
@@ -121,24 +125,69 @@ class _AppsScreenState extends State<AppsScreen> {
       body: Column(
         children: [
           _SearchBar(state: state),
+          if (state.hasPermissionAlerts) _UpdateAlertBanner(state: state),
           Expanded(
-            child: RefreshIndicator(
-              onRefresh: state.scan,
-              child: showUninstalled
-                  ? _UninstalledList(state: state)
-                  : apps.isEmpty
-                  ? _EmptyView(state: state)
-                  : state.groupMode != AppGroupMode.none &&
-                        state.query.trim().isEmpty
-                  ? _GroupedAppList(state: state)
-                  : ListView.builder(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      itemCount: apps.length,
-                      itemBuilder: (context, i) =>
-                          _appTile(context, state, apps[i]),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // A tablet in landscape can show the list and the app page side
+                // by side instead of pushing a page over the list.
+                final wide = constraints.maxWidth >= 840;
+                void select(AppInfo app) =>
+                    setState(() => _selectedPackage = app.packageName);
+                final list = RefreshIndicator(
+                  onRefresh: state.scan,
+                  child: state.scanning && apps.isEmpty
+                      ? const _SkeletonList()
+                      : showUninstalled
+                      ? _UninstalledList(state: state)
+                      : state.filter == AppFilter.hidden
+                      ? _HiddenList(
+                          state: state,
+                          onSelect: wide ? select : null,
+                        )
+                      : apps.isEmpty
+                      ? _EmptyView(state: state)
+                      : state.groupMode != AppGroupMode.none &&
+                            state.query.trim().isEmpty
+                      ? _GroupedAppList(
+                          state: state,
+                          onSelect: wide ? select : null,
+                        )
+                      : ListView.builder(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          keyboardDismissBehavior:
+                              ScrollViewKeyboardDismissBehavior.onDrag,
+                          itemCount: apps.length,
+                          itemBuilder: (context, i) => _appTile(
+                            context,
+                            state,
+                            apps[i],
+                            onTap: wide ? () => select(apps[i]) : null,
+                          ),
+                        ),
+                );
+                if (!wide) return list;
+                return Row(
+                  children: [
+                    SizedBox(width: 360, child: list),
+                    const VerticalDivider(width: 1),
+                    Expanded(
+                      child: _selectedPackage == null
+                          ? Center(
+                              child: Text(
+                                context.strings.t('选择左侧的应用查看详情'),
+                                style: TextStyle(color: Colors.grey.shade600),
+                              ),
+                            )
+                          : AppDetailScreen(
+                              key: ValueKey(_selectedPackage),
+                              packageName: _selectedPackage!,
+                              embedded: true,
+                            ),
                     ),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -147,23 +196,181 @@ class _AppsScreenState extends State<AppsScreen> {
   }
 }
 
+/// A red-ish strip above the list when the last scan found apps that started
+/// asking for more after an update.
+class _UpdateAlertBanner extends StatelessWidget {
+  const _UpdateAlertBanner({required this.state});
+  final AppState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.strings;
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.shield_outlined, size: 18, color: scheme.error),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              s.t('{n} 个应用在更新后新增了权限或换了签名', {
+                'n': state.permissionAlerts.length,
+              }),
+              style: const TextStyle(fontSize: 12.5),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HealthScreen()),
+            ),
+            child: Text(s.t('查看')),
+          ),
+          IconButton(
+            tooltip: s.t('忽略'),
+            visualDensity: VisualDensity.compact,
+            icon: const Icon(Icons.close, size: 18),
+            onPressed: state.dismissPermissionAlerts,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The hidden apps, with a note about what hiding does and does not do.
+class _HiddenList extends StatelessWidget {
+  const _HiddenList({required this.state, this.onSelect});
+  final AppState state;
+  final ValueChanged<AppInfo>? onSelect;
+
+  @override
+  Widget build(BuildContext context) {
+    final apps = state.hiddenApps;
+    if (apps.isEmpty) {
+      return ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        children: [
+          const SizedBox(height: 100),
+          Icon(Icons.visibility_off_outlined, size: 64, color: Colors.grey),
+          const SizedBox(height: 12),
+          Center(child: Text(context.strings.t('没有隐藏的应用'))),
+          const SizedBox(height: 6),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              context.strings.t('在应用详情页的菜单里可以隐藏；分类、原因和备注都会保留'),
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12.5),
+            ),
+          ),
+        ],
+      );
+    }
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      itemCount: apps.length + 1,
+      itemBuilder: (context, i) {
+        if (i == 0) {
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Text(
+              context.strings.t('隐藏的应用不会出现在列表里；分类、原因、备注和磁贴都还在。'),
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+          );
+        }
+        final app = apps[i - 1];
+        return _appTile(
+          context,
+          state,
+          app,
+          onTap: onSelect == null ? null : () => onSelect!(app),
+        );
+      },
+    );
+  }
+}
+
+/// Shown while the first scan is running: blocks that suggest the list that is
+/// about to arrive instead of a lone spinner.
+class _SkeletonList extends StatelessWidget {
+  const _SkeletonList();
+
+  @override
+  Widget build(BuildContext context) {
+    final base = Theme.of(context).colorScheme.onSurface
+        .withValues(alpha: 0.07);
+    Widget bar(double width, double height) => Container(
+      width: width,
+      height: height,
+      decoration: BoxDecoration(
+        color: base,
+        borderRadius: BorderRadius.circular(height / 2),
+      ),
+    );
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(),
+      itemCount: 8,
+      itemBuilder: (context, i) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: base,
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            const SizedBox(width: 14),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                bar(120 + (i % 3) * 30, 12),
+                const SizedBox(height: 8),
+                bar(180 + (i % 2) * 40, 9),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// One row of the app list, wired to the detail page.
-Widget _appTile(BuildContext context, AppState state, AppInfo app) {
+Widget _appTile(
+  BuildContext context,
+  AppState state,
+  AppInfo app, {
+  VoidCallback? onTap,
+}) {
   return AppListTile(
     app: app,
     state: state,
     showSortFact: true,
-    onTap: () {
-      FocusManager.instance.primaryFocus?.unfocus();
-      // A search that led somewhere is worth repeating.
-      if (state.query.trim().isNotEmpty) state.rememberQuery(state.query);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => AppDetailScreen(packageName: app.packageName),
-        ),
-      );
-    },
+    onTap:
+        onTap ??
+        () {
+          FocusManager.instance.primaryFocus?.unfocus();
+          // A search that led somewhere is worth repeating.
+          if (state.query.trim().isNotEmpty) state.rememberQuery(state.query);
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => AppDetailScreen(packageName: app.packageName),
+            ),
+          );
+        },
   );
 }
 
@@ -171,8 +378,12 @@ Widget _appTile(BuildContext context, AppState state, AppInfo app) {
 /// past. Grouping is off while searching: results are ranked by relevance, and
 /// cutting them into sections would hide that order.
 class _GroupedAppList extends StatelessWidget {
-  const _GroupedAppList({required this.state});
+  const _GroupedAppList({required this.state, this.onSelect});
   final AppState state;
+
+  /// Set on wide screens: tapping a row fills the side pane instead of pushing
+  /// a page.
+  final ValueChanged<AppInfo>? onSelect;
 
   @override
   Widget build(BuildContext context) {
@@ -194,8 +405,12 @@ class _GroupedAppList extends StatelessWidget {
           ),
           SliverList.builder(
             itemCount: group.apps.length,
-            itemBuilder: (context, i) =>
-                _appTile(context, state, group.apps[i]),
+            itemBuilder: (context, i) => _appTile(
+              context,
+              state,
+              group.apps[i],
+              onTap: onSelect == null ? null : () => onSelect!(group.apps[i]),
+            ),
           ),
         ],
         const SliverToBoxAdapter(child: SizedBox(height: 24)),
@@ -662,6 +877,7 @@ class _AppFilterSheet extends StatelessWidget {
                     AppFilter.hasReason: s.t('有原因'),
                     AppFilter.unorganized: '🫥${s.t('未整理')}',
                     AppFilter.uninstalled: '🗑️${s.t('已卸载')}',
+                    AppFilter.hidden: '🙈${s.t('隐藏')}',
                   }.entries)
                     e.key == AppFilter.unorganized
                         ? Tooltip(

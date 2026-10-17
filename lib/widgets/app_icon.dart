@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../services/custom_icons.dart';
 import '../services/icon_cache.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
@@ -48,6 +49,10 @@ class _AppIconState extends State<AppIcon> {
   Uint8List? _bytes;
   bool _loading = false;
 
+  /// Set when the last painted bytes came from [CustomIcons], so removing the
+  /// custom icon can trigger a fresh native lookup.
+  String _customSlot = '';
+
   /// Whether a native fetch has already been kicked off for this package, so a
   /// rebuild does not queue a second one.
   bool _requested = false;
@@ -59,6 +64,7 @@ class _AppIconState extends State<AppIcon> {
     // Repaint when the shared cache is replaced (e.g. the settings "refresh
     // icon cache" action or a data import).
     IconCache.instance.addListener(_onCacheChanged);
+    CustomIcons.instance.addListener(_onCustomChanged);
     NotificationBadges.instance.addListener(_onBadgesChanged);
     _resolve();
   }
@@ -79,6 +85,7 @@ class _AppIconState extends State<AppIcon> {
   @override
   void dispose() {
     IconCache.instance.removeListener(_onCacheChanged);
+    CustomIcons.instance.removeListener(_onCustomChanged);
     NotificationBadges.instance.removeListener(_onBadgesChanged);
     super.dispose();
   }
@@ -98,6 +105,14 @@ class _AppIconState extends State<AppIcon> {
     setState(() {});
   }
 
+  void _onCustomChanged() {
+    if (!mounted) return;
+    setState(() {
+      _requested = false;
+      _resolve();
+    });
+  }
+
   /// Cache slot this widget paints: the app's own icon, or a pinned entry's.
   String get _slot =>
       IconCache.instance.slotFor(widget.packageName, widget.activity);
@@ -105,11 +120,26 @@ class _AppIconState extends State<AppIcon> {
   /// Decide what to paint for the current package. Called outside build, so it
   /// assigns fields directly.
   void _resolve() {
+    // A user-chosen icon wins over everything else: that is the whole point of
+    // choosing one.
+    final custom = CustomIcons.instance.bytesFor(widget.packageName);
+    if (custom != null) {
+      _bytes = custom;
+      _loading = false;
+      _requested = false;
+      return;
+    }
     if (widget.bytes != null) {
       _bytes = widget.bytes;
       _loading = false;
       _requested = false;
       return;
+    }
+    // A custom icon that was removed falls back to the launcher icon.
+    if (!CustomIcons.instance.has(widget.packageName) &&
+        IconCache.instance.slotFor(widget.packageName, widget.activity) ==
+            _customSlot) {
+      _customSlot = '';
     }
     final cached = IconCache.instance[_slot];
     if (cached != null) {
@@ -125,6 +155,8 @@ class _AppIconState extends State<AppIcon> {
   }
 
   Future<void> _fetch() async {
+    // Re-read after a custom icon was removed (see [_resolve]).
+    _customSlot = _slot;
     final slot = _slot;
     final activity = IconCache.slotActivity(slot);
     Uint8List? bytes;
@@ -133,6 +165,7 @@ class _AppIconState extends State<AppIcon> {
         widget.packageName,
         size: IconCache.fetchSize,
         activity: activity,
+        iconPack: IconCache.instance.iconPack,
       );
     } catch (_) {
       bytes = null;
@@ -173,7 +206,10 @@ class _AppIconState extends State<AppIcon> {
   }
 
   Widget _buildIcon(BuildContext context) {
-    final bytes = _bytes ?? widget.bytes;
+    final bytes =
+        CustomIcons.instance.bytesFor(widget.packageName) ??
+        _bytes ??
+        widget.bytes;
     final radius = BorderRadius.circular(widget.size * 0.26);
     if (bytes != null) {
       return ClipRRect(

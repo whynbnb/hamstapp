@@ -55,6 +55,16 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   - *Tools* — torch, quick dial, countdown, world clock (optional date, or its difference from today),
     a note, and a battery / RAM / storage / data overview.
   - *Actions* — scan apps, take a snapshot, search apps, open the storage manager.
+- **Tile gestures** — bind an action to a double tap or an upward swipe on any tile (open the app,
+  its details, search, or jump to a page). Off by default, so a plain tap still launches instantly.
+- **Drag one tile onto another** to make a real folder; dropping onto an existing folder adds to it.
+- **Multi-select** (delete or move a batch to another page), **copy a page** with all its tiles, and
+  **lock the layout** so nothing moves by accident.
+- **App shortcuts** — long-press a tile to open the app's own long-press menu (WeChat's "Scan", …).
+  Android only shows those to the current launcher, so this needs 囤囤 to be the default home app;
+  the menu explains that instead of failing silently.
+- **Global search** — one search icon in the header covers apps (including web entries), categories,
+  backup lists, snapshots and a handful of screens that are otherwise buried in Settings.
 - **Categories** — group apps with an emoji and a colour; reorder by hand or by name / count.
 - **Favorites** — a quick grid of the apps you starred.
 - **Recent** — launch history with *all / today / 7-day / 30-day* filters, sorted by recency or frequency,
@@ -78,6 +88,15 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
     system permission screen.
   - **Signature** — the certificate fingerprint (tap to copy), subject, validity, and flags for
     self-signed / multiple signers / rotated keys.
+- **Hidden apps** — hide an app from the list without deleting anything it carries (categories,
+  reason, notes); the 「隐藏」 filter is where it comes back from.
+- **Custom icons** — pick an image for any app; it is shrunk to 192 px and used everywhere (list,
+  tiles, search) until you restore the launcher icon.
+- **整理与体检 (Health)** — one screen for the things worth noticing: updates that added sensitive
+  permissions or changed signer, the install-source breakdown, apps sharing a name (highlighted when
+  their certificates differ), packages with several downloaded versions, and the hidden apps.
+- **Real usage** — per-app foreground time for today / 7 / 30 days and this month's traffic per app,
+  straight from the system (usage access), next to 囤囤's own launch history.
 - **Uninstall records** — when an app disappears it is kept together with the reason you give,
   so reinstalls and snapshots stay meaningful.
 
@@ -125,7 +144,14 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - **Recommendations** based on the time of day you usually open each app.
 
 ### 🔒 Data & privacy
-- **Export / import** the whole state as one JSON package.
+- **Export / import** the whole state as one JSON package. Import shows what the package holds and
+  how much of it is already here, and can **merge** instead of replacing everything.
+- **Back up to WebDAV** — write the package into one of the configured WebDAV folders, and restore
+  from the list of backups there (same preview/merge step).
+- **Snapshot difference export** — the comparison page writes its result (versions, new/removed
+  permissions, signer changes) to a Markdown file.
+- **Automatic snapshots** — off by default; when enabled, a scan that finds changes after N days
+  takes one on its own.
 - A persistent **icon cache** so icons appear instantly, with an on-demand refresh.
 - **Offline by default** — the only network access is the remote sources you configure yourself.
 - **Notification badges** are read on-device from the system notification access you grant; nothing is uploaded.
@@ -138,6 +164,11 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   `2026年10月17日`) and 24-hour or `1:05 PM`; one setting drives every screen and tile.
   Relative times (`3 days ago`, `today`) stay relative.
 - Navigation: bottom bar, side rail, or a collapsed button.
+- **Icon packs** — use the icons of an installed icon pack instead of the launcher's (the platform
+  appfilter convention; system icons stay the default).
+- **Font size and density** — 85 / 100 / 115 / 130 % on top of the device's own scale, and a compact
+  list density.
+- On a tablet or in landscape the app list and the app page sit side by side instead of pushing pages.
 - Adjustable haptics, optional full-screen (hide the status bar), remember last position.
 
 ## 📥 Install
@@ -175,12 +206,29 @@ bash scripts/release.sh
   SMB (`jcifs-ng`) and vibration.
 - **WebDAV** is implemented in Dart over HTTP.
 
+## 🚫 Not planned
+
+These are deliberately out of scope. They need system-level privileges, vendor private APIs, or
+would break the local-first design, so they will not be added — listed here so they stop coming
+back as suggestions:
+
+- **Freezing / disabling apps** — Shizuku, root or device-owner; too much setup and risk for what it adds.
+- **Autostart / background management** — every vendor hides its own components; supporting it means
+  hard-coding each ROM.
+- **Battery-drain ranking** — `BatteryStats` is only readable with system-level permissions.
+- **Weather or other cloud data** — needs network and location; the app stays offline by default.
+- **Accounts / a sync service** — no account, no telemetry, no server of ours.
+
 ## 📝 Changelog
 
 - **1.1** — permission audit; per-app storage / permissions / signature cards; storage manager and app
   usage ranking; 30 info tiles with their own settings; web-app entries with a standalone window or a
   browser of your choice; launcher shortcuts; date-format and 24-hour settings; “unsupported tile”
   handling instead of silent removal.
+- **Unreleased** — tile gestures, drag-into-folder, multi-select / page copy / layout lock, app
+  shortcuts, global search; hidden apps, custom icons, 整理与体检, per-app usage and traffic, install
+  source breakdown; icon packs, font size / density, two-pane tablets; auto snapshots, WebDAV
+  backup, preview/merge import, snapshot-difference export.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

@@ -435,6 +435,107 @@ class InstallSource {
       );
 }
 
+/// Foreground time of one app over three windows, from the system's usage
+/// statistics. [lastUsed] is epoch milliseconds (0 when unknown).
+class AppUsageStat {
+  const AppUsageStat({
+    required this.packageName,
+    this.todayMillis = 0,
+    this.weekMillis = 0,
+    this.monthMillis = 0,
+    this.lastUsed = 0,
+  });
+
+  final String packageName;
+  final int todayMillis;
+  final int weekMillis;
+  final int monthMillis;
+  final int lastUsed;
+
+  factory AppUsageStat.fromMap(Map<dynamic, dynamic> m) => AppUsageStat(
+        packageName: m['packageName'] as String? ?? '',
+        todayMillis: (m['todayMillis'] as num?)?.toInt() ?? 0,
+        weekMillis: (m['weekMillis'] as num?)?.toInt() ?? 0,
+        monthMillis: (m['monthMillis'] as num?)?.toInt() ?? 0,
+        lastUsed: (m['lastUsed'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// Per-app usage; [permitted] is false without the usage-access grant.
+class AppUsageReport {
+  const AppUsageReport({required this.permitted, this.apps = const []});
+
+  final bool permitted;
+  final List<AppUsageStat> apps;
+}
+
+/// This month's bytes for one app (mobile + Wi-Fi).
+class AppTrafficStat {
+  const AppTrafficStat({required this.packageName, this.bytes = 0});
+
+  final String packageName;
+  final int bytes;
+
+  factory AppTrafficStat.fromMap(Map<dynamic, dynamic> m) => AppTrafficStat(
+        packageName: m['packageName'] as String? ?? '',
+        bytes: (m['bytes'] as num?)?.toInt() ?? 0,
+      );
+}
+
+class AppTrafficReport {
+  const AppTrafficReport({required this.permitted, this.apps = const []});
+
+  final bool permitted;
+  final List<AppTrafficStat> apps;
+}
+
+/// One of an app's own long-press shortcuts.
+class AppShortcut {
+  const AppShortcut({
+    required this.id,
+    required this.shortLabel,
+    required this.longLabel,
+  });
+
+  final String id;
+  final String shortLabel;
+  final String longLabel;
+
+  String get label => shortLabel.isNotEmpty ? shortLabel : longLabel;
+
+  factory AppShortcut.fromMap(Map<dynamic, dynamic> m) => AppShortcut(
+        id: m['id'] as String? ?? '',
+        shortLabel: m['shortLabel'] as String? ?? '',
+        longLabel: m['longLabel'] as String? ?? '',
+      );
+}
+
+/// An app's shortcuts; [permitted] is false unless 囤囤 is the default launcher
+/// (the platform only reveals another app's shortcuts to it).
+class AppShortcutList {
+  const AppShortcutList({required this.permitted, this.shortcuts = const []});
+
+  final bool permitted;
+  final List<AppShortcut> shortcuts;
+}
+
+/// An installed icon pack: a theme package that declares launcher icons.
+class IconPackInfo {
+  const IconPackInfo({required this.packageName, this.name = '', this.icons = 0});
+
+  final String packageName;
+  final String name;
+
+  /// How many app icons the pack maps (0 when it could not be read).
+  final int icons;
+
+  factory IconPackInfo.fromMap(Map<dynamic, dynamic> m) => IconPackInfo(
+        packageName: m['packageName'] as String? ?? '',
+        name: m['name'] as String? ?? '',
+        icons: (m['icons'] as num?)?.toInt() ?? 0,
+      );
+}
+
 /// One entry of the launcher's dynamic shortcut list: an app the user launched
 /// recently, offered on a long press of 囤囤's own icon.
 class RecentShortcut {
@@ -670,13 +771,105 @@ class NativeApps {
     String packageName, {
     int size = 144,
     String? activity,
+    String iconPack = '',
   }) async {
     final bytes = await _channel.invokeMethod<Uint8List>('getAppIcon', {
       'packageName': packageName,
       'size': size,
       if (activity != null && activity.isNotEmpty) 'activity': activity,
+      if (iconPack.isNotEmpty) 'iconPack': iconPack,
     });
     return bytes;
+  }
+
+  /// Per-app foreground time for today / 7 / 30 days (usage access needed).
+  static Future<AppUsageReport> appUsageStats() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'appUsageStats',
+      );
+      return AppUsageReport(
+        permitted: r?['permitted'] as bool? ?? false,
+        apps: [
+          for (final e in (r?['apps'] as List?) ?? const [])
+            AppUsageStat.fromMap((e as Map).cast<dynamic, dynamic>()),
+        ],
+      );
+    } catch (_) {
+      return const AppUsageReport(permitted: false);
+    }
+  }
+
+  /// This month's traffic per app.
+  static Future<AppTrafficReport> appTraffic() async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>('appTraffic');
+      return AppTrafficReport(
+        permitted: r?['permitted'] as bool? ?? false,
+        apps: [
+          for (final e in (r?['apps'] as List?) ?? const [])
+            AppTrafficStat.fromMap((e as Map).cast<dynamic, dynamic>()),
+        ],
+      );
+    } catch (_) {
+      return const AppTrafficReport(permitted: false);
+    }
+  }
+
+  /// An app's own long-press shortcuts (empty unless we are the launcher).
+  static Future<AppShortcutList> appShortcuts(String packageName) async {
+    try {
+      final r = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'appShortcuts',
+        {'packageName': packageName},
+      );
+      return AppShortcutList(
+        permitted: r?['permitted'] as bool? ?? false,
+        shortcuts: [
+          for (final e in (r?['shortcuts'] as List?) ?? const [])
+            AppShortcut.fromMap((e as Map).cast<dynamic, dynamic>()),
+        ],
+      );
+    } catch (_) {
+      return const AppShortcutList(permitted: false);
+    }
+  }
+
+  static Future<bool> startAppShortcut(
+    String packageName,
+    String shortcutId,
+  ) async {
+    try {
+      return await _channel.invokeMethod<bool>('startAppShortcut', {
+            'packageName': packageName,
+            'shortcutId': shortcutId,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Opens the system's "default home app" picker.
+  static Future<bool> openHomeSettings() async {
+    try {
+      return await _channel.invokeMethod<bool>('openHomeSettings') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Installed icon packs (ADW/Nova/Lawnchair-compatible theme packages).
+  static Future<List<IconPackInfo>> iconPacks() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>('iconPacks');
+      return [
+        for (final e in raw ?? const [])
+          IconPackInfo.fromMap((e as Map).cast<dynamic, dynamic>()),
+      ];
+    } catch (_) {
+      return const <IconPackInfo>[];
+    }
   }
 
   /// Starts an app, optionally pinning one of its desktop entries ([activity]

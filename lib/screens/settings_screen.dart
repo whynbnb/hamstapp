@@ -8,6 +8,8 @@ import '../services/notification_badges.dart';
 import '../state/app_state.dart';
 import '../utils/app_exporter.dart';
 import '../utils/backup_actions.dart';
+import 'health_screen.dart';
+import 'icon_pack_screen.dart';
 import '../utils/format.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/theme_color_picker.dart';
@@ -116,6 +118,37 @@ class SettingsScreen extends StatelessWidget {
                   );
               }
             },
+          ),
+          ListTile(
+            leading: const Icon(Icons.palette_outlined),
+            title: Text(context.strings.t('图标包')),
+            subtitle: Text(
+              state.iconPack.isEmpty
+                  ? context.strings.t('使用系统图标')
+                  : state.iconPack,
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const IconPackScreen()),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.format_size),
+            title: Text(context.strings.t('字体大小')),
+            subtitle: Text(
+              context.strings.t('{n}%（100% 跟随系统）', {
+                'n': (state.fontScale * 100).round(),
+              }),
+            ),
+            onTap: () => _pickFontScale(context, state),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.density_medium),
+            title: Text(context.strings.t('紧凑列表')),
+            subtitle: Text(context.strings.t('列表行更矮，一屏能多看几项')),
+            value: state.compactDensity,
+            onChanged: state.setCompactDensity,
           ),
           ListTile(
             leading: Icon(_tileStyleIcon(state.tileStyle)),
@@ -320,6 +353,15 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          SwitchListTile(
+            secondary: const Icon(Icons.lock_outline),
+            title: Text(context.strings.t('锁定磁贴布局')),
+            subtitle: Text(
+              context.strings.t('锁定后不能进入编辑模式，避免误拖；浏览和启动不受影响'),
+            ),
+            value: state.layoutLocked,
+            onChanged: state.setLayoutLocked,
+          ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('通知')),
           SwitchListTile(
@@ -484,6 +526,18 @@ class SettingsScreen extends StatelessWidget {
           const Divider(height: 1),
           _SectionHeader(context.strings.t('隐私')),
           ListTile(
+            leading: const Icon(Icons.health_and_safety_outlined),
+            title: Text(context.strings.t('整理与体检')),
+            subtitle: Text(
+              context.strings.t('更新后新增的权限、安装来源、重复/相似应用、隐藏应用'),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const HealthScreen()),
+            ),
+          ),
+          ListTile(
             leading: const Icon(Icons.shield_outlined),
             title: Text(context.strings.t('权限体检')),
             subtitle: Text(
@@ -514,6 +568,53 @@ class SettingsScreen extends StatelessWidget {
               context.strings.t('导出成 Markdown / CSV / 纯文本，带上分类、原因和备注'),
             ),
             onTap: () => exportAppList(context, state),
+          ),
+          ListTile(
+            leading: const Icon(Icons.schedule),
+            title: Text(context.strings.t('自动快照')),
+            subtitle: Text(
+              state.autoSnapshotDays == 0
+                  ? context.strings.t('已关闭')
+                  : context.strings.t(
+                      '每 {n} 天检查一次，有变化时自动创建',
+                      {'n': state.autoSnapshotDays},
+                    ),
+            ),
+            trailing: DropdownButton<int>(
+              value: state.autoSnapshotDays,
+              underline: const SizedBox.shrink(),
+              onChanged: (v) {
+                if (v != null) state.setAutoSnapshotDays(v);
+              },
+              items: [
+                DropdownMenuItem(value: 0, child: Text(context.strings.t('关闭'))),
+                for (final d in const [1, 3, 7, 30])
+                  DropdownMenuItem(
+                    value: d,
+                    child: Text(context.strings.t('{n} 天', {'n': d})),
+                  ),
+              ],
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.cloud_upload_outlined),
+            title: Text(context.strings.t('备份到 WebDAV')),
+            subtitle: Text(
+              state.lastWebdavBackupAt == null
+                  ? context.strings.t('把数据包写进已配置的 WebDAV 目录')
+                  : context.strings.t('上次：{time}', {
+                      'time': Fmt.dateTime(
+                        state.lastWebdavBackupAt!.millisecondsSinceEpoch,
+                      ),
+                    }),
+            ),
+            onTap: () => backupToWebdav(context, state),
+          ),
+          ListTile(
+            leading: const Icon(Icons.cloud_download_outlined),
+            title: Text(context.strings.t('从 WebDAV 恢复')),
+            subtitle: Text(context.strings.t('列出目录里的备份，预览后再导入')),
+            onTap: () => restoreFromWebdav(context, state),
           ),
           ListTile(
             leading: const Icon(Icons.download_outlined),
@@ -1010,6 +1111,35 @@ class _SectionHeader extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Font scale choices: 100% follows the system, the rest override it.
+Future<void> _pickFontScale(BuildContext context, AppState state) async {
+  final s = context.strings;
+  final value = await showDialog<double>(
+    context: context,
+    builder: (ctx) => SimpleDialog(
+      title: Text(s.t('字体大小')),
+      children: [
+        for (final v in const <double>[0.85, 1.0, 1.15, 1.3])
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, v),
+            child: Row(
+              children: [
+                Expanded(child: Text('${(v * 100).round()}%')),
+                if ((state.fontScale - v).abs() < 0.001)
+                  Icon(
+                    Icons.check,
+                    size: 18,
+                    color: Theme.of(ctx).colorScheme.primary,
+                  ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+  if (value != null) await state.setFontScale(value);
 }
 
 class _DeviceInfoTile extends StatelessWidget {

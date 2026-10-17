@@ -1,3 +1,7 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -41,6 +45,107 @@ class _CompareScreenState extends State<CompareScreen> {
   List<DiffItem> get _updatedItems =>
       _securityOnly ? _diff.securityUpdates : _diff.updated;
 
+  /// The comparison as a Markdown note, for keeping a record of an upgrade.
+  String _diffMarkdown(BuildContext context) {
+    final s = context.strings;
+    String list(List<String> permissions) => permissions
+        .map((p) => s.t(permissionLabel(p)))
+        .join('、');
+    final b = StringBuffer()
+      ..writeln('# ${s.t('快照差异')}')
+      ..writeln()
+      ..writeln(s.t('基准：{label}', {'label': widget.olderLabel}))
+      ..writeln(s.t('对比：{label}', {'label': widget.newerLabel}))
+      ..writeln(
+        '${s.t('新增 {n}', {'n': _diff.added.length})} · '
+        '${s.t('卸载 {n}', {'n': _diff.removed.length})} · '
+        '${s.t('更新 {n}', {'n': _diff.updated.length})}',
+      )
+      ..writeln();
+
+    void header(String text) {
+      b
+        ..writeln('## $text')
+        ..writeln();
+    }
+
+    if (_diff.added.isNotEmpty) {
+      header(s.t('新增'));
+      for (final e in _diff.added) {
+        b.writeln('- ${e.appName}（${e.packageName}）${e.toVersion}');
+      }
+      b.writeln();
+    }
+    if (_diff.removed.isNotEmpty) {
+      header(s.t('卸载'));
+      for (final e in _diff.removed) {
+        b.writeln('- ${e.appName}（${e.packageName}）${e.fromVersion}');
+      }
+      b.writeln();
+    }
+    if (_diff.updated.isNotEmpty) {
+      header(s.t('更新'));
+      for (final e in _diff.updated) {
+        b.writeln(
+          '- **${e.appName}** ${e.fromVersion} → ${e.toVersion}',
+        );
+        if (e.addedPermissions.isNotEmpty) {
+          b.writeln('  - ${s.t('新增权限')}：${list(e.addedPermissions)}');
+        }
+        if (e.removedPermissions.isNotEmpty) {
+          b.writeln('  - ${s.t('移除权限')}：${list(e.removedPermissions)}');
+        }
+        if (e.signatureChanged) {
+          b.writeln('  - ${s.t('签名已变化')}');
+        }
+        if (e.fromTargetSdk > 0 &&
+            e.toTargetSdk > 0 &&
+            e.fromTargetSdk != e.toTargetSdk) {
+          b.writeln('  - targetSdk ${e.fromTargetSdk} → ${e.toTargetSdk}');
+        }
+        if (e.fromInstaller != e.toInstaller) {
+          b.writeln(
+            '  - ${s.t('安装来源')}：'
+            '${e.fromInstaller.isEmpty ? s.t('侧载或未知') : e.fromInstaller} → '
+            '${e.toInstaller.isEmpty ? s.t('侧载或未知') : e.toInstaller}',
+          );
+        }
+      }
+      b.writeln();
+    }
+    return b.toString();
+  }
+
+  Future<void> _exportDiff() async {
+    final s = context.strings;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final now = DateTime.now();
+      String two(int n) => n.toString().padLeft(2, '0');
+      final name =
+          'hamstapp_diff_${now.year}${two(now.month)}${two(now.day)}_'
+          '${two(now.hour)}${two(now.minute)}.md';
+      final uri = await FilePicker.saveFile(
+        fileName: name,
+        bytes: Uint8List.fromList(utf8.encode(_diffMarkdown(context))),
+        mimeType: 'text/markdown',
+        dialogTitle: s.t('导出这份差异'),
+      );
+      if (uri == null) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(s.t('已导出 {name}', {'name': name}))),
+        );
+    } catch (e) {
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(s.t('导出失败：{error}', {'error': e}))),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = context.strings;
@@ -61,6 +166,11 @@ class _CompareScreenState extends State<CompareScreen> {
             tabAlignment: TabAlignment.start,
           ),
           actions: [
+            IconButton(
+              tooltip: s.t('导出这份差异'),
+              icon: const Icon(Icons.ios_share),
+              onPressed: _exportDiff,
+            ),
             if (_diff.securityUpdates.isNotEmpty)
               IconButton(
                 tooltip: s.t('只看安全相关的变化'),

@@ -12,17 +12,20 @@ import '../models/category.dart';
 import '../models/launch_event.dart';
 import '../models/remote_source.dart';
 import '../models/snapshot.dart';
+import '../models/snapshot_diff.dart';
 import '../models/tile.dart';
 import '../models/tile_page.dart';
 import '../models/web_app.dart';
 import '../services/native_apps.dart';
 import '../services/notification_badges.dart';
 import '../services/app_log.dart';
+import '../services/custom_icons.dart';
 import '../services/pwa.dart';
 import '../services/storage.dart';
 import '../services/icon_cache.dart';
 import '../utils/app_grouping.dart';
 import '../utils/format.dart';
+import '../utils/permissions.dart';
 import '../utils/recommender.dart';
 import '../utils/search.dart';
 import '../utils/system_ui.dart';
@@ -41,6 +44,7 @@ enum AppFilter {
   hasReason,
   unorganized,
   uninstalled,
+  hidden,
 }
 
 enum AppSort { name, installTime, updateTime, size }
@@ -443,6 +447,8 @@ class AppState extends ChangeNotifier {
   Future<void> init() async {
     meta = await _loadMeta();
     _syncIconActivities();
+    await _loadCustomIcons();
+    IconCache.instance.iconPack = iconPack;
     categories = await _loadCategories();
     snapshots = await _loadSnapshots();
     backupLists = await _loadBackupLists();
@@ -963,6 +969,9 @@ class AppState extends ChangeNotifier {
       unawaited(refreshIconCache());
       // An uninstalled app must not stay on the long-press list.
       unawaited(syncRecentShortcuts());
+      // Read permissions/certificates, warn about updates that added some and
+      // take the automatic snapshot when it is due.
+      unawaited(_afterScanMaintenance());
     }
   }
 
@@ -989,6 +998,18 @@ class AppState extends ChangeNotifier {
     final list = meta.values.where((m) => m.isUninstalled).toList()
       ..sort((a, b) => b.uninstalledAt.compareTo(a.uninstalledAt));
     return list;
+  }
+
+  /// Apps the user hid from the list, newest first by name.
+  List<AppInfo> get hiddenApps =>
+      apps.where((a) => metaFor(a.packageName).hidden).toList()..sort(
+        (a, b) => _sortName(a).compareTo(_sortName(b)),
+      );
+
+  Future<void> setHidden(String packageName, bool hidden) async {
+    metaFor(packageName).hidden = hidden;
+    await _persistMeta();
+    notifyListeners();
   }
 
   // ---------------------------------------------------------------- meta
@@ -1768,6 +1789,137 @@ class AppState extends ChangeNotifier {
   }
 
   /// Remove every tile for [packageName].
+  /// Removes several tiles at once (the board's multi-select mode).
+  Future<void> removeTiles(Iterable<String> ids) async {
+    final set = ids.toSet();
+    if (set.isEmpty) return;
+    final removed = tiles.where((t) => set.contains(t.id)).toList();
+    tiles.removeWhere((t) => set.contains(t.id));
+    for (final t in removed) {
+      _syncPinned(t.packageName);
+    }
+    await _persistTiles();
+    await _persistMeta();
+    notifyListeners();
+  }
+
+  /// Moves tiles to [pageId], letting the target page pack them.
+  Future<void> moveTilesToPage(Iterable<String> ids, String pageId) async {
+    final set = ids.toSet();
+    if (set.isEmpty) return;
+    if (!tilePages.any((p) => p.id == pageId)) return;
+    var changed = false;
+    for (final t in tiles) {
+      if (!set.contains(t.id)) continue;
+      t.pageId = pageId;
+      // Auto placement: the target page packs them without overlapping.
+      t.col = -1;
+      t.row = -1;
+      changed = true;
+    }
+    if (!changed) return;
+    await _persistTiles();
+    notifyListeners();
+  }
+
+  /// Duplicates a page and its tiles onto a new page, keeping every tile's size
+  /// and position. Returns the new page (null when [pageId] does not exist).
+  Future<TilePage?> copyTilePage(String pageId) async {
+    final source = tilePages.where((p) => p.id == pageId).firstOrNull;
+    if (source == null) return null;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final copy = TilePage(
+      id: _newId(),
+      name: '${source.name} ${AppStrings.current.t('副本')}',
+      createdAt: now,
+    );
+    tilePages.add(copy);
+    // Snapshot the source list: the loop adds to [tiles] as it goes.
+    final sourceTiles = tiles
+        .where((t) => _normalizedPageId(t) == pageId)
+        .toList();
+    for (final t in sourceTiles) {
+      tiles.add(
+        Tile(
+          id: _newId(),
+          packageName: t.packageName,
+          pageId: copy.id,
+          kind: t.kind,
+          options: Map<String, dynamic>.from(t.options),
+          col: t.col,
+          row: t.row,
+          w: t.w,
+          h: t.h,
+          showLabel: t.showLabel,
+          innerPadding: t.innerPadding,
+          border: t.border,
+        ),
+      );
+    }
+    await _persistTilePages();
+    await _persistTiles();
+    notifyListeners();
+    return copy;
+  }
+
+  /// Drops [draggedId] onto [targetId]: both become one folder.
+  ///
+  /// An existing folder simply gains the app; two app tiles are replaced by a
+  /// new folder at the target's cell. A folder built from a category cannot be
+  /// extended by hand, so that case returns null and the caller just moves the
+  /// tile.
+  Future<String?> combineIntoFolder(String draggedId, String targetId) async {
+    if (draggedId == targetId) return null;
+    final dragged = tileById(draggedId);
+    final target = tileById(targetId);
+    if (dragged == null || target == null) return null;
+    final draggedPackage = dragged.packageName;
+    if (draggedPackage.isEmpty) return null;
+
+    if (target.kind == TileKind.folder) {
+      if (target.optionString('category').isNotEmpty) return null;
+      final apps = target.optionList('apps');
+      if (!apps.contains(draggedPackage)) apps.add(draggedPackage);
+      final options = <String, dynamic>{
+        ...target.options,
+        'apps': apps,
+      }..remove('category');
+      target
+        ..options = options
+        ..w = target.w < 2 ? 2 : target.w
+        ..h = target.h < 2 ? 2 : target.h;
+      tiles.removeWhere((t) => t.id == draggedId);
+      _syncPinned(draggedPackage);
+      await _persistTiles();
+      await _persistMeta();
+      notifyListeners();
+      return target.id;
+    }
+
+    if (target.kind != TileKind.app || target.packageName.isEmpty) return null;
+    final folder = Tile(
+      id: _newId(),
+      packageName: '',
+      pageId: target.pageId,
+      kind: TileKind.folder,
+      col: target.col,
+      row: target.row < 0 ? dragged.row : target.row,
+      w: target.w < 2 ? 2 : target.w,
+      h: target.h < 2 ? 2 : target.h,
+      options: <String, dynamic>{
+        'apps': <String>[target.packageName, draggedPackage],
+      },
+    );
+    tiles.removeWhere((t) => t.id == targetId || t.id == draggedId);
+    tiles.add(folder);
+    _syncPinned(target.packageName);
+    _syncPinned(draggedPackage);
+    await _persistTiles();
+    await _persistMeta();
+    notifyListeners();
+    return folder.id;
+  }
+
   Future<void> removeTilesFor(String packageName) async {
     final before = tiles.length;
     tiles.removeWhere((t) => t.packageName == packageName);
@@ -2488,6 +2640,279 @@ class AppState extends ChangeNotifier {
     return colors;
   }
 
+  /// Text scale for the whole app (1.0 = the system's own scale).
+  double get fontScale =>
+      ((settings['font_scale'] as num?)?.toDouble() ?? 1.0).clamp(0.8, 1.6);
+
+  Future<void> setFontScale(double value) async {
+    settings['font_scale'] = value.clamp(0.8, 1.6);
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Denser rows in lists (compact visual density).
+  bool get compactDensity => settings['compact_density'] as bool? ?? false;
+
+  Future<void> setCompactDensity(bool value) async {
+    settings['compact_density'] = value;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Locks the tile board: edit mode cannot be entered, so nothing moves by
+  /// accident. Browsing, launching and the tile menu still work.
+  bool get layoutLocked => settings['layout_lock'] as bool? ?? false;
+
+  Future<void> setLayoutLocked(bool value) async {
+    settings['layout_lock'] = value;
+    if (value) tileEditMode = false;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Automatic snapshot interval in days; 0 (the default) keeps it off.
+  int get autoSnapshotDays =>
+      (settings['auto_snapshot_days'] as num?)?.toInt() ?? 0;
+
+  Future<void> setAutoSnapshotDays(int value) async {
+    settings['auto_snapshot_days'] = value.clamp(0, 90);
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Installed icon pack (a package name); '' uses the launcher icons.
+  String get iconPack => settings['icon_pack'] as String? ?? '';
+
+  Future<void> setIconPack(String value) async {
+    if (iconPack == value) return;
+    settings['icon_pack'] = value;
+    await _persistSettings();
+    // Every cached picture now means something else.
+    IconCache.instance.setIconPack(value);
+    await _persistIcons();
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------- custom icons
+
+  static const String _kCustomIcons = 'custom_icons';
+
+  Future<void> _loadCustomIcons() async {
+    final icons = CustomIcons.fromBase64(await storage.readJson(_kCustomIcons));
+    CustomIcons.instance.replaceAll(icons);
+    // A metadata marker without a stored icon would leave the app claiming an
+    // icon it cannot draw.
+    var changed = false;
+    for (final m in meta.values) {
+      if (m.customIcon.isEmpty || icons.containsKey(m.packageName)) continue;
+      m.customIcon = '';
+      changed = true;
+    }
+    if (changed) await _persistMeta();
+  }
+
+  Future<void> _persistCustomIcons() async {
+    await storage.writeJson(_kCustomIcons, CustomIcons.instance.toBase64());
+  }
+
+  /// Stores a user-chosen icon for [packageName] from raw image bytes. Returns
+  /// false when the image could not be decoded.
+  Future<bool> setCustomIcon(String packageName, Uint8List bytes) async {
+    final png = await CustomIcons.shrink(bytes);
+    if (png == null) return false;
+    CustomIcons.instance.put(packageName, png);
+    metaFor(packageName).customIcon = 'custom';
+    await _persistCustomIcons();
+    await _persistMeta();
+    notifyListeners();
+    return true;
+  }
+
+  Future<void> clearCustomIcon(String packageName) async {
+    if (!CustomIcons.instance.has(packageName)) return;
+    CustomIcons.instance.remove(packageName);
+    metaFor(packageName).customIcon = '';
+    await _persistCustomIcons();
+    await _persistMeta();
+    notifyListeners();
+  }
+
+  // ---------------------------------------------------------------- update alerts
+
+  static const String _kFactsBaseline = 'app_facts_baseline';
+
+  /// Sensitive permissions an app started asking for after an update (and any
+  /// changed signing certificate), newest first. Recorded by
+  /// [_checkUpdateAlerts] and kept until the user clears them.
+  List<Map<String, dynamic>> get permissionAlerts =>
+      (settings['permission_alerts'] as List?)
+          ?.whereType<Map>()
+          .map((e) => e.cast<String, dynamic>())
+          .toList(growable: false) ??
+      const <Map<String, dynamic>>[];
+
+  bool get hasPermissionAlerts => permissionAlerts.isNotEmpty;
+
+  Future<void> dismissPermissionAlerts() async {
+    settings['permission_alerts'] = <dynamic>[];
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  Future<void> dismissPermissionAlert(String packageName) async {
+    final alerts = permissionAlerts
+        .where((e) => e['pkg'] != packageName)
+        .map((e) => e.cast<String, dynamic>())
+        .toList();
+    settings['permission_alerts'] = alerts;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Compares what the apps ask for now with the first time they were seen, and
+  /// records an alert when an update added a sensitive permission or replaced
+  /// the certificate. Runs after a scan; the first scan only records a baseline.
+  Future<void> _checkUpdateAlerts() async {
+    final raw = await storage.readJson(_kFactsBaseline);
+    if (raw is! Map) {
+      await _saveFactsBaseline();
+      return;
+    }
+    final baseline = <String, Map<String, dynamic>>{
+      for (final e in raw.entries)
+        if (e.value is Map) '${e.key}': (e.value as Map).cast<String, dynamic>(),
+    };
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final alerts = <Map<String, dynamic>>[
+      ...permissionAlerts,
+    ];
+    var added = 0;
+    for (final a in apps) {
+      final facts = appFacts[a.packageName];
+      final before = baseline[a.packageName];
+      if (facts == null || before == null) continue;
+      final oldCode = (before['v'] as num?)?.toInt() ?? 0;
+      // Only a real update (versionCode moved) is interesting.
+      if (oldCode == 0 || oldCode == a.versionCode) continue;
+      final oldPerms =
+          (before['p'] as List?)?.map((e) => '$e').toSet() ?? <String>{};
+      final fresh = facts.permissions.toSet().difference(oldPerms);
+      final sensitive = fresh.where(isSensitivePermission).toList()..sort();
+      final oldSignature = before['s'] as String? ?? '';
+      final signatureChanged = oldSignature.isNotEmpty &&
+          facts.signature.isNotEmpty &&
+          oldSignature != facts.signature;
+      if (sensitive.isEmpty && !signatureChanged) continue;
+      alerts.removeWhere((e) => e['pkg'] == a.packageName);
+      alerts.insert(0, <String, dynamic>{
+        'pkg': a.packageName,
+        'name': displayNameFor(a.packageName),
+        'at': now,
+        'from': oldCode,
+        'to': a.versionCode,
+        if (sensitive.isNotEmpty) 'added': sensitive,
+        if (signatureChanged) 'signature': true,
+      });
+      added++;
+      AppLog.instance.log(
+        LogModule.apps,
+        '更新提醒 · ${displayNameFor(a.packageName)} · '
+            '新增权限=${sensitive.join(',')}'
+            '${signatureChanged ? ' · 签名变化' : ''}',
+      );
+    }
+    if (alerts.length > 50) alerts.removeRange(50, alerts.length);
+    settings['permission_alerts'] = alerts;
+    if (added > 0) {
+      await _persistSettings();
+      AppLog.instance.log(LogModule.apps, '更新提醒 · 新增 $added 条');
+      notifyListeners();
+    }
+    await _saveFactsBaseline();
+  }
+
+  Future<void> _saveFactsBaseline() async {
+    final out = <String, dynamic>{};
+    for (final a in apps) {
+      final facts = appFacts[a.packageName];
+      if (facts == null) continue;
+      out[a.packageName] = <String, dynamic>{
+        'v': a.versionCode,
+        'p': facts.permissions,
+        's': facts.signature,
+      };
+    }
+    if (out.isEmpty) return;
+    await storage.writeJson(_kFactsBaseline, out);
+  }
+
+  /// Everything that needs the (lazily read) per-app facts, run after a scan:
+  /// the update alerts and the automatic snapshot.
+  Future<void> _afterScanMaintenance() async {
+    if (apps.isEmpty) return;
+    await ensureAppFacts();
+    if (appFacts.isEmpty) return;
+    await _checkUpdateAlerts();
+    await _maybeAutoSnapshot();
+  }
+
+  /// Takes a snapshot when the interval has passed and something actually
+  /// changed. Default off; never runs when the user has not enabled it.
+  Future<void> _maybeAutoSnapshot() async {
+    final days = autoSnapshotDays;
+    if (days <= 0) return;
+    final latest = latestSnapshot;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final due =
+        latest == null || now - latest.createdAt >= days * 86400000;
+    if (!due) return;
+    if (latest != null) {
+      final diff = SnapshotDiff.between(latest, currentDeviceSnapshot());
+      if (diff.changedCount == 0) {
+        AppLog.instance.log(LogModule.apps, '自动快照 · 没有变化，跳过');
+        return;
+      }
+    }
+    final snapshot = await createSnapshot(
+      '${AppStrings.current.t('自动快照')} · '
+      '${Fmt.shortDate(now)}',
+      note: AppStrings.current.t('按设置的天数自动创建'),
+    );
+    AppLog.instance.log(
+      LogModule.apps,
+      '自动快照 · ${snapshot.name} · ${snapshot.installedCount} 个应用',
+    );
+  }
+
+  /// When the data package was last written to WebDAV (null = never).
+  DateTime? get lastWebdavBackupAt {
+    final ms = (settings['webdav_backup_at'] as num?)?.toInt() ?? 0;
+    return ms == 0 ? null : DateTime.fromMillisecondsSinceEpoch(ms);
+  }
+
+  String get lastWebdavBackupPath =>
+      settings['webdav_backup_path'] as String? ?? '';
+
+  Future<void> noteWebdavBackup(String path, DateTime at) async {
+    settings['webdav_backup_path'] = path;
+    settings['webdav_backup_at'] = at.millisecondsSinceEpoch;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Installed apps per install source, biggest first. The key is the installer
+  /// package; '' means the system recorded none (side-loaded or preinstalled).
+  List<(String, int)> get installSourceCounts {
+    final counts = <String, int>{};
+    for (final a in apps) {
+      final installer = appFacts[a.packageName]?.installer ?? a.installer;
+      counts[installer] = (counts[installer] ?? 0) + 1;
+    }
+    final entries = counts.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    return [for (final e in entries) (e.key, e.value)];
+  }
+
   /// UI language preference. Defaults to [AppLanguage.system].
   AppLanguage get language {
     final raw = settings['language'] as String?;
@@ -2645,6 +3070,7 @@ class AppState extends ChangeNotifier {
         'settings': settings,
         'launch_log': launchLog.map((e) => e.toMap()).toList(),
         'icons': IconCache.instance.toJson(),
+        'custom_icons': CustomIcons.instance.toBase64(),
       },
     };
   }
@@ -2726,6 +3152,7 @@ class AppState extends ChangeNotifier {
     settings = newSettings;
     launchLog = newLaunchLog;
     IconCache.instance.replaceAll(newIcons);
+    CustomIcons.instance.replaceAll(CustomIcons.fromBase64(d['custom_icons']));
     _syncIconActivities();
     _pruneLaunchLog();
     // Don't carry the exporter's position memory into this device.
@@ -2739,6 +3166,205 @@ class AppState extends ChangeNotifier {
     await _persistAll();
     await applyStatusBarVisibility(showSystemStatusBar);
     notifyListeners();
+  }
+
+  /// What a data package holds and how much of it this device already has, by
+  /// id. Feeds the import preview so merging is a knowing choice.
+  Map<String, (int, int)> mergePreview(Map<String, dynamic> pkg) {
+    final data = pkg['data'];
+    if (data is! Map) return const <String, (int, int)>{};
+    final d = data.cast<String, dynamic>();
+    final s = AppStrings.current;
+    final incomingMeta = _parseMeta(d['meta']);
+    final incomingCategories = _parseCategories(d['categories']);
+    final incomingSnapshots = _parseSnapshots(d['snapshots']);
+    final incomingLists = _parseBackupLists(d['backup_lists']);
+    final incomingTiles = _parseTiles(d['tiles']);
+    final categoryIds = categories.map((c) => c.id).toSet();
+    final snapshotIds = snapshots.map((x) => x.id).toSet();
+    final listIds = backupLists.map((x) => x.id).toSet();
+    final tileIds = tiles.map((x) => x.id).toSet();
+    int already<T>(Iterable<T> items, bool Function(T) has) =>
+        items.where(has).length;
+    return <String, (int, int)>{
+      s.t('应用'): (
+        incomingMeta.length,
+        already(incomingMeta.values, (m) => meta.containsKey(m.packageName)),
+      ),
+      s.t('分组'): (
+        incomingCategories.length,
+        already(incomingCategories, (c) => categoryIds.contains(c.id)),
+      ),
+      s.t('快照'): (
+        incomingSnapshots.length,
+        already(incomingSnapshots, (x) => snapshotIds.contains(x.id)),
+      ),
+      s.t('备份列表'): (
+        incomingLists.length,
+        already(incomingLists, (x) => listIds.contains(x.id)),
+      ),
+      s.t('磁贴'): (
+        incomingTiles.length,
+        already(incomingTiles, (x) => tileIds.contains(x.id)),
+      ),
+    };
+  }
+
+  /// Merge a data package into the current data instead of replacing it.
+  ///
+  /// Existing annotations win; whatever this device lacks (apps, categories,
+  /// snapshots, backup lists, tiles, settings keys, icons) is added. Returns
+  /// how many of each were added or filled in, keyed by localised labels.
+  Future<Map<String, int>> mergePackage(Map<String, dynamic> pkg) async {
+    if (pkg['app'] != 'hamstapp') {
+      throw FormatException(AppStrings.current.t('不是囤囤的数据包'));
+    }
+    final data = pkg['data'];
+    if (data is! Map) {
+      throw FormatException(AppStrings.current.t('数据包缺少 data 内容'));
+    }
+    final d = data.cast<String, dynamic>();
+    final s = AppStrings.current;
+    var appsTouched = 0;
+    var categoriesAdded = 0;
+    var snapshotsAdded = 0;
+    var listsAdded = 0;
+    var tilesAdded = 0;
+
+    // Annotations: add unknown apps, fill the empty fields of known ones.
+    for (final e in _parseMeta(d['meta']).entries) {
+      final incoming = e.value;
+      final existing = meta[e.key];
+      if (existing == null) {
+        meta[e.key] = incoming;
+        appsTouched++;
+        continue;
+      }
+      var filled = false;
+      if (existing.reason.isEmpty && incoming.reason.isNotEmpty) {
+        existing.reason = incoming.reason;
+        filled = true;
+      }
+      if (existing.note.isEmpty && incoming.note.isNotEmpty) {
+        existing.note = incoming.note;
+        filled = true;
+      }
+      if (existing.categoryIds.isEmpty && incoming.categoryIds.isNotEmpty) {
+        existing.categoryIds = List<String>.from(incoming.categoryIds);
+        filled = true;
+      }
+      if (!existing.favorite && incoming.favorite) {
+        existing.favorite = true;
+        filled = true;
+      }
+      if (!existing.hidden && incoming.hidden) {
+        existing.hidden = true;
+        filled = true;
+      }
+      if (existing.customIcon.isEmpty && incoming.customIcon.isNotEmpty) {
+        existing.customIcon = incoming.customIcon;
+        filled = true;
+      }
+      if (existing.launchActivity.isEmpty &&
+          incoming.launchActivity.isNotEmpty) {
+        existing.launchActivity = incoming.launchActivity;
+        existing.launchEntryLabel = incoming.launchEntryLabel;
+        filled = true;
+      }
+      if (filled) appsTouched++;
+    }
+
+    final categoryIds = categories.map((c) => c.id).toSet();
+    for (final c in _parseCategories(d['categories'])) {
+      if (!categoryIds.add(c.id)) continue;
+      categories.add(c);
+      categoriesAdded++;
+    }
+
+    final snapshotIds = snapshots.map((x) => x.id).toSet();
+    for (final snap in _parseSnapshots(d['snapshots'])) {
+      if (!snapshotIds.add(snap.id)) continue;
+      snapshots.add(snap);
+      snapshotsAdded++;
+    }
+
+    final listIds = backupLists.map((x) => x.id).toSet();
+    for (final list in _parseBackupLists(d['backup_lists'])) {
+      if (!listIds.add(list.id)) continue;
+      backupLists.add(list);
+      listsAdded++;
+    }
+
+    // Pages first, so tiles from the package land on a page that exists.
+    var pages = _parseTilePages(d['tile_pages']);
+    if (tilePages.isEmpty && pages.isNotEmpty) {
+      tilePages
+        ..clear()
+        ..addAll(pages);
+    }
+    final pageIds = tilePages.map((p) => p.id).toSet();
+    for (final page in pages) {
+      if (!pageIds.add(page.id)) continue;
+      tilePages.add(page);
+    }
+    if (tilePages.isEmpty) {
+      tilePages.add(
+        TilePage(
+          id: _newId(),
+          name: s.t('页面 1'),
+          createdAt: DateTime.now().millisecondsSinceEpoch,
+        ),
+      );
+    }
+    final validPageIds = tilePages.map((p) => p.id).toSet();
+    final tileIds = tiles.map((x) => x.id).toSet();
+    for (final tile in _parseTiles(d['tiles'])) {
+      if (!tileIds.add(tile.id)) continue;
+      if (!validPageIds.contains(tile.pageId)) {
+        tile.pageId = tilePages.first.id;
+      }
+      tiles.add(tile);
+      tilesAdded++;
+    }
+
+    // Settings only fill the gaps: the device's own choices win.
+    final incomingSettings = _parseSettings(d['settings']);
+    for (final e in incomingSettings.entries) {
+      settings.putIfAbsent(e.key, () => e.value);
+    }
+
+    // Launch history: add what is not already there.
+    final seen = <String>{
+      for (final e in launchLog) '${e.packageName}|${e.at}',
+    };
+    for (final e in _parseLaunchLog(d['launch_log'])) {
+      if (seen.add('${e.packageName}|${e.at}')) launchLog.add(e);
+    }
+
+    final incomingIcons = IconCache.decode(d['icons']);
+    for (final e in incomingIcons.entries) {
+      if (!IconCache.instance.containsKey(e.key)) {
+        IconCache.instance.put(e.key, e.value);
+      }
+    }
+    final incomingCustom = CustomIcons.fromBase64(d['custom_icons']);
+    for (final e in incomingCustom.entries) {
+      if (!CustomIcons.instance.has(e.key)) {
+        CustomIcons.instance.put(e.key, e.value);
+      }
+    }
+
+    _syncIconActivities();
+    _pruneLaunchLog();
+    await _persistAll();
+    notifyListeners();
+    return <String, int>{
+      s.t('应用'): appsTouched,
+      s.t('分组'): categoriesAdded,
+      s.t('快照'): snapshotsAdded,
+      s.t('备份列表'): listsAdded,
+      s.t('磁贴'): tilesAdded,
+    };
   }
 
   /// Wipe all local data and start fresh.
@@ -2760,6 +3386,7 @@ class AppState extends ChangeNotifier {
     settings = <String, dynamic>{};
     launchLog = <LaunchEvent>[];
     IconCache.instance.replaceAll(<String, Uint8List>{});
+    CustomIcons.instance.replaceAll(<String, Uint8List>{});
     pendingUninstalls = <AppMeta>[];
     currentTilePageIndex = 0;
     tileEditMode = false;
@@ -2773,6 +3400,7 @@ class AppState extends ChangeNotifier {
 
   Future<void> _persistAll() async {
     await _persistMeta();
+    await _persistCustomIcons();
     await _persistCategories();
     await _persistSnapshots();
     await _persistBackupLists();
@@ -2870,6 +3498,14 @@ class AppState extends ChangeNotifier {
     final q = parsed.text.trim();
     final scores = <String, int>{};
     final list = apps.where((app) {
+      final meta = metaFor(app.packageName);
+      // Hidden apps only show under the 隐藏 filter; every other view leaves
+      // them out.
+      if (filter == AppFilter.hidden) {
+        if (!meta.hidden) return false;
+      } else if (meta.hidden) {
+        return false;
+      }
       switch (scope) {
         case AppScope.user:
           if (app.isSystem) return false;
@@ -2899,6 +3535,9 @@ class AppState extends ChangeNotifier {
         case AppFilter.uninstalled:
           // Handled separately via [uninstalledApps].
           return false;
+        case AppFilter.hidden:
+          // Narrowed above, before the scope check.
+          break;
         case AppFilter.all:
           break;
       }
@@ -2908,7 +3547,6 @@ class AppState extends ChangeNotifier {
         }
       }
       if (parsed.hasFilters) {
-        final meta = metaFor(app.packageName);
         final installer = appFacts[app.packageName]?.installer ?? app.installer;
         final installerLabel = installer.isEmpty
             ? ''
@@ -2994,7 +3632,10 @@ class AppState extends ChangeNotifier {
       m.reason.isEmpty &&
       m.note.isEmpty &&
       !m.favorite &&
-      !m.pinned;
+      !m.pinned &&
+      // Hiding an app or giving it its own icon is a decision, not neglect.
+      !m.hidden &&
+      m.customIcon.isEmpty;
 
   /// Apps that are not sorted out yet.
   List<AppInfo> get unorganizedApps =>
