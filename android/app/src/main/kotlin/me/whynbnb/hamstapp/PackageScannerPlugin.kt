@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.app.AlarmManager
 import android.app.AppOpsManager
 import android.app.WallpaperManager
+import android.appwidget.AppWidgetManager
 import android.app.usage.NetworkStats
 import android.app.usage.NetworkStatsManager
 import android.app.usage.StorageStats
@@ -596,6 +597,71 @@ class PackageScannerPlugin(
             }
             "requestNotificationRebind" -> {
                 mainHandler.post { result.success(requestNotificationRebind()) }
+            }
+            // ---- desktop widget ------------------------------------------
+            // Dart pushes one document with the suggestions for every hour of
+            // the day plus the wording; the widget picks the current hour
+            // itself, so it never has to run the recommender or wake Flutter.
+            "updateHomeWidget" -> {
+                val json = call.argument<String>("json")
+                executor.execute {
+                    val ok = if (json.isNullOrBlank()) {
+                        false
+                    } else {
+                        runCatching {
+                            WidgetStore.writeData(context, json) &&
+                                runCatching { WidgetRenderer.updateAll(context) }
+                                    .isSuccess
+                        }.getOrDefault(false)
+                    }
+                    mainHandler.post { result.success(ok) }
+                }
+            }
+            // Launches made from the widget since the last time 囤囤 read the
+            // queue. Dart merges them into the statistics and clears them.
+            "consumeWidgetLaunches" -> executor.execute {
+                val launches = runCatching { WidgetStore.consumeLaunches(context) }
+                    .getOrDefault(emptyList<Map<String, Any?>>())
+                mainHandler.post { result.success(launches) }
+            }
+            "widgetStatus" -> {
+                val manager = AppWidgetManager.getInstance(context)
+                val ids = runCatching {
+                    manager?.getAppWidgetIds(
+                        ComponentName(context, HamstappWidgetProvider::class.java),
+                    )
+                }.getOrNull() ?: IntArray(0)
+                val pinSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                result.success(
+                    mapOf(
+                        "count" to ids.size,
+                        "supported" to pinSupported,
+                        "canPin" to (
+                            pinSupported &&
+                                manager?.isRequestPinAppWidgetSupported == true
+                            ),
+                    ),
+                )
+            }
+            // Opens the launcher's own "pin this widget" dialog. Only the
+            // launcher decides whether it supports it; the settings screen
+            // explains the manual route when this returns false.
+            "requestPinWidget" -> {
+                if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                    result.success(false)
+                    return
+                }
+                val manager = AppWidgetManager.getInstance(context)
+                val component = ComponentName(
+                    context,
+                    HamstappWidgetProvider::class.java,
+                )
+                val ok = manager != null &&
+                    manager.isRequestPinAppWidgetSupported &&
+                    runCatching {
+                        manager.requestPinAppWidget(component, null, null)
+                    }.getOrDefault(false)
+                result.success(ok)
             }
             else -> result.notImplemented()
         }

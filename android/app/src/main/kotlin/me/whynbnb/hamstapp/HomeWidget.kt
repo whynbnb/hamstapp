@@ -1,0 +1,644 @@
+package me.whynbnb.hamstapp
+
+import android.app.Activity
+import android.app.PendingIntent
+import android.appwidget.AppWidgetManager
+import android.appwidget.AppWidgetProvider
+import android.content.ComponentName
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.net.Uri
+import android.os.Bundle
+import android.util.Base64
+import android.view.View
+import android.widget.RemoteViews
+import org.json.JSONArray
+import org.json.JSONObject
+import java.util.Calendar
+
+/**
+ * State the desktop widget needs while Flutter is not running.
+ *
+ * Two things live here:
+ *
+ * * the document Dart pushes after a scan / launch / setting change — the
+ *   suggestions for every hour of the day, plus the labels and the wording, so
+ *   the widget never has to compute a recommendation (or start the engine);
+ * * a queue of launches made from the widget. Dart drains it the next time 囤囤
+ *   comes to the foreground, which is what makes a widget tap count in the
+ *   launch statistics and in future recommendations.
+ */
+object WidgetStore {
+    private const val PREFS = "hamstapp_widget"
+    private const val KEY_DATA = "data"
+    private const val KEY_PENDING = "pending_launches"
+
+    /** Enough for a busy month; the queue only drains when 囤囤 is opened. */
+    private const val MAX_PENDING = 500
+
+    private val lock = Any()
+
+    fun writeData(context: Context, json: String): Boolean = runCatching {
+        JSONObject(json) // reject malformed data instead of storing it
+        prefs(context).edit().putString(KEY_DATA, json).apply()
+        true
+    }.getOrDefault(false)
+
+    fun readData(context: Context): JSONObject? = runCatching {
+        val raw = prefs(context).getString(KEY_DATA, null)
+        if (raw.isNullOrEmpty()) null else JSONObject(raw)
+    }.getOrNull()
+
+    /**
+     * Remembers one launch. `commit` (not `apply`) on purpose: the launcher may
+     * kill 囤囤's process while the tapped app is in front, and losing the tap
+     * would silently break the count.
+     */
+    fun recordLaunch(context: Context, packageName: String, at: Long) {
+        if (packageName.isEmpty()) return
+        synchronized(lock) {
+            val prefs = prefs(context)
+            val queue = runCatching {
+                JSONArray(prefs.getString(KEY_PENDING, null) ?: "[]")
+            }.getOrElse { JSONArray() }
+            val first = (queue.length() - MAX_PENDING + 1).coerceAtLeast(0)
+            val trimmed = JSONArray()
+            for (i in first until queue.length()) trimmed.put(queue.get(i))
+            trimmed.put(JSONObject().put("p", packageName).put("t", at))
+            prefs.edit().putString(KEY_PENDING, trimmed.toString()).commit()
+        }
+    }
+
+    /** Pending launches, oldest first. Cleared atomically. */
+    fun consumeLaunches(context: Context): List<Map<String, Any?>> {
+        val out = ArrayList<Map<String, Any?>>()
+        synchronized(lock) {
+            val prefs = prefs(context)
+            val raw = prefs.getString(KEY_PENDING, null)
+            if (raw.isNullOrBlank()) return out
+            prefs.edit().remove(KEY_PENDING).commit()
+            val queue = runCatching { JSONArray(raw) }.getOrNull() ?: return out
+            for (i in 0 until queue.length()) {
+                val o = queue.optJSONObject(i) ?: continue
+                val pkg = o.optString("p")
+                if (pkg.isEmpty()) continue
+                out.add(mapOf("p" to pkg, "t" to o.optLong("t", 0L)))
+            }
+        }
+        return out
+    }
+
+    private fun prefs(context: Context) =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+}
+
+/**
+ * Draws the widget with RemoteViews.
+ *
+ * The layout is a fixed 4x2 grid; cells the current size (or the current
+ * suggestion list) does not fill are hidden, so one layout serves everything
+ * from a 4x1 strip to a 4x2 card. Icons are loaded here rather than shipped
+ * from Dart: PackageManager already has them and the widget can be refreshed
+ * without waking the Flutter engine.
+ */
+object WidgetRenderer {
+    private const val CELLS = 8
+    private const val COLUMNS = 4
+
+    private val cellIds = intArrayOf(
+        R.id.widget_cell_0, R.id.widget_cell_1, R.id.widget_cell_2,
+        R.id.widget_cell_3, R.id.widget_cell_4, R.id.widget_cell_5,
+        R.id.widget_cell_6, R.id.widget_cell_7,
+    )
+    private val iconIds = intArrayOf(
+        R.id.widget_icon_0, R.id.widget_icon_1, R.id.widget_icon_2,
+        R.id.widget_icon_3, R.id.widget_icon_4, R.id.widget_icon_5,
+        R.id.widget_icon_6, R.id.widget_icon_7,
+    )
+    private val labelIds = intArrayOf(
+        R.id.widget_label_0, R.id.widget_label_1, R.id.widget_label_2,
+        R.id.widget_label_3, R.id.widget_label_4, R.id.widget_label_5,
+        R.id.widget_label_6, R.id.widget_label_7,
+    )
+    private val rowIds = intArrayOf(R.id.widget_row_0, R.id.widget_row_1)
+
+    private class Entry(
+        val packageName: String,
+        val label: String,
+        val icon: Bitmap,
+        /** Launcher activity the user pinned, or '' for the app's default. */
+        val activity: String,
+        /** Web-app config as JSON, or '' for an Android app. */
+        val web: String,
+    )
+
+    fun updateAll(context: Context) {
+        val manager = AppWidgetManager.getInstance(context) ?: return
+        val ids = runCatching {
+            manager.getAppWidgetIds(
+                ComponentName(context, HamstappWidgetProvider::class.java),
+            )
+        }.getOrDefault(IntArray(0))
+        for (id in ids) update(context, manager, id)
+    }
+
+    fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
+        runCatching {
+            val options = manager.getAppWidgetOptions(widgetId)
+            manager.updateAppWidget(widgetId, build(context, widgetId, options))
+        }
+    }
+
+    private fun build(context: Context, widgetId: Int, options: Bundle): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.widget_hamstapp)
+        // Hosts report the portrait size as MIN_* and the landscape size as
+        // MAX_*; the larger one is the safe estimate for "how much room is
+        // there", and a launcher that only fills one of them still works.
+        val widthDp = maxOf(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH),
+        ).takeIf { it > 0 } ?: 250
+        val heightDp = maxOf(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT),
+        ).takeIf { it > 0 } ?: 150
+        val columns = ((widthDp - 20) / 52).coerceIn(2, COLUMNS)
+
+        views.setOnClickPendingIntent(R.id.widget_header, openApp(context, widgetId))
+
+        val data = WidgetStore.readData(context)
+        val title = slotFor(data)?.optString("title").orEmpty()
+            .ifEmpty { data?.optString("title").orEmpty() }
+            .ifEmpty { context.getString(R.string.widget_title) }
+        views.setTextViewText(R.id.widget_title, title)
+        val showLabels = data?.optBoolean("showLabels", true) ?: true
+
+        val entries = loadEntries(context, data, columns * 2)
+
+        if (entries.isEmpty()) {
+            views.setViewVisibility(R.id.widget_rows, View.GONE)
+            views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
+            views.setTextViewText(
+                R.id.widget_empty,
+                data?.optString("empty").orEmpty()
+                    .ifEmpty { context.getString(R.string.widget_empty_default) },
+            )
+            views.setOnClickPendingIntent(R.id.widget_empty, openApp(context, widgetId))
+            return views
+        }
+
+        views.setViewVisibility(R.id.widget_rows, View.VISIBLE)
+        views.setViewVisibility(R.id.widget_empty, View.GONE)
+
+        // Same layout rule as the 推荐 section in 最近: fewer suggestions than
+        // a full row use one column each (balanced across the width), a full
+        // row keeps four columns, and never more than two rows. A really short
+        // widget (4x1) only has room for the first row.
+        val cols = if (entries.size < columns) entries.size else columns
+        val rows = if (entries.size > cols && heightDp >= 70) 2 else 1
+
+        for (r in 0 until 2) {
+            val used = r < rows && r * cols < entries.size
+            views.setViewVisibility(rowIds[r], if (used) View.VISIBLE else View.GONE)
+        }
+
+        for (i in 0 until CELLS) {
+            val row = i / COLUMNS
+            val col = i % COLUMNS
+            // The row holds `cols` cells, not necessarily four, so the two
+            // axes have different strides.
+            val slot = row * cols + col
+            val inRow = row < rows && col < cols
+            val hasApp = inRow && slot < entries.size
+            views.setViewVisibility(
+                cellIds[i],
+                when {
+                    hasApp -> View.VISIBLE
+                    // Keep the column width for the tail of a full row, exactly
+                    // like the app's grid does. Cells outside the row collapse
+                    // so a short row spreads evenly.
+                    inRow -> View.INVISIBLE
+                    else -> View.GONE
+                },
+            )
+            if (!hasApp) {
+                // A hidden cell must not keep a PendingIntent from the previous
+                // update: a later resize could reveal a stale app. Point it at
+                // the app instead of clearing it, which older RemoteViews
+                // implementations do not support for click actions.
+                views.setOnClickPendingIntent(
+                    cellIds[i],
+                    openApp(context, widgetId),
+                )
+                continue
+            }
+            val entry = entries[slot]
+            views.setImageViewBitmap(iconIds[i], entry.icon)
+            views.setTextViewText(labelIds[i], entry.label)
+            views.setViewVisibility(
+                labelIds[i],
+                if (showLabels) View.VISIBLE else View.GONE,
+            )
+            views.setContentDescription(cellIds[i], entry.label)
+            views.setOnClickPendingIntent(
+                cellIds[i],
+                tap(context, widgetId, i, entry),
+            )
+        }
+        return views
+    }
+
+    /** The slot for the current hour, falling back to the first one. */
+    private fun slotFor(data: JSONObject?): JSONObject? {
+        val slots = data?.optJSONArray("slots") ?: return null
+        if (slots.length() == 0) return null
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
+        for (i in 0 until slots.length()) {
+            val slot = slots.optJSONObject(i) ?: continue
+            if (slot.optInt("h", -1) == hour) return slot
+        }
+        return slots.optJSONObject(0)
+    }
+
+    private fun loadEntries(
+        context: Context,
+        data: JSONObject?,
+        capacity: Int,
+    ): List<Entry> {
+        val apps = slotFor(data)?.optJSONArray("apps")
+            ?: data?.optJSONArray("fallback")
+            ?: return emptyList()
+        val pm = context.packageManager
+        val size = iconSizePx(context)
+        val out = ArrayList<Entry>(capacity)
+        for (i in 0 until apps.length()) {
+            if (out.size >= capacity) break
+            val item = apps.optJSONObject(i) ?: continue
+            val pkg = item.optString("p")
+            if (pkg.isEmpty()) continue
+            val label = item.optString("n").ifEmpty { appLabel(pm, pkg) }
+
+            // A hand-added web app: PackageManager knows nothing about it, so
+            // everything (icon, URL, window settings) comes from the payload.
+            val web = item.optJSONObject("w")
+            if (web != null) {
+                if (web.optString("url").isEmpty()) continue
+                val icon = bitmapFromData(context, data, pkg)
+                    ?: letterIcon(label, size)
+                val config = JSONObject(web.toString())
+                data?.optJSONObject("icons")?.optString(pkg)
+                    ?.takeIf { it.isNotEmpty() }
+                    ?.let { config.put("icon", it) }
+                out.add(Entry(pkg, label.ifEmpty { pkg }, icon, "", config.toString()))
+                continue
+            }
+
+            val activity = item.optString("a")
+            if (!isLaunchable(pm, pkg, activity)) continue
+            // An icon sent by Dart (a custom icon) wins over the system one,
+            // matching what the tile board shows.
+            val icon = bitmapFromData(context, data, pkg)
+                ?: systemIcon(context, pm, pkg, activity, size)
+                ?: continue
+            out.add(Entry(pkg, label.ifEmpty { pkg }, icon, activity, ""))
+        }
+        return out
+    }
+
+    private fun iconSizePx(context: Context): Int =
+        (38 * context.resources.displayMetrics.density).toInt().coerceAtLeast(48)
+
+    private fun isLaunchable(
+        pm: PackageManager,
+        pkg: String,
+        activity: String,
+    ): Boolean = runCatching {
+        val info = pm.getApplicationInfo(pkg, 0)
+        if (!info.enabled) return@runCatching false
+        if (activity.isNotEmpty() &&
+            runCatching {
+                pm.getActivityInfo(ComponentName(pkg, activity), 0)
+            }.isSuccess
+        ) {
+            return@runCatching true
+        }
+        pm.getLaunchIntentForPackage(pkg) != null
+    }.getOrDefault(false)
+
+    private fun appLabel(pm: PackageManager, pkg: String): String = runCatching {
+        pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString()
+    }.getOrDefault(pkg)
+
+    /** The pinned entry's icon when there is one, else the app's own. */
+    private fun systemIcon(
+        context: Context,
+        pm: PackageManager,
+        pkg: String,
+        activity: String,
+        size: Int,
+    ): Bitmap? = runCatching {
+        val drawable = (
+            if (activity.isNotEmpty()) {
+                runCatching {
+                    pm.getActivityIcon(ComponentName(pkg, activity))
+                }.getOrNull()
+            } else {
+                null
+            }
+            ) ?: pm.getApplicationIcon(pkg)
+        val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        drawable.setBounds(0, 0, size, size)
+        drawable.draw(canvas)
+        bitmap
+    }.getOrNull()
+
+    /** Decodes an icon Dart sent for a custom icon or a web app. */
+    private fun bitmapFromData(
+        context: Context,
+        data: JSONObject?,
+        pkg: String,
+    ): Bitmap? {
+        val encoded = data?.optJSONObject("icons")?.optString(pkg)
+        if (encoded.isNullOrEmpty()) return null
+        val bytes = runCatching {
+            Base64.decode(encoded, Base64.DEFAULT)
+        }.getOrNull() ?: return null
+        val source = runCatching {
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }.getOrNull() ?: return null
+        val size = iconSizePx(context)
+        return if (source.width == size && source.height == size) {
+            source
+        } else {
+            Bitmap.createScaledBitmap(source, size, size, true)
+        }
+    }
+
+    /** Placeholder for a web app that has no cached icon yet. */
+    private fun letterIcon(label: String, size: Int): Bitmap {
+        val out = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(out)
+        var hash = 0
+        for (c in label) hash = hash * 31 + c.code
+        val hue = ((hash % 360) + 360) % 360
+        val background = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.HSVToColor(floatArrayOf(hue.toFloat(), 0.55f, 0.55f))
+        }
+        val radius = size * 0.26f
+        canvas.drawRoundRect(
+            0f,
+            0f,
+            size.toFloat(),
+            size.toFloat(),
+            radius,
+            radius,
+            background,
+        )
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = size * 0.45f
+            textAlign = Paint.Align.CENTER
+            typeface = Typeface.DEFAULT_BOLD
+        }
+        val baseline = size / 2f - (text.descent() + text.ascent()) / 2f
+        canvas.drawText(
+            label.trim().take(1).ifEmpty { "?" },
+            size / 2f,
+            baseline,
+            text,
+        )
+        return out
+    }
+
+    private fun openApp(context: Context, widgetId: Int): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(context, 900_000 + widgetId, intent, flags())
+    }
+
+    private fun tap(
+        context: Context,
+        widgetId: Int,
+        index: Int,
+        entry: Entry,
+    ): PendingIntent {
+        val intent = Intent(context, WidgetTapActivity::class.java).apply {
+            action = WidgetTapActivity.ACTION_TAP
+            putExtra(WidgetTapActivity.EXTRA_PACKAGE, entry.packageName)
+            if (entry.activity.isNotEmpty()) {
+                putExtra(WidgetTapActivity.EXTRA_ACTIVITY, entry.activity)
+            }
+            if (entry.web.isNotEmpty()) {
+                putExtra(WidgetTapActivity.EXTRA_WEB, entry.web)
+            }
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_NO_ANIMATION
+        }
+        return PendingIntent.getActivity(
+            context,
+            widgetId * 16 + index,
+            intent,
+            flags(),
+        )
+    }
+
+    private fun flags(): Int =
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+}
+
+/**
+ * The widget itself. It only rebuilds a handful of RemoteViews on the
+ * platform's half-hour tick, on resize and when Dart pushes new suggestions;
+ * there is no service, no alarm and no wake lock.
+ */
+class HamstappWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray,
+    ) {
+        for (id in appWidgetIds) WidgetRenderer.update(context, appWidgetManager, id)
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle?,
+    ) {
+        WidgetRenderer.update(context, appWidgetManager, appWidgetId)
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        // A widget keeps the RemoteViews the old build produced until someone
+        // repaints it. Installing an update must not leave square icons or the
+        // old layout on the home screen.
+        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+            WidgetRenderer.updateAll(context)
+        }
+    }
+}
+
+/**
+ * Invisible trampoline behind every widget icon.
+ *
+ * Widget clicks must launch another app and still be counted, but a
+ * BroadcastReceiver cannot reliably start an activity on recent Android
+ * versions. A transparent activity launched by the PendingIntent is always
+ * allowed to start the target, records the tap first, and finishes before it
+ * would ever draw. It also knows how to open a hand-added web app, whose window
+ * host is [WebAppActivity].
+ */
+class WidgetTapActivity : Activity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        try {
+            if (intent?.action == ACTION_TAP) {
+                val pkg = intent.getStringExtra(EXTRA_PACKAGE).orEmpty()
+                if (pkg.isNotEmpty()) {
+                    // Count it before launching: the tap happened even if the
+                    // target refuses to start (disabled or just uninstalled).
+                    WidgetStore.recordLaunch(this, pkg, System.currentTimeMillis())
+                    // Launching from the widget reads that app's notifications,
+                    // exactly like a launch started inside 囤囤.
+                    runCatching {
+                        NotificationStore.init(applicationContext)
+                        NotificationStore.markAllRead(pkg)
+                        NotificationStore.emit()
+                    }
+                    val web = intent.getStringExtra(EXTRA_WEB)
+                    if (!web.isNullOrEmpty()) {
+                        launchWeb(JSONObject(web))
+                    } else {
+                        launchApp(
+                            pkg,
+                            intent.getStringExtra(EXTRA_ACTIVITY).orEmpty(),
+                        )?.let { startActivity(it) }
+                    }
+                }
+            }
+        } catch (_: Throwable) {
+            // An invisible helper must never stay on screen, so failures here
+            // simply mean "nothing launched".
+        } finally {
+            finish()
+        }
+    }
+
+    /**
+     * The chosen launcher entry when it still exists, else whatever the system
+     * would open for the package. Several entries of one package can look and
+     * launch differently (contacts and the dialer, say).
+     */
+    private fun launchApp(packageName: String, activity: String): Intent? {
+        val pm = packageManager
+        if (activity.isNotEmpty()) {
+            val explicit = Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LAUNCHER)
+                .setComponent(ComponentName(packageName, activity))
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            if (pm.resolveActivity(explicit, 0) != null) return explicit
+        }
+        return runCatching {
+            val base = pm.getLaunchIntentForPackage(packageName)
+                ?: run {
+                    val probe = Intent(Intent.ACTION_MAIN)
+                        .addCategory(Intent.CATEGORY_LAUNCHER)
+                        .setPackage(packageName)
+                    val info = pm.queryIntentActivities(probe, 0)
+                        .firstOrNull()?.activityInfo ?: return null
+                    Intent(probe).setComponent(
+                        ComponentName(info.packageName, info.name),
+                    )
+                }
+            base.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            base
+        }.getOrNull()
+    }
+
+    /** A hand-added web app: its own window when asked for, else a browser. */
+    private fun launchWeb(config: JSONObject) {
+        val url = config.optString("url")
+        if (url.isEmpty()) return
+        val mode = config.optString("mode", "standalone")
+        if (mode != "browser" && startWebWindow(url, config)) return
+        openInBrowser(url, config.optString("browser"))
+    }
+
+    private fun startWebWindow(url: String, config: JSONObject): Boolean =
+        runCatching {
+            val intent = Intent(this, WebAppActivity::class.java).apply {
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_NEW_DOCUMENT,
+                )
+                data = Uri.parse(url)
+                putExtra(WebAppActivity.EXTRA_URL, url)
+                putExtra(WebAppActivity.EXTRA_NAME, config.optString("name"))
+                putExtra(
+                    WebAppActivity.EXTRA_DISPLAY,
+                    config.optString("display", "standalone"),
+                )
+                putExtra(WebAppActivity.EXTRA_SCOPE, config.optString("scope"))
+                putExtra(
+                    WebAppActivity.EXTRA_BROWSER,
+                    config.optString("browser"),
+                )
+                putExtra(
+                    WebAppActivity.EXTRA_HIDE_STATUS_BAR,
+                    config.optBoolean("hide"),
+                )
+                putExtra(
+                    WebAppActivity.EXTRA_THEME_COLOR,
+                    config.optInt("theme"),
+                )
+                putExtra(
+                    WebAppActivity.EXTRA_BACKGROUND_COLOR,
+                    config.optInt("bg"),
+                )
+                val icon = config.optString("icon")
+                if (icon.isNotEmpty()) {
+                    val bytes = runCatching {
+                        Base64.decode(icon, Base64.DEFAULT)
+                    }.getOrNull()
+                    if (bytes != null && bytes.isNotEmpty()) {
+                        putExtra(WebAppActivity.EXTRA_ICON, bytes)
+                    }
+                }
+            }
+            startActivity(intent)
+            true
+        }.getOrDefault(false)
+
+    private fun openInBrowser(url: String, browser: String) {
+        val base = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (browser.isNotEmpty()) {
+            val picked = Intent(base).setPackage(browser)
+            if (picked.resolveActivity(packageManager) != null &&
+                runCatching { startActivity(picked) }.isSuccess
+            ) {
+                return
+            }
+        }
+        runCatching { startActivity(base) }
+    }
+
+    companion object {
+        const val ACTION_TAP = "me.whynbnb.hamstapp.action.WIDGET_TAP"
+        const val EXTRA_PACKAGE = "me.whynbnb.hamstapp.extra.WIDGET_PACKAGE"
+        const val EXTRA_ACTIVITY = "me.whynbnb.hamstapp.extra.WIDGET_ACTIVITY"
+        const val EXTRA_WEB = "me.whynbnb.hamstapp.extra.WIDGET_WEB"
+    }
+}

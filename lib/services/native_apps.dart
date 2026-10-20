@@ -1514,6 +1514,98 @@ class NativeApps {
     });
     return ok ?? false;
   }
+
+  /// Replaces the document the home-screen widget draws: the suggestions for
+  /// every hour of the day, the labels and the wording. The widget reads this
+  /// itself, so a tap never has to start Flutter.
+  static Future<bool> updateHomeWidget(String json) async {
+    try {
+      return await _channel.invokeMethod<bool>('updateHomeWidget', {
+            'json': json,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Launches recorded by the widget since the last call, oldest first. The
+  /// native side clears its queue in the same step.
+  static Future<List<WidgetLaunch>> consumeWidgetLaunches() async {
+    try {
+      final raw = await _channel.invokeMethod<List<dynamic>>(
+        'consumeWidgetLaunches',
+      );
+      if (raw == null) return const <WidgetLaunch>[];
+      return [
+        for (final item in raw)
+          if (item is Map)
+            WidgetLaunch(
+              packageName: item['p'] as String? ?? '',
+              at: (item['t'] as num?)?.toInt() ?? 0,
+            ),
+      ].where((l) => l.packageName.isNotEmpty && l.at > 0).toList();
+    } catch (_) {
+      return const <WidgetLaunch>[];
+    }
+  }
+
+  /// How many widgets are on the launcher, and whether it supports pinning one
+  /// from inside the app.
+  static Future<HomeWidgetStatus> homeWidgetStatus() async {
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'widgetStatus',
+      );
+      if (raw == null) return const HomeWidgetStatus();
+      return HomeWidgetStatus(
+        count: (raw['count'] as num?)?.toInt() ?? 0,
+        supported: raw['supported'] as bool? ?? false,
+        canPin: raw['canPin'] as bool? ?? false,
+      );
+    } catch (_) {
+      return const HomeWidgetStatus();
+    }
+  }
+
+  /// Asks the launcher to show its "add widget" dialog. Returns false when it
+  /// declined or does not support pinning.
+  static Future<bool> requestPinHomeWidget() async {
+    try {
+      return await _channel.invokeMethod<bool>('requestPinWidget') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+}
+
+/// A launch the home-screen widget recorded while 囤囤 was not running.
+class WidgetLaunch {
+  const WidgetLaunch({required this.packageName, required this.at});
+
+  final String packageName;
+
+  /// Epoch milliseconds of the tap, so the launch log keeps the real time of
+  /// day instead of the moment 囤囤 next opened.
+  final int at;
+}
+
+/// State of the home-screen widget: how many copies are on the launcher and
+/// whether the app may ask the launcher to add one.
+class HomeWidgetStatus {
+  const HomeWidgetStatus({
+    this.count = 0,
+    this.supported = false,
+    this.canPin = false,
+  });
+
+  final int count;
+
+  /// Whether the platform knows app widgets that can be pinned from an app.
+  final bool supported;
+
+  /// Whether this launcher implements the pin request.
+  final bool canPin;
 }
 
 /// One app that can open an http(s) address: an option for "use this browser".

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Launcher long-press shortcut icon. Same rounded white tile as the app
+     icon, with a glyph that says what the shortcut does. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M34,10 H74 A24,24 0 0 1 98,34 V74 A24,24 0 0 1 74,98 H34 A24,24 0 0 1 10,74 V34 A24,24 0 0 1 34,10 Z" />
+    <!-- Magnifier -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF1C1B1F"
+        android:strokeLineCap="round"
+        android:strokeWidth="7"
+        android:pathData="M48,33 A15,15 0 1 1 48,63 A15,15 0 1 1 48,33" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FF1C1B1F"
+        android:strokeLineCap="round"
+        android:strokeWidth="8"
+        android:pathData="M59.5,59.5 L74,74" />
+</vector>

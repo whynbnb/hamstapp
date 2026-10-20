@@ -9,6 +9,7 @@ import '../state/app_state.dart';
 import '../utils/app_exporter.dart';
 import '../utils/backup_actions.dart';
 import 'health_screen.dart';
+import 'home_widget_screen.dart';
 import 'icon_pack_screen.dart';
 import '../utils/format.dart';
 import '../widgets/collapsed_nav.dart';
@@ -302,6 +303,17 @@ class SettingsScreen extends StatelessWidget {
           ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('磁贴')),
+          ListTile(
+            leading: const Icon(Icons.widgets_outlined),
+            title: Text(context.strings.t('桌面小组件')),
+            subtitle: Text(
+              context.strings.t('推荐应用直接放在桌面，点按即启动并计入启动次数'),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const HomeWidgetScreen()),
+            ),
+          ),
           ListTile(
             leading: const Icon(Icons.grid_view_rounded),
             title: Text(context.strings.t('新增磁贴默认大小')),

@@ -6,4 +6,8 @@
     <string name="shortcut_recent_long">打开最近使用的应用</string>
     <string name="shortcut_tiles_short">磁贴</string>
     <string name="shortcut_tiles_long">打开磁贴板</string>
+    <string name="widget_label">囤囤 · 推荐</string>
+    <string name="widget_title">推荐</string>
+    <string name="widget_empty_default">打开囤囤，多用几次应用，这里就会出现推荐。</string>
+    <string name="widget_description">此刻推荐的应用</string>
 </resources>

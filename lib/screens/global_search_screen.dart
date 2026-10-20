@@ -18,6 +18,7 @@ import 'app_usage_screen.dart';
 import 'backup_lists_screen.dart';
 import 'compare_screen.dart';
 import 'health_screen.dart';
+import 'home_widget_screen.dart';
 import 'log_screen.dart';
 import 'orphan_cache_screen.dart';
 import 'permission_audit_screen.dart';
@@ -83,6 +84,7 @@ class _GlobalSearchScreenState extends State<GlobalSearchScreen> {
               .toList();
     final shortcuts = <(String, IconData, Widget Function())>[
       (s.t('整理与体检'), Icons.health_and_safety_outlined, () => const HealthScreen()),
+      (s.t('桌面小组件'), Icons.widgets_outlined, () => const HomeWidgetScreen()),
       (s.t('存储管理'), Icons.sd_storage_outlined, () => const StorageManagerScreen()),
       (s.t('权限体检'), Icons.security_outlined, () => const PermissionAuditScreen()),
       (s.t('使用趋势'), Icons.insights_outlined, () => const UsageStatsScreen()),

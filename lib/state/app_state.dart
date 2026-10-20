@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:ui' as ui;
 
@@ -553,6 +554,10 @@ class AppState extends ChangeNotifier {
     }
     initialized = true;
     notifyListeners();
+    // A widget used while 囤囤 was closed: count those launches now, then
+    // refresh the schedule the widget reads (the counts may change it).
+    unawaited(consumeHomeWidgetLaunches());
+    unawaited(syncHomeWidget(force: true));
   }
 
   void _onNotificationCounts(Map<String, int> counts) {
@@ -715,6 +720,7 @@ class AppState extends ChangeNotifier {
           '${entry.isPwa ? 'PWA（${entry.display}）' : '普通网页'}',
     );
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
   }
 
   /// Re-reads the address: a site may have gained a manifest (or changed its
@@ -743,6 +749,7 @@ class AppState extends ChangeNotifier {
           '${entry.isPwa ? 'PWA ${entry.display} · ${entry.manifestUrl}' : '无清单'}',
     );
     notifyListeners();
+    unawaited(syncHomeWidget());
     return site;
   }
 
@@ -780,6 +787,7 @@ class AppState extends ChangeNotifier {
     await _persistWebApps();
     await _persistMeta();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
   }
 
   /// Removes a web entry, together with everything that pointed at it (its
@@ -794,6 +802,7 @@ class AppState extends ChangeNotifier {
     await _persistMeta();
     await _persistTiles();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
   }
 
   /// Re-reads the addresses of entries that were added before the site was
@@ -814,6 +823,8 @@ class AppState extends ChangeNotifier {
         // Offline, or the site is gone: leave the entry as it is.
       }
     }
+    // One push covers every entry the loop refreshed.
+    unawaited(syncHomeWidget(force: true));
   }
 
   bool _webBackfillDone = false;
@@ -976,6 +987,8 @@ class AppState extends ChangeNotifier {
       // Read permissions/certificates, warn about updates that added some and
       // take the automatic snapshot when it is due.
       unawaited(_afterScanMaintenance());
+      // A new app list changes what the widget can offer.
+      unawaited(syncHomeWidget(force: true));
     }
   }
 
@@ -1014,6 +1027,7 @@ class AppState extends ChangeNotifier {
     metaFor(packageName).hidden = hidden;
     await _persistMeta();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
   }
 
   // ---------------------------------------------------------------- meta
@@ -1054,6 +1068,9 @@ class AppState extends ChangeNotifier {
     if (nameFollowsEntry != null) m.nameFollowsEntry = nameFollowsEntry;
     await _persistMeta();
     notifyListeners();
+    // The widget draws that entry's icon and label, and launches it; refresh
+    // now that the choice changed.
+    if (launchActivity != null) unawaited(syncHomeWidget(force: true));
   }
 
   Future<void> clearMeta(String packageName) async {
@@ -2343,6 +2360,226 @@ class AppState extends ChangeNotifier {
     settings['recent_recommendations'] = value;
     await _persistSettings();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
+  }
+
+  // ---- desktop widget
+
+  /// Whether the home-screen widget draws the app name under each icon.
+  bool get widgetShowLabels =>
+      settings['widget_show_labels'] as bool? ?? true;
+
+  Future<void> setWidgetShowLabels(bool value) async {
+    settings['widget_show_labels'] = value;
+    await _persistSettings();
+    notifyListeners();
+    unawaited(syncHomeWidget(force: true));
+  }
+
+  /// Apps the desktop widget shows at [hour] (0-23), plus where they came from:
+  /// `recommend`, `recent`, `pinned` or `empty`.
+  ///
+  /// Recommendations are time-of-day habits. When that model has nothing for
+  /// the hour, the widget falls back to the apps used the most, then the most
+  /// recently, then the pinned tiles — a widget that is useful from day one.
+  ({List<AppInfo> apps, String kind}) homeWidgetSuggestionForHour(
+    int hour, {
+    DateTime? at,
+    int limit = 8,
+  }) {
+    if (apps.isEmpty) return (apps: const <AppInfo>[], kind: 'empty');
+    final out = <AppInfo>[];
+    final seen = <String>{};
+
+    void add(AppInfo a) {
+      if (out.length >= limit) return;
+      if (a.packageName.isEmpty) return;
+      if (metaFor(a.packageName).hidden) return;
+      if (!seen.add(a.packageName)) return;
+      out.add(a);
+    }
+
+    if (recommendationsEnabled && launchLog.isNotEmpty) {
+      final now = DateTime.now();
+      final moment = at ?? DateTime(now.year, now.month, now.day, hour);
+      final installed = <String>{for (final a in apps) a.packageName};
+      final events = launchLog
+          .where((e) => installed.contains(e.packageName))
+          .toList(growable: false);
+      final recs = Recommender.recommend(
+        events,
+        nowMillis: moment.millisecondsSinceEpoch,
+        limit: limit,
+      );
+      for (final r in recs) {
+        final a = appByPackage(r.packageName);
+        if (a != null) add(a);
+      }
+      // Exactly what 最近 → 推荐 shows: recommendations only, never padded
+      // with other apps. The widget mirrors that section.
+      if (out.isNotEmpty) return (apps: out, kind: 'recommend');
+    }
+
+    for (final a in recentAppsBy(RecentSort.frequent)) {
+      add(a);
+    }
+    for (final a in recentAppsBy(RecentSort.recent)) {
+      add(a);
+    }
+    var kind = out.isEmpty ? 'pinned' : 'recent';
+
+    if (out.length < limit) {
+      // Nothing launched from 囤囤 yet (or everything was hidden): the tiles
+      // are the apps the user has already chosen to see.
+      for (final t in tiles) {
+        if (t.packageName.isEmpty) continue;
+        final a = appByPackage(t.packageName);
+        if (a != null) add(a);
+      }
+    }
+
+    if (out.isEmpty) return (apps: const <AppInfo>[], kind: 'empty');
+    return (apps: out, kind: kind);
+  }
+
+  /// The heading the widget shows for a suggestion source.
+  String homeWidgetTitleFor(String kind) {
+    final s = AppStrings.current;
+    return switch (kind) {
+      'recommend' => s.t('推荐'),
+      'recent' => s.t('最近常用'),
+      'pinned' => s.t('常用应用'),
+      _ => s.t('推荐'),
+    };
+  }
+
+  /// The whole document the widget reads. One entry per hour so the widget can
+  /// pick "now" on its own, without starting Flutter or recomputing anything.
+  Map<String, dynamic> buildHomeWidgetData() {
+    final s = AppStrings.current;
+    final now = DateTime.now();
+    final icons = <String, String>{};
+    final slots = <Map<String, dynamic>>[];
+    for (var h = 0; h < 24; h++) {
+      // The current hour uses the exact moment, so the widget agrees with the
+      // 推荐 section in 最近 instead of showing the top of the hour.
+      final suggestion = homeWidgetSuggestionForHour(
+        h,
+        at: h == now.hour ? now : null,
+      );
+      slots.add({
+        'h': h,
+        'title': homeWidgetTitleFor(suggestion.kind),
+        'apps': [for (final a in suggestion.apps) _homeWidgetApp(a, icons)],
+      });
+    }
+    final hour = now.hour;
+    final current = slots[hour];
+    return {
+      'version': 2,
+      'updatedAt': now.millisecondsSinceEpoch,
+      'showLabels': widgetShowLabels,
+      'title': current['title'],
+      'empty': s.t('在囤囤里启动几次应用，这里就会出现推荐'),
+      'slots': slots,
+      'fallback': current['apps'],
+      // Only the icons the system cannot provide: custom icons and web-app
+      // icons. Everything else is read from PackageManager by the widget.
+      'icons': icons,
+    };
+  }
+
+  /// One entry for the widget. An app carries the launcher entry the user
+  /// pinned ([AppMeta.launchActivity]) so the widget launches and draws exactly
+  /// what the tile board does; a web app carries enough to open it without
+  /// running Flutter.
+  Map<String, dynamic> _homeWidgetApp(
+    AppInfo a,
+    Map<String, String> icons,
+  ) {
+    final name = displayNameFor(a.packageName);
+    final web = a.isWebEntry ? webAppById(a.packageName) : null;
+    if (web != null) {
+      final bytes = IconCache.instance[a.packageName];
+      if (bytes != null && bytes.isNotEmpty) {
+        icons[a.packageName] = base64Encode(bytes);
+      }
+      return {
+        'p': a.packageName,
+        'n': name,
+        'w': {
+          'name': name,
+          'url': web.startUrl.isEmpty ? web.url : web.startUrl,
+          'mode': web.opensStandalone ? 'standalone' : 'browser',
+          'display': web.windowDisplay,
+          'scope': web.scope,
+          'theme': web.themeColor,
+          'bg': web.backgroundColor,
+          'hide': web.hideStatusBar,
+          'browser': web.browserPackage,
+        },
+      };
+    }
+    final custom = CustomIcons.instance.bytesFor(a.packageName);
+    if (custom != null && custom.isNotEmpty) {
+      icons[a.packageName] = base64Encode(custom);
+    }
+    final activity = metaFor(a.packageName).launchActivity;
+    return {
+      'p': a.packageName,
+      'n': name,
+      if (activity.isNotEmpty) 'a': activity,
+    };
+  }
+
+  static const int _kWidgetPushIntervalMs = 30000;
+  int _lastWidgetPushAt = 0;
+  bool _loggedWidgetPush = false;
+
+  /// Pushes the current suggestions to the widget. Cheap and best effort: the
+  /// widget keeps the last document when the platform refuses an update.
+  Future<void> syncHomeWidget({bool force = false}) async {
+    // Nothing to suggest before the first scan, but a forced push still matters
+    // (wiping all data must clear the widget as well).
+    if (apps.isEmpty && !force) return;
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force && now - _lastWidgetPushAt < _kWidgetPushIntervalMs) return;
+    _lastWidgetPushAt = now;
+    final data = buildHomeWidgetData();
+    final ok = await NativeApps.updateHomeWidget(jsonEncode(data));
+    if (ok && !_loggedWidgetPush) {
+      _loggedWidgetPush = true;
+      final count = (data['fallback'] as List).length;
+      AppLog.instance.log(
+        LogModule.launch,
+        '桌面小组件 · 已更新推荐 · $count 个应用',
+      );
+    }
+  }
+
+  /// Merges launches made from the widget into the normal statistics. The
+  /// widget records them natively because it must not wake the Flutter engine;
+  /// this is where they join the launch log, 最近 and future recommendations.
+  Future<void> consumeHomeWidgetLaunches() async {
+    final launches = await NativeApps.consumeWidgetLaunches();
+    if (launches.isEmpty) return;
+    var counted = 0;
+    for (final l in launches) {
+      if (appByPackage(l.packageName) == null) continue;
+      final m = metaFor(l.packageName);
+      if (l.at > m.lastLaunchedAt) m.lastLaunchedAt = l.at;
+      m.launchCount += 1;
+      _recordLaunch(l.packageName, l.at);
+      counted++;
+    }
+    if (counted == 0) return;
+    _pruneLaunchLog();
+    await _persistMeta();
+    await _persistLaunchLog();
+    notifyListeners();
+    AppLog.instance.log(LogModule.launch, '桌面小组件 · 计入 $counted 次启动');
+    unawaited(syncRecentShortcuts());
+    unawaited(syncHomeWidget(force: true));
   }
 
   // ---- position memory
@@ -2946,6 +3183,8 @@ class AppState extends ChangeNotifier {
     _applyLanguage();
     await _persistSettings();
     notifyListeners();
+    // The widget's title and empty hint are written in the app's language.
+    unawaited(syncHomeWidget(force: true));
   }
 
   /// The concrete language code (`'zh'` / `'en'`) after resolving
@@ -3377,6 +3616,7 @@ class AppState extends ChangeNotifier {
     _pruneLaunchLog();
     await _persistAll();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
     return <String, int>{
       s.t('应用'): appsTouched,
       s.t('分组'): categoriesAdded,
@@ -3415,6 +3655,8 @@ class AppState extends ChangeNotifier {
     await _persistAll();
     await applyStatusBarVisibility(true);
     notifyListeners();
+    // The widget must not keep showing apps that no longer exist here.
+    unawaited(syncHomeWidget(force: true));
   }
 
   Future<void> _persistAll() async {
@@ -3732,6 +3974,8 @@ class AppState extends ChangeNotifier {
     notifyListeners();
     // The launcher's long press should offer what was used last.
     unawaited(syncRecentShortcuts());
+    // Throttled internally; the widget's "now" suggestion improves with use.
+    unawaited(syncHomeWidget());
   }
 
   /// How many recent apps a long press on 囤囤's icon offers.
@@ -3805,6 +4049,7 @@ class AppState extends ChangeNotifier {
     await _persistLaunchLog();
     await _persistMeta();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
   }
 
   /// How many timestamped launches were recorded for [packageName].
@@ -3827,6 +4072,7 @@ class AppState extends ChangeNotifier {
     await _persistLaunchLog();
     await _persistMeta();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
   }
 
   // ---- usage trends

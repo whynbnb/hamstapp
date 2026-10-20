@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Neutral surface so the widget reads well over any wallpaper. The colours
+     flip in values-night; the app's own accent is not used because the widget
+     follows the system theme, while 囤囤 can be forced to light or dark. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="rectangle">
+    <solid android:color="@color/widget_surface" />
+    <corners android:radius="24dp" />
+</shape>

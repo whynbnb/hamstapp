@@ -42,6 +42,35 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+        <!-- The home-screen widget: recommended apps for the current hour,
+             drawn with RemoteViews and refreshed by the system every half
+             hour. Tapping a cell goes through WidgetTapActivity, which
+             records the launch for 囤囤's statistics and starts the app. -->
+        <receiver
+            android:name=".HamstappWidgetProvider"
+            android:exported="true"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <!-- Repaint immediately after installing a new build instead of
+                     waiting for the launcher to ask again. -->
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/hamstapp_widget_info" />
+        </receiver>
+        <!-- Invisible trampoline behind a widget tap. Its own (empty) task and
+             no history, so it cannot drag 囤囤's UI to the front or show up in
+             Recents; it finishes before drawing anything. -->
+        <activity
+            android:name=".WidgetTapActivity"
+            android:exported="false"
+            android:theme="@style/WidgetTapTheme"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

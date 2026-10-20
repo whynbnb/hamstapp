@@ -75,6 +75,18 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   open it, the app withdraws it, or you launch the app from 囤囤.
 - **Launcher shortcuts** — long-press 囤囤's own icon for *Scan apps*, *Recent* and *Tiles*.
 
+### 🖥 Home-screen widget
+- **Recommended apps on the desktop.** A native Android widget (no Flutter engine, no background
+  service) shows the same apps as **Recent → Recommendations** for the current hour — at most two
+  rows — or the most used / pinned apps when there are no suggestions yet. The widget follows the
+  system light / dark theme.
+- **A tap launches directly and still counts.** Widget taps are recorded natively, then merged into
+  囤囤's launch log the next time it opens, so the app also shows up in *Recent*, the usage trends
+  and later recommendations. Apps launch through the same pinned launcher entry as the tile board
+  (icon, label and activity), and hand-added web apps open in their own window (or the chosen browser).
+- Add it from **Settings → Tiles → Home screen widget**; the same screen has a live preview and a
+  switch to hide app names. The widget refreshes about every 30 minutes on the platform's own tick.
+
 ### 📦 App manager
 - Scan installed apps (optionally including system apps); the list is cached for instant launch.
 - Search by **name, package, pinyin initials, full pinyin** or fuzzy subsequence.
@@ -228,7 +240,8 @@ back as suggestions:
 - **Unreleased** — tile gestures, drag-into-folder, multi-select / page copy / layout lock, app
   shortcuts, global search; hidden apps, custom icons, 整理与体检, per-app usage and traffic, install
   source breakdown; icon packs, font size / density, two-pane tablets; auto snapshots, WebDAV
-  backup, preview/merge import, snapshot-difference export.
+  backup, preview/merge import, snapshot-difference export; home-screen widget with hourly
+  recommendations whose taps count as launches.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

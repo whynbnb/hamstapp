@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Recommended apps, picked for the current hour. updatePeriodMillis is the
+     platform minimum: the provider only re-inflates a handful of RemoteViews
+     and never starts a background service, so this stays cheap. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="160dp"
+    android:minResizeHeight="70dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="2"
+    android:resizeMode="horizontal|vertical"
+    android:updatePeriodMillis="1800000"
+    android:initialLayout="@layout/widget_hamstapp"
+    android:previewLayout="@layout/widget_hamstapp_preview"
+    android:description="@string/widget_description"
+    android:widgetCategory="home_screen" />

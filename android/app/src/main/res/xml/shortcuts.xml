@@ -8,7 +8,7 @@
     <shortcut
         android:shortcutId="scan"
         android:enabled="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_shortcut_scan"
         android:shortcutShortLabel="@string/shortcut_scan_short"
         android:shortcutLongLabel="@string/shortcut_scan_long">
         <intent
@@ -23,7 +23,7 @@
     <shortcut
         android:shortcutId="recent"
         android:enabled="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_shortcut_recent"
         android:shortcutShortLabel="@string/shortcut_recent_short"
         android:shortcutLongLabel="@string/shortcut_recent_long">
         <intent
@@ -38,7 +38,7 @@
     <shortcut
         android:shortcutId="tiles"
         android:enabled="true"
-        android:icon="@mipmap/ic_launcher"
+        android:icon="@drawable/ic_shortcut_tiles"
         android:shortcutShortLabel="@string/shortcut_tiles_short"
         android:shortcutLongLabel="@string/shortcut_tiles_long">
         <intent

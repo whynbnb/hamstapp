@@ -8,4 +8,9 @@
     <string name="shortcut_recent_long">Open the recently used apps</string>
     <string name="shortcut_tiles_short">Tiles</string>
     <string name="shortcut_tiles_long">Open the tile board</string>
+    <!-- Shown in the widget picker. -->
+    <string name="widget_label">囤囤 · Recommended</string>
+    <string name="widget_title">Recommended</string>
+    <string name="widget_empty_default">Open 囤囤 and launch a few apps; suggestions will show up here.</string>
+    <string name="widget_description">Recommended apps for right now</string>
 </resources>

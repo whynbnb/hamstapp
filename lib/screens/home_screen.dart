@@ -97,6 +97,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state == AppLifecycleState.resumed) {
       final app = context.read<AppState>();
       unawaited(_syncNotifications(app));
+      // Widget taps recorded while the app was in the background join the
+      // launch statistics now; the schedule is refreshed right after.
+      unawaited(app.consumeHomeWidgetLaunches());
+      unawaited(app.syncHomeWidget());
       // A changed wallpaper should change the theme without a restart.
       unawaited(app.refreshWallpaperColor());
     }
