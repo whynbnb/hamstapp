@@ -12,5 +12,8 @@
     <string name="widget_label">囤囤 · Recommended</string>
     <string name="widget_title">Recommended</string>
     <string name="widget_empty_default">Open 囤囤 and launch a few apps; suggestions will show up here.</string>
+    <string name="pagebar_widget_label">囤囤 · Pages</string>
+    <string name="pagebar_widget_description">Tile page tabs</string>
+    <string name="pagebar_widget_empty">打开囤囤</string>
     <string name="widget_description">Recommended apps for right now</string>
 </resources>

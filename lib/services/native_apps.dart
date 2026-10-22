@@ -1515,6 +1515,19 @@ class NativeApps {
     return ok ?? false;
   }
 
+  /// Replaces the page list of the 4x1 tile-page strip (names plus which page
+  /// is current). No periodic update: the list only changes in 囤囤.
+  static Future<bool> updatePageWidget(String json) async {
+    try {
+      return await _channel.invokeMethod<bool>('updatePageWidget', {
+            'json': json,
+          }) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Replaces the document the home-screen widget draws: the suggestions for
   /// every hour of the day, the labels and the wording. The widget reads this
   /// itself, so a tap never has to start Flutter.
@@ -1552,10 +1565,13 @@ class NativeApps {
 
   /// How many widgets are on the launcher, and whether it supports pinning one
   /// from inside the app.
-  static Future<HomeWidgetStatus> homeWidgetStatus() async {
+  static Future<HomeWidgetStatus> homeWidgetStatus({
+    String target = 'home',
+  }) async {
     try {
       final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
         'widgetStatus',
+        {'target': target},
       );
       if (raw == null) return const HomeWidgetStatus();
       return HomeWidgetStatus(
@@ -1570,9 +1586,14 @@ class NativeApps {
 
   /// Asks the launcher to show its "add widget" dialog. Returns false when it
   /// declined or does not support pinning.
-  static Future<bool> requestPinHomeWidget() async {
+  static Future<bool> requestPinHomeWidget({
+    String target = 'home',
+  }) async {
     try {
-      return await _channel.invokeMethod<bool>('requestPinWidget') ?? false;
+      return await _channel.invokeMethod<bool>('requestPinWidget', {
+            'target': target,
+          }) ??
+          false;
     } catch (_) {
       return false;
     }

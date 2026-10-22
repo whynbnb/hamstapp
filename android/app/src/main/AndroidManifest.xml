@@ -67,6 +67,20 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/hamstapp_widget_info" />
         </receiver>
+        <!-- 4x1 strip with the tile board's page tabs. No periodic updates:
+             Dart pushes the page list whenever it changes. -->
+        <receiver
+            android:name=".PageBarWidgetProvider"
+            android:exported="true"
+            android:label="@string/pagebar_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/pagebar_widget_info" />
+        </receiver>
         <!-- Alarm target: repaints the widget every half hour even when 囤囤
              has not run since. -->
         <receiver

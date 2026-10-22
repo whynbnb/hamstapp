@@ -77,6 +77,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (packageName.isNotEmpty) unawaited(launchApp(context, packageName));
       return;
     }
+    // A tab in the 4x1 page strip: open the tile board on that page.
+    if (id.startsWith('page:')) {
+      final pageId = id.substring(5);
+      final index = state.tilePages.indexWhere((p) => p.id == pageId);
+      if (index >= 0) state.setCurrentTilePage(index);
+      state.requestLaunchTab(1);
+      _select(state, 0);
+      return;
+    }
     switch (id) {
       case 'scan':
         _select(state, 1);

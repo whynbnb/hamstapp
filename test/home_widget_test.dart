@@ -213,6 +213,17 @@ void main() {
       expect(icons['com.a'], isNotEmpty);
     });
 
+    test('the 4x1 strip carries the pages and the current one', () {
+      final state = _state();
+      state.currentTilePageIndex = 0;
+
+      final data = state.buildPageWidgetData();
+      final pages = (data['pages'] as List).cast<Map<String, dynamic>>();
+      expect(pages.single['id'], 'p1');
+      expect(pages.single['n'], 'P1');
+      expect(data['current'], 0);
+    });
+
     test('the label setting is stored', () async {
       final storage = _MemStorage();
       final state = AppState(storage)..initialized = true;
@@ -265,6 +276,12 @@ void main() {
     expect(find.text('还没有添加到桌面'), findsOneWidget);
     expect(find.text('添加到桌面'), findsOneWidget);
     expect(find.text('显示应用名称'), findsOneWidget);
+
+    // The 4x1 strip's section is below the fold.
+    await tester.drag(find.byType(ListView), const Offset(0, -600));
+    await tester.pumpAndSettle();
+    expect(find.text('磁贴页标签条'), findsOneWidget);
+    expect(find.text('添加标签条到桌面'), findsOneWidget);
 
     await tester.tap(find.text('添加到桌面'));
     await tester.pumpAndSettle();

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A 4x1 tab strip. No periodic updates: the page list only changes while the
+     app is running and is pushed explicitly. -->
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:minResizeWidth="160dp"
+    android:minResizeHeight="40dp"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:resizeMode="horizontal"
+    android:updatePeriodMillis="0"
+    android:initialLayout="@layout/widget_pagebar"
+    android:previewLayout="@layout/widget_pagebar_preview"
+    android:description="@string/pagebar_widget_description"
+    android:widgetCategory="home_screen" />

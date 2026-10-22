@@ -558,6 +558,7 @@ class AppState extends ChangeNotifier {
     // refresh the schedule the widget reads (the counts may change it).
     unawaited(consumeHomeWidgetLaunches());
     unawaited(syncHomeWidget(force: true));
+    unawaited(syncPageWidget());
   }
 
   void _onNotificationCounts(Map<String, int> counts) {
@@ -1562,6 +1563,8 @@ class AppState extends ChangeNotifier {
       _kTilePages,
       tilePages.map((p) => p.toMap()).toList(),
     );
+    // The 4x1 tab strip mirrors the page list.
+    unawaited(syncPageWidget());
   }
 
   Future<List<Tile>> _loadTiles() async =>
@@ -2055,6 +2058,7 @@ class AppState extends ChangeNotifier {
     currentTilePageIndex = i;
     _rememberTilePage();
     notifyListeners();
+    unawaited(syncPageWidget());
   }
 
   TilePage _pageForTile(Tile tile) {
@@ -2555,6 +2559,35 @@ class AppState extends ChangeNotifier {
         '桌面小组件 · 已更新推荐 · $count 个应用',
       );
     }
+  }
+
+  /// The 4x1 page-tab strip's document: the page names, in order, and which
+  /// one the app is on (drawn highlighted).
+  Map<String, dynamic> buildPageWidgetData() {
+    final s = AppStrings.current;
+    return {
+      'pages': [
+        for (var i = 0; i < tilePages.length; i++)
+          {
+            'id': tilePages[i].id,
+            // A page without a usable name would otherwise render as an empty
+            // tab; fall back to its position.
+            'n': tilePages[i].name.trim().isEmpty
+                ? s.t('页面 {n}', {'n': i + 1})
+                : tilePages[i].name.trim(),
+          },
+      ],
+      'current': tilePages.isEmpty
+          ? 0
+          : currentTilePageIndex.clamp(0, tilePages.length - 1),
+    };
+  }
+
+  /// Pushes the page tabs to the strip. The page list only changes in 囤囤, so
+  /// there is no periodic update on that widget.
+  Future<void> syncPageWidget() async {
+    if (tilePages.isEmpty) return;
+    await NativeApps.updatePageWidget(jsonEncode(buildPageWidgetData()));
   }
 
   /// Merges launches made from the widget into the normal statistics. The

@@ -617,6 +617,23 @@ class PackageScannerPlugin(
                     mainHandler.post { result.success(ok) }
                 }
             }
+            // The 4x1 page-tab strip: Dart pushes the page names and which one
+            // is current; the widget itself has no periodic update.
+            "updatePageWidget" -> {
+                val json = call.argument<String>("json")
+                executor.execute {
+                    val ok = if (json.isNullOrBlank()) {
+                        false
+                    } else {
+                        runCatching {
+                            WidgetStore.writePageData(context, json) &&
+                                runCatching { PageBarRenderer.updateAll(context) }
+                                    .isSuccess
+                        }.getOrDefault(false)
+                    }
+                    mainHandler.post { result.success(ok) }
+                }
+            }
             // Launches made from the widget since the last time 囤囤 read the
             // queue. Dart merges them into the statistics and clears them.
             "consumeWidgetLaunches" -> executor.execute {
@@ -626,10 +643,13 @@ class PackageScannerPlugin(
             }
             "widgetStatus" -> {
                 val manager = AppWidgetManager.getInstance(context)
+                val provider = if (call.argument<String>("target") == "pages") {
+                    PageBarWidgetProvider::class.java
+                } else {
+                    HamstappWidgetProvider::class.java
+                }
                 val ids = runCatching {
-                    manager?.getAppWidgetIds(
-                        ComponentName(context, HamstappWidgetProvider::class.java),
-                    )
+                    manager?.getAppWidgetIds(ComponentName(context, provider))
                 }.getOrNull() ?: IntArray(0)
                 val pinSupported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                 result.success(
@@ -652,10 +672,12 @@ class PackageScannerPlugin(
                     return
                 }
                 val manager = AppWidgetManager.getInstance(context)
-                val component = ComponentName(
-                    context,
-                    HamstappWidgetProvider::class.java,
-                )
+                val provider = if (call.argument<String>("target") == "pages") {
+                    PageBarWidgetProvider::class.java
+                } else {
+                    HamstappWidgetProvider::class.java
+                }
+                val component = ComponentName(context, provider)
                 val ok = manager != null &&
                     manager.isRequestPinAppWidgetSupported &&
                     runCatching {

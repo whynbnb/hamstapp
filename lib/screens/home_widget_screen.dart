@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
+import '../models/tile_page.dart';
 import '../services/native_apps.dart';
 import '../state/app_state.dart';
 import '../widgets/app_icon.dart';
@@ -19,7 +20,9 @@ class HomeWidgetScreen extends StatefulWidget {
 class _HomeWidgetScreenState extends State<HomeWidgetScreen>
     with WidgetsBindingObserver {
   HomeWidgetStatus _status = const HomeWidgetStatus();
+  HomeWidgetStatus _pagesStatus = const HomeWidgetStatus();
   bool _pinning = false;
+  bool _pinningPages = false;
 
   @override
   void initState() {
@@ -43,8 +46,12 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
 
   Future<void> _load() async {
     final status = await NativeApps.homeWidgetStatus();
+    final pages = await NativeApps.homeWidgetStatus(target: 'pages');
     if (!mounted) return;
-    setState(() => _status = status);
+    setState(() {
+      _status = status;
+      _pagesStatus = pages;
+    });
   }
 
   Future<void> _pin() async {
@@ -64,8 +71,28 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
     await _load();
   }
 
+  Future<void> _pinPages() async {
+    if (_pinningPages) return;
+    setState(() => _pinningPages = true);
+    final ok = await NativeApps.requestPinHomeWidget(target: 'pages');
+    if (!mounted) return;
+    setState(() => _pinningPages = false);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            context.strings.t('这个桌面不支持直接添加，请长按桌面空白处 → 小组件 → 囤囤'),
+          ),
+        ),
+      );
+      return;
+    }
+    await _load();
+  }
+
   Future<void> _push(AppState state) async {
     await state.syncHomeWidget(force: true);
+    await state.syncPageWidget();
     await _load();
   }
 
@@ -164,6 +191,86 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
             icon: Icons.battery_saver_outlined,
             text: s.t('小组件大约每 30 分钟刷新一次，不使用后台服务'),
           ),
+          const Divider(height: 32),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.view_carousel_outlined,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  s.t('磁贴页标签条'),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '4×1',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+            child: _PageBarPreview(
+              pages: state.tilePages,
+              current: state.currentTilePageIndex,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Text(
+              s.t('4×1 的小长条，显示磁贴页标签；点标签直接跳到那一页，标签太多时出现「…」'),
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.45,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          ListTile(
+            leading: Icon(
+              _pagesStatus.count > 0
+                  ? Icons.check_circle_outline
+                  : Icons.view_week_outlined,
+              color: _pagesStatus.count > 0
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+            ),
+            title: Text(
+              _pagesStatus.count > 0
+                  ? s.t('已添加标签条 · {n} 个', {'n': _pagesStatus.count})
+                  : s.t('还没有添加标签条'),
+            ),
+            subtitle: _pagesStatus.count == 0 && !_pagesStatus.canPin
+                ? Text(s.t('这个桌面不支持直接添加，请长按桌面空白处 → 小组件 → 囤囤'))
+                : null,
+          ),
+          if (_pagesStatus.canPin)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: FilledButton.tonalIcon(
+                onPressed: _pinningPages ? null : _pinPages,
+                icon: _pinningPages
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_to_home_screen),
+                label: Text(s.t('添加标签条到桌面')),
+              ),
+            ),
         ],
       ),
     );
@@ -204,7 +311,7 @@ class _Preview extends StatelessWidget {
               const AppIcon(
                 packageName: 'me.whynbnb.hamstapp',
                 label: '囤囤',
-                size: 18,
+                size: 20,
                 showNotificationBadge: false,
               ),
               const SizedBox(width: 6),
@@ -221,7 +328,10 @@ class _Preview extends StatelessWidget {
               ),
               Text(
                 '›',
-                style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+                style: TextStyle(
+                  fontSize: 13,
+                  color: scheme.onSurfaceVariant,
+                ),
               ),
             ],
           ),
@@ -245,13 +355,11 @@ class _Preview extends StatelessWidget {
               shrinkWrap: true,
               padding: EdgeInsets.zero,
               physics: const NeverScrollableScrollPhysics(),
-              // Same rule as the widget and 最近 → 推荐: up to four per row, and
-              // the row only uses as many columns as there are suggestions.
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: apps.length < 4 ? apps.length : 4,
                 crossAxisSpacing: 4,
                 mainAxisSpacing: 8,
-                mainAxisExtent: showLabels ? 62 : 44,
+                mainAxisExtent: showLabels ? 70 : 52,
               ),
               itemCount: apps.length > 8 ? 8 : apps.length,
               itemBuilder: (context, i) {
@@ -262,7 +370,7 @@ class _Preview extends StatelessWidget {
                     AppIcon(
                       packageName: app.packageName,
                       label: nameOf(app.packageName),
-                      size: 34,
+                      size: 38,
                       showNotificationBadge: false,
                     ),
                     if (showLabels)
@@ -272,7 +380,7 @@ class _Preview extends StatelessWidget {
                           nameOf(app.packageName),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 10),
+                          style: const TextStyle(fontSize: 11),
                         ),
                       ),
                   ],
@@ -280,6 +388,88 @@ class _Preview extends StatelessWidget {
               },
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// A drawing of the 4x1 strip with the real page names. The pills keep their
+/// natural width and the row is centred — matching the widget, which avoids
+/// stretching a short list into wide bars.
+class _PageBarPreview extends StatelessWidget {
+  const _PageBarPreview({required this.pages, required this.current});
+
+  final List<TilePage> pages;
+  final int current;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final names = [
+      for (var i = 0; i < pages.length; i++)
+        pages[i].name.trim().isEmpty ? '页面 ${i + 1}' : pages[i].name.trim(),
+    ];
+    final overflow = names.length > 8;
+    final shown = overflow ? names.take(7).toList() : names.take(8).toList();
+    // A single emoji (or one or two characters) is drawn much larger than a
+    // text label, matching the widget.
+    bool shortName(String name) {
+      final text = name.trim();
+      if (text.isEmpty) return false;
+      if (text.length <= 2) return true;
+      return !RegExp(r'[A-Za-z0-9\u4e00-\u9fff]').hasMatch(text);
+    }
+
+    Widget pill(String text, {required bool active}) {
+      final textSize = shortName(text) ? 28.0 : 13.0;
+      return Container(
+        height: 52,
+        constraints: const BoxConstraints(minWidth: 44),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        decoration: BoxDecoration(
+          color: active
+              ? scheme.onSurface.withValues(alpha: 0.16)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(18),
+        ),
+        alignment: Alignment.center,
+        child: Text(
+          text,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: textSize,
+            color: active ? scheme.onSurface : scheme.onSurfaceVariant,
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: scheme.outlineVariant.withValues(alpha: 0.5)),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (var i = 0; i < shown.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: pill(shown[i], active: i == current),
+              ),
+            if (overflow)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 2),
+                child: pill('…', active: false),
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -22,8 +22,8 @@
 
         <ImageView
             android:id="@+id/widget_app_icon"
-            android:layout_width="18dp"
-            android:layout_height="18dp"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
             android:src="@drawable/widget_mark" />
 
         <TextView
@@ -74,8 +74,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_0"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -87,7 +87,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/widget_cell_1"
@@ -101,8 +101,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_1"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -114,7 +114,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/widget_cell_2"
@@ -128,8 +128,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_2"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -141,7 +141,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/widget_cell_3"
@@ -155,8 +155,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_3"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -168,7 +168,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
             </LinearLayout>
             <LinearLayout
@@ -190,8 +190,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_4"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -203,7 +203,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/widget_cell_5"
@@ -217,8 +217,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_5"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -230,7 +230,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/widget_cell_6"
@@ -244,8 +244,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_6"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -257,7 +257,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
                 <LinearLayout
                     android:id="@+id/widget_cell_7"
@@ -271,8 +271,8 @@
 
                     <ImageView
                         android:id="@+id/widget_icon_7"
-                        android:layout_width="38dp"
-                        android:layout_height="38dp"
+                        android:layout_width="44dp"
+                        android:layout_height="44dp"
                         android:scaleType="fitCenter" />
 
                     <TextView
@@ -284,7 +284,7 @@
                         android:gravity="center"
                         android:maxLines="1"
                         android:textColor="@color/widget_text"
-                        android:textSize="10sp" />
+                        android:textSize="11sp" />
                 </LinearLayout>
             </LinearLayout>
     </LinearLayout>

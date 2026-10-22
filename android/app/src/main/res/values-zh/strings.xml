@@ -9,5 +9,8 @@
     <string name="widget_label">囤囤 · 推荐</string>
     <string name="widget_title">推荐</string>
     <string name="widget_empty_default">打开囤囤，多用几次应用，这里就会出现推荐。</string>
+    <string name="pagebar_widget_label">囤囤 · 磁贴页</string>
+    <string name="pagebar_widget_description">磁贴页标签，点一下跳到那一页</string>
+    <string name="pagebar_widget_empty">打开囤囤</string>
     <string name="widget_description">此刻推荐的应用</string>
 </resources>

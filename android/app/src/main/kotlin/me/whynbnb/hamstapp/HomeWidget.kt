@@ -40,6 +40,7 @@ import java.util.Calendar
 object WidgetStore {
     private const val PREFS = "hamstapp_widget"
     private const val KEY_DATA = "data"
+    private const val KEY_PAGES = "pages"
     private const val KEY_PENDING = "pending_launches"
 
     /** Enough for a busy month; the queue only drains when 囤囤 is opened. */
@@ -55,6 +56,18 @@ object WidgetStore {
 
     fun readData(context: Context): JSONObject? = runCatching {
         val raw = prefs(context).getString(KEY_DATA, null)
+        if (raw.isNullOrEmpty()) null else JSONObject(raw)
+    }.getOrNull()
+
+    /** Page tabs for the 4x1 strip: what to show and which one is current. */
+    fun writePageData(context: Context, json: String): Boolean = runCatching {
+        JSONObject(json) // reject malformed data instead of storing it
+        prefs(context).edit().putString(KEY_PAGES, json).apply()
+        true
+    }.getOrDefault(false)
+
+    fun readPageData(context: Context): JSONObject? = runCatching {
+        val raw = prefs(context).getString(KEY_PAGES, null)
         if (raw.isNullOrEmpty()) null else JSONObject(raw)
     }.getOrNull()
 
@@ -319,7 +332,7 @@ object WidgetRenderer {
     }
 
     private fun iconSizePx(context: Context): Int =
-        (38 * context.resources.displayMetrics.density).toInt().coerceAtLeast(48)
+        (44 * context.resources.displayMetrics.density).toInt().coerceAtLeast(48)
 
     private fun isLaunchable(
         pm: PackageManager,

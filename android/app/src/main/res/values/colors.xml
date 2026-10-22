@@ -4,4 +4,6 @@
     <color name="widget_text">#1C1B1F</color>
     <color name="widget_text_dim">#5F5B66</color>
     <color name="widget_placeholder">#2E1C1B1F</color>
+    <color name="widget_chip">#12000000</color>
+    <color name="widget_chip_active">#2E000000</color>
 </resources>

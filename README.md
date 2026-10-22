@@ -80,6 +80,12 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   service) shows the same apps as **Recent → Recommendations** for the current hour — at most two
   rows — or the most used / pinned apps when there are no suggestions yet. The widget follows the
   system light / dark theme.
+- **Tile page tabs (4×1).** A slim second widget with the tile board's pages; tap a tab to open
+  that page in 囤囤. Only the current page gets a pill — the rest are plain labels, so a short list
+  never turns into stretched grey buttons. Emoji page names are drawn large (up to 30sp) and shrink
+  step by step as pages are added; only when they truly cannot fit do they share the row equally
+  (with a “…” for the rest). Its page list is pushed whenever the tabs change, so it does not need a
+  periodic refresh.
 - **A tap launches directly and still counts.** Widget taps are recorded natively, then merged into
   囤囤's launch log the next time it opens, so the app also shows up in *Recent*, the usage trends
   and later recommendations. Apps launch through the same pinned launcher entry as the tile board
