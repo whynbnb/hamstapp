@@ -39,13 +39,37 @@
             android:textSize="13sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/widget_more"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="›"
-            android:textColor="@color/widget_text_dim"
-            android:textSize="13sp" />
+        <!-- Quick actions: jump straight to the 应用 / 最近 tabs, or search. -->
+        <ImageButton
+            android:id="@+id/widget_quick_apps"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:layout_marginLeft="2dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="@string/widget_quick_apps"
+            android:padding="4dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_apps" />
+
+        <ImageButton
+            android:id="@+id/widget_quick_recent"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="@string/widget_quick_recent"
+            android:padding="4dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_recent" />
+
+        <ImageButton
+            android:id="@+id/widget_quick_search"
+            android:layout_width="26dp"
+            android:layout_height="26dp"
+            android:background="@android:color/transparent"
+            android:contentDescription="@string/widget_quick_search"
+            android:padding="4dp"
+            android:scaleType="fitCenter"
+            android:src="@drawable/ic_widget_search" />
     </LinearLayout>
 
     <LinearLayout

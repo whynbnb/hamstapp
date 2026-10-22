@@ -90,6 +90,8 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   囤囤's launch log the next time it opens, so the app also shows up in *Recent*, the usage trends
   and later recommendations. Apps launch through the same pinned launcher entry as the tile board
   (icon, label and activity), and hand-added web apps open in their own window (or the chosen browser).
+- The header's right side carries three shortcuts — **Apps**, **Recent** and **Search** — so the
+  panel is useful even when the suggestion it shows is not the one you want.
 - Add it from **Settings → Tiles → Home screen widget**; the same screen has a live preview and a
   switch to hide app names. A lightweight half-hour alarm keeps repainting it (and switching to the
   current hour's suggestions) even when 囤囤 has not been opened; the suggestion *data* is recomputed

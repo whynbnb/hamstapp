@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quick action in the recommendation widget's header: the 最近 tab. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="@color/widget_text_dim"
+        android:strokeWidth="1.8"
+        android:pathData="M12,4.6 A7.4,7.4 0 1 1 11.99,4.6" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="@color/widget_text_dim"
+        android:strokeLineCap="round"
+        android:strokeWidth="1.8"
+        android:pathData="M12,7.6 L12,12 L15.2,13.8" />
+</vector>

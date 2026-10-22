@@ -12,5 +12,8 @@
     <string name="pagebar_widget_label">囤囤 · 磁贴页</string>
     <string name="pagebar_widget_description">磁贴页标签，点一下跳到那一页</string>
     <string name="pagebar_widget_empty">打开囤囤</string>
+    <string name="widget_quick_apps">应用</string>
+    <string name="widget_quick_recent">最近</string>
+    <string name="widget_quick_search">搜索</string>
     <string name="widget_description">此刻推荐的应用</string>
 </resources>

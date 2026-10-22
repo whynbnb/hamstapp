@@ -7,6 +7,7 @@ import '../l10n/app_strings.dart';
 import '../services/native_apps.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
+import 'global_search_screen.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/uninstall_reason.dart';
 import 'apps_screen.dart';
@@ -87,6 +88,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       return;
     }
     switch (id) {
+      case 'apps':
+        _select(state, 1);
+      case 'search':
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const GlobalSearchScreen()),
+        );
       case 'scan':
         _select(state, 1);
         unawaited(state.scan());

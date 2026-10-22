@@ -191,6 +191,19 @@ object WidgetRenderer {
         val columns = ((widthDp - 20) / 52).coerceIn(2, COLUMNS)
 
         views.setOnClickPendingIntent(R.id.widget_header, openApp(context, widgetId))
+        // Quick actions on the right of the header.
+        views.setOnClickPendingIntent(
+            R.id.widget_quick_apps,
+            shortcut(context, widgetId, 20, "apps"),
+        )
+        views.setOnClickPendingIntent(
+            R.id.widget_quick_recent,
+            shortcut(context, widgetId, 21, "recent"),
+        )
+        views.setOnClickPendingIntent(
+            R.id.widget_quick_search,
+            shortcut(context, widgetId, 22, "search"),
+        )
 
         val data = WidgetStore.readData(context)
         val title = slotFor(data)?.optString("title").orEmpty()
@@ -435,6 +448,26 @@ object WidgetRenderer {
             text,
         )
         return out
+    }
+
+    /** Opens 囤囤 on a screen; MainActivity forwards the action to Dart. */
+    private fun shortcut(
+        context: Context,
+        widgetId: Int,
+        slot: Int,
+        action: String,
+    ): PendingIntent {
+        val intent = Intent(context, MainActivity::class.java).apply {
+            this.action = "me.whynbnb.hamstapp.action.SHORTCUT"
+            putExtra("hamstapp.action", action)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            widgetId * 32 + slot,
+            intent,
+            flags(),
+        )
     }
 
     private fun openApp(context: Context, widgetId: Int): PendingIntent {
