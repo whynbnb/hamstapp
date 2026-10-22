@@ -68,7 +68,10 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - **Categories** — group apps with an emoji and a colour; reorder by hand or by name / count.
 - **Favorites** — a quick grid of the apps you starred.
 - **Recent** — launch history with *all / today / 7-day / 30-day* filters, sorted by recency or frequency,
-  plus time-of-day **recommendations** learned from your habits.
+  plus time-of-day **recommendations** learned from your habits. The list fixes its order when you
+  enter the tab — launching an app updates its count and time but never makes the other rows jump —
+  and re-sorts when you come back to it. Usage-sorted info tiles (最近使用 / 常用 / 长期未打开) do the
+  same while their page stays open.
 - **Notification badges** — grant notification access, turn on *Capture notifications*, and app icons
   get an unread bubble: choose **count / dot / hidden**, set separately for the tile board and the rest.
   Badges follow **unread** semantics: dismissing a notification keeps the bubble, which clears when you
@@ -80,6 +83,10 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   service) shows the same apps as **Recent → Recommendations** for the current hour — at most two
   rows — or the most used / pinned apps when there are no suggestions yet. The widget follows the
   system light / dark theme.
+- **Icons stay put within the hour.** The layout picked for the current hour is kept even when you
+  launch one of its apps, so the grid never shifts under your finger (and never looks like the tap
+  landed on the wrong icon). It refreshes at the next hour, or right away from the refresh button in
+  the widget settings. 最近 → 推荐 follows the same rule.
 - **Tile page tabs (4×1).** A slim second widget with the tile board's pages; tap a tab to open
   that page in 囤囤. Only the current page gets a pill — the rest are plain labels, so a short list
   never turns into stretched grey buttons. Emoji page names are drawn large (up to 30sp) and shrink
@@ -95,7 +102,7 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - Add it from **Settings → Tiles → Home screen widget**; the same screen has a live preview and a
   switch to hide app names. A lightweight half-hour alarm keeps repainting it (and switching to the
   current hour's suggestions) even when 囤囤 has not been opened; the suggestion *data* is recomputed
-  whenever 囤囤 runs.
+  whenever 囤囤 runs, while the current hour's layout stays put.
 
 ### 📦 App manager
 - Scan installed apps (optionally including system apps); the list is cached for instant launch.
@@ -251,7 +258,8 @@ back as suggestions:
   shortcuts, global search; hidden apps, custom icons, 整理与体检, per-app usage and traffic, install
   source breakdown; icon packs, font size / density, two-pane tablets; auto snapshots, WebDAV
   backup, preview/merge import, snapshot-difference export; home-screen widget with hourly
-  recommendations whose taps count as launches.
+  recommendations whose taps count as launches; recommendation layouts and usage-sorted lists keep
+  their order while you are looking at them, so a launch never shifts the other icons.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

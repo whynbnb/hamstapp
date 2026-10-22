@@ -205,6 +205,41 @@ void main() {
       expect(names, isNot(contains('com.ghost')));
     });
 
+    test('the live recommendation order stays put for the hour', () {
+      final now = DateTime.now();
+      final minute = now.hour * 60 + now.minute;
+      final state = AppState(_MemStorage())
+        ..apps = [_ai('com.a', 'A'), _ai('com.b', 'B')];
+      for (var d = 1; d <= 4; d++) {
+        final day = DateTime(now.year, now.month, now.day - d);
+        final at = day.add(Duration(minutes: minute));
+        state.launchLog.add(_ev('com.a', at));
+        state.launchLog.add(_ev('com.b', at));
+      }
+
+      final first = state.recommendedApps().map((r) => r.packageName).toList();
+      expect(first, isNotEmpty);
+
+      // A burst that would normally promote B on its own.
+      for (var d = 1; d <= 6; d++) {
+        state.launchLog.add(
+          _ev(
+            'com.b',
+            DateTime(now.year, now.month, now.day - d)
+                .add(Duration(minutes: minute)),
+          ),
+        );
+      }
+
+      // The live call keeps the order shown earlier this hour, while an
+      // explicit "now" asks for a fresh ranking.
+      final second = state.recommendedApps().map((r) => r.packageName).toList();
+      expect(second, first);
+      final fresh =
+          state.recommendedApps(now: now).map((r) => r.packageName).toList();
+      expect(fresh.first, 'com.b');
+    });
+
     test('recommendations can be turned off and persist', () async {
       final storage = _MemStorage();
       final state = AppState(storage);
@@ -291,6 +326,56 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
 
       expect(find.text('推荐'), findsNothing);
+    });
+
+    testWidgets('launching an app does not reorder the list', (tester) async {
+      final now = DateTime.now();
+      final state = AppState(_MemStorage())
+        ..initialized = true
+        ..apps = [_ai('com.a', 'Alpha'), _ai('com.b', 'Beta')]
+        ..launchLog = [
+          LaunchEvent(
+            packageName: 'com.a',
+            at: now.subtract(const Duration(minutes: 10)).millisecondsSinceEpoch,
+          ),
+          LaunchEvent(
+            packageName: 'com.b',
+            at: now.subtract(const Duration(minutes: 5)).millisecondsSinceEpoch,
+          ),
+        ]
+        ..tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)]
+        ..currentTilePageIndex = 0
+        ..settings = {
+          'remember_position': true,
+          'last_launch_tab': 0,
+          'recent_recommendations': false,
+        };
+      state.metaFor('com.a').lastLaunchedAt = now
+          .subtract(const Duration(minutes: 10))
+          .millisecondsSinceEpoch;
+      state.metaFor('com.b').lastLaunchedAt = now
+          .subtract(const Duration(minutes: 5))
+          .millisecondsSinceEpoch;
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: const MaterialApp(home: QuickLaunchScreen()),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+
+      double top(String name) => tester.getTopLeft(find.text(name)).dy;
+      final alphaTop = top('Alpha');
+      final betaTop = top('Beta');
+      expect(betaTop, lessThan(alphaTop));
+
+      // Alpha is now the most recent one; the rows on screen must stay put.
+      await state.markLaunched('com.a');
+      await tester.pump();
+
+      expect(top('Alpha'), alphaTop);
+      expect(top('Beta'), betaTop);
     });
 
     testWidgets('fills the grid with at most eight suggestions', (

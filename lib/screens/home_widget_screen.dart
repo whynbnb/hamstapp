@@ -91,7 +91,8 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
   }
 
   Future<void> _push(AppState state) async {
-    await state.syncHomeWidget(force: true);
+    // An explicit refresh is allowed to change the hour's layout.
+    await state.refreshHomeWidgetNow();
     await state.syncPageWidget();
     await _load();
   }
@@ -100,8 +101,7 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
   Widget build(BuildContext context) {
     final s = context.strings;
     final state = context.watch<AppState>();
-    final now = DateTime.now();
-    final suggestion = state.homeWidgetSuggestionForHour(now.hour, at: now);
+    final suggestion = state.homeWidgetNow();
     final title = state.homeWidgetTitleFor(suggestion.kind);
 
     return Scaffold(

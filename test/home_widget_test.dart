@@ -91,6 +91,50 @@ void main() {
       expect((data['fallback'] as List), isEmpty);
     });
 
+    test('the current hour keeps its order when an app is used', () {
+      final state = _state();
+      state.metaFor('com.a').lastLaunchedAt = 1000;
+      state.metaFor('com.b').lastLaunchedAt = 2000;
+
+      List<String> currentPackages() {
+        final hour = DateTime.now().hour;
+        final slot =
+            (state.buildHomeWidgetData()['slots'] as List)[hour] as Map;
+        return [
+          for (final a in slot['apps'] as List) (a as Map)['p'] as String,
+        ];
+      }
+
+      // No launch log yet: the fallback is 最近常用, newest first.
+      expect(currentPackages(), ['com.b', 'com.a']);
+
+      // Using A now would normally move it to the front. The hour's pick must
+      // stay put so the widget does not look like it registered a wrong tap.
+      state.metaFor('com.a').lastLaunchedAt = 3000;
+      expect(currentPackages(), ['com.b', 'com.a']);
+    });
+
+    test('hiding an app drops it from the frozen hour, keeping the rest', () {
+      final state = _state();
+      state.metaFor('com.a').lastLaunchedAt = 1000;
+      state.metaFor('com.b').lastLaunchedAt = 2000;
+
+      Map slot() {
+        final hour = DateTime.now().hour;
+        return (state.buildHomeWidgetData()['slots'] as List)[hour] as Map;
+      }
+
+      expect(
+        [for (final a in slot()['apps'] as List) (a as Map)['p']],
+        ['com.b', 'com.a'],
+      );
+      state.metaFor('com.b').hidden = true;
+      expect(
+        [for (final a in slot()['apps'] as List) (a as Map)['p']],
+        ['com.a'],
+      );
+    });
+
     test('a time-of-day habit becomes a recommendation', () {
       final state = _state();
       final now = DateTime.now();

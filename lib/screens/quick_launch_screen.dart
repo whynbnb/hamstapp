@@ -3009,7 +3009,7 @@ class _FavoritesTab extends StatelessWidget {
 
 // ---------------------------------------------------------------- 最近
 
-class _RecentTab extends StatelessWidget {
+class _RecentTab extends StatefulWidget {
   const _RecentTab({
     required this.state,
     required this.sort,
@@ -3020,15 +3020,55 @@ class _RecentTab extends StatelessWidget {
   final int sinceMillis;
 
   @override
+  State<_RecentTab> createState() => _RecentTabState();
+}
+
+class _RecentTabState extends State<_RecentTab> {
+  /// The order already shown in this visit. A launch updates the timestamps
+  /// and counts, but must not make the rows jump under the user's finger; the
+  /// list refreshes when the tab is entered again (the pager disposes it).
+  List<String>? _order;
+
+  @override
+  void didUpdateWidget(covariant _RecentTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.sort != widget.sort ||
+        oldWidget.sinceMillis != widget.sinceMillis) {
+      _order = null;
+    }
+  }
+
+  List<AppInfo> _inOrder(List<AppInfo> fresh) {
+    final order = _order;
+    if (order == null) {
+      _order = [for (final a in fresh) a.packageName];
+      return fresh;
+    }
+    final byPackage = {for (final a in fresh) a.packageName: a};
+    final out = <AppInfo>[];
+    for (final packageName in order) {
+      final app = byPackage.remove(packageName);
+      if (app != null) out.add(app);
+    }
+    // Newly launched apps join at the end instead of pushing the rest down.
+    out.addAll(byPackage.values);
+    _order = [for (final a in out) a.packageName];
+    return out;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final apps = state.recentAppsBy(sort, sinceMillis: sinceMillis);
+    final state = widget.state;
+    final apps = _inOrder(
+      state.recentAppsBy(widget.sort, sinceMillis: widget.sinceMillis),
+    );
     final recs = state.recommendedApps();
 
     if (apps.isEmpty && recs.isEmpty) {
       return _hint(
         context,
         icon: Icons.history,
-        text: sinceMillis > 0
+        text: widget.sinceMillis > 0
             ? context.strings.t('该时间段内没有启动记录\n可在右上角调整时间段')
             : context.strings.t('还没有启动记录\n从囤囤里启动应用后会出现在这里'),
       );
@@ -3054,7 +3094,7 @@ class _RecentTab extends StatelessWidget {
             child: _hint(
               context,
               icon: Icons.history,
-              text: sinceMillis > 0
+              text: widget.sinceMillis > 0
                   ? context.strings.t('该时间段内没有启动记录\n可在右上角调整时间段')
                   : context.strings.t('还没有启动记录\n从囤囤里启动应用后会出现在这里'),
             ),
@@ -3064,8 +3104,8 @@ class _RecentTab extends StatelessWidget {
   }
 
   Widget _recentTile(BuildContext context, AppInfo app) {
-    final meta = state.metaFor(app.packageName);
-    final name = state.displayNameFor(app.packageName);
+    final meta = widget.state.metaFor(app.packageName);
+    final name = widget.state.displayNameFor(app.packageName);
     return ListTile(
       leading: AppIcon(packageName: app.packageName, label: name),
       title: Text(name),

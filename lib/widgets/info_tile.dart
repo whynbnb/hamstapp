@@ -23,6 +23,7 @@ import '../utils/actions.dart';
 import '../utils/format.dart';
 import 'app_icon.dart';
 import 'info_tile_sheets.dart';
+import 'stable_app_order.dart';
 
 /// Backdrop colour of an info tile, picked so the kinds are recognisable next
 /// to a board full of app-coloured tiles.
@@ -1005,30 +1006,41 @@ class _InfoTileContentState extends State<InfoTileContent> {
         ),
       );
     }
-    final shown = apps.take(4).toList();
     return Padding(
       padding: EdgeInsets.all(pad),
       child: Column(
         children: [
           Expanded(
-            child: GridView.count(
-              crossAxisCount: 2,
-              physics: const NeverScrollableScrollPhysics(),
-              mainAxisSpacing: 4,
-              crossAxisSpacing: 4,
-              children: [
-                for (final a in shown)
-                  gestureLaunch(
-                    context,
-                    a.packageName,
-                    AppIcon(
-                      packageName: a.packageName,
-                      label: state.displayNameFor(a.packageName),
-                      showNotificationBadge: false,
-                      size: (shortest * 0.28).clamp(18.0, 40.0),
+            // 最近 / 常用 / 长期未打开 are sorted by usage, so using one of the
+            // shown apps would otherwise reshuffle the other three. Keep the
+            // order shown while this tile stays on screen; it refreshes when
+            // the page is entered again.
+            child: StableAppOrder(
+              key: ValueKey(
+                '${widget.tile.id}:${widget.tile.kind.name}:'
+                '${widget.tile.options}',
+              ),
+              apps: apps,
+              limit: 4,
+              builder: (context, shown) => GridView.count(
+                crossAxisCount: 2,
+                physics: const NeverScrollableScrollPhysics(),
+                mainAxisSpacing: 4,
+                crossAxisSpacing: 4,
+                children: [
+                  for (final a in shown)
+                    gestureLaunch(
+                      context,
+                      a.packageName,
+                      AppIcon(
+                        packageName: a.packageName,
+                        label: state.displayNameFor(a.packageName),
+                        showNotificationBadge: false,
+                        size: (shortest * 0.28).clamp(18.0, 40.0),
+                      ),
                     ),
-                  ),
-              ],
+                ],
+              ),
             ),
           ),
           if (showCaption)

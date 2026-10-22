@@ -458,6 +458,10 @@ class AppState extends ChangeNotifier {
     snapshots = await _loadSnapshots();
     backupLists = await _loadBackupLists();
     settings = await _loadSettings();
+    final hourPick = await storage.readJson(_kWidgetHourPick);
+    if (hourPick is Map) {
+      _hourPick = hourPick.cast<String, dynamic>();
+    }
     // Restore the remembered filter/sort before the first build.
     restoreAppFilters();
     IconCache.instance.replaceAll(
@@ -1572,6 +1576,9 @@ class AppState extends ChangeNotifier {
 
   Future<void> _persistTiles() async {
     await storage.writeJson(_kTiles, tiles.map((t) => t.toMap()).toList());
+    // A tile edit is deliberate (unlike a launch), so the widget may adopt the
+    // new pinned order at once instead of waiting for the next hour.
+    if (initialized) _forgetHour();
   }
 
   Tile? tileById(String id) {
@@ -2362,12 +2369,22 @@ class AppState extends ChangeNotifier {
 
   Future<void> setRecommendationsEnabled(bool value) async {
     settings['recent_recommendations'] = value;
+    _resetRecommendationPicks();
     await _persistSettings();
     notifyListeners();
     unawaited(syncHomeWidget(force: true));
   }
 
   // ---- desktop widget
+
+  /// The recommendation layout chosen for the current hour. See
+  /// [buildHomeWidgetData]; persisted so a restart cannot shuffle the widget.
+  Map<String, dynamic>? _hourPick;
+
+  /// The same idea for the in-app 推荐 grid: the live call keeps the order it
+  /// first showed this hour, so tapping one icon does not reshuffle the rest.
+  String? _recsHourKey;
+  List<Recommendation>? _recsHour;
 
   /// Whether the home-screen widget draws the app name under each icon.
   bool get widgetShowLabels =>
@@ -2462,15 +2479,15 @@ class AppState extends ChangeNotifier {
   Map<String, dynamic> buildHomeWidgetData() {
     final s = AppStrings.current;
     final now = DateTime.now();
+    // Keep the layout picked at the start of this hour. A launch is recorded
+    // straight away, but moving the icons under the user's finger reads as a
+    // mis-tap; the recommendation refreshes on the next hour instead.
+    final pick = _pickFor(now);
     final icons = <String, String>{};
     final slots = <Map<String, dynamic>>[];
     for (var h = 0; h < 24; h++) {
-      // The current hour uses the exact moment, so the widget agrees with the
-      // 推荐 section in 最近 instead of showing the top of the hour.
-      final suggestion = homeWidgetSuggestionForHour(
-        h,
-        at: h == now.hour ? now : null,
-      );
+      final suggestion =
+          h == now.hour ? pick : homeWidgetSuggestionForHour(h);
       slots.add({
         'h': h,
         'title': homeWidgetTitleFor(suggestion.kind),
@@ -2491,6 +2508,64 @@ class AppState extends ChangeNotifier {
       // icons. Everything else is read from PackageManager by the widget.
       'icons': icons,
     };
+  }
+
+  /// The local hour a pick belongs to, e.g. `2026-10-22-9`.
+  static String _hourKey(DateTime at) =>
+      '${at.year}-${at.month}-${at.day}-${at.hour}';
+
+  /// The recommendation the widget is showing right now. The settings preview
+  /// and the pushed document both use this, so they never disagree.
+  ({List<AppInfo> apps, String kind}) homeWidgetNow() =>
+      _pickFor(DateTime.now());
+
+  ({List<AppInfo> apps, String kind}) _pickFor(DateTime now) {
+    final key = _hourKey(now);
+    final frozen = _frozenHour(key);
+    if (frozen != null) return frozen;
+    final fresh = homeWidgetSuggestionForHour(now.hour, at: now);
+    if (fresh.apps.isNotEmpty) _rememberHour(key, fresh.kind, fresh.apps);
+    return fresh;
+  }
+
+  /// The layout stored for [key], minus apps that were uninstalled or hidden
+  /// since. Null when the hour is over or nothing is left.
+  ({List<AppInfo> apps, String kind})? _frozenHour(String key) {
+    final pick = _hourPick;
+    if (pick == null || pick['k'] != key) return null;
+    final kind = pick['kind'];
+    final packages = pick['pkgs'];
+    if (kind is! String || kind.isEmpty || packages is! List) return null;
+    final apps = <AppInfo>[];
+    for (final raw in packages) {
+      if (raw is! String) continue;
+      final app = appByPackage(raw);
+      if (app == null) continue;
+      if (metaFor(raw).hidden) continue;
+      apps.add(app);
+    }
+    return apps.isEmpty ? null : (apps: apps, kind: kind);
+  }
+
+  void _rememberHour(String key, String kind, List<AppInfo> apps) {
+    final pick = <String, dynamic>{
+      'k': key,
+      'kind': kind,
+      'pkgs': [for (final a in apps) a.packageName],
+    };
+    _hourPick = pick;
+    unawaited(
+      storage.writeJson(_kWidgetHourPick, pick).catchError((Object _) {}),
+    );
+  }
+
+  /// Drops the stored hour pick, e.g. after the recommendation source changed.
+  void _forgetHour() {
+    if (_hourPick == null) return;
+    _hourPick = null;
+    unawaited(
+      storage.writeJson(_kWidgetHourPick, null).catchError((Object _) {}),
+    );
   }
 
   /// One entry for the widget. An app carries the launcher entry the user
@@ -2559,6 +2634,14 @@ class AppState extends ChangeNotifier {
         '桌面小组件 · 已更新推荐 · $count 个应用',
       );
     }
+  }
+
+  /// Recomputes the current hour's layout on request (the widget settings'
+  /// refresh button). Launches deliberately never go through here, so the
+  /// icons stay still while the user is using them.
+  Future<void> refreshHomeWidgetNow() async {
+    _resetRecommendationPicks();
+    await syncHomeWidget(force: true);
   }
 
   /// The 4x1 page-tab strip's document: the page names, in order, and which
@@ -4058,22 +4141,53 @@ class AppState extends ChangeNotifier {
     if (!recommendationsEnabled || apps.isEmpty || launchLog.isEmpty) {
       return const <Recommendation>[];
     }
+    final at = now ?? DateTime.now();
+    // Live calls (the 最近 grid) keep the order chosen earlier this hour.
+    // Explicit `now` asks for a fresh ranking and is left untouched.
+    final live = now == null;
+    final key = _hourKey(at);
+    if (live && _recsHourKey == key) {
+      final cached = _recsHour;
+      if (cached != null) {
+        final kept = <Recommendation>[
+          for (final r in cached)
+            if (appByPackage(r.packageName) != null &&
+                !metaFor(r.packageName).hidden)
+              r,
+        ];
+        if (kept.isNotEmpty) return kept.take(limit).toList();
+      }
+    }
     final installed = <String>{for (final a in apps) a.packageName};
     final events = launchLog
         .where((e) => installed.contains(e.packageName))
         .toList(growable: false);
     if (events.isEmpty) return const <Recommendation>[];
-    final at = now ?? DateTime.now();
-    return Recommender.recommend(
+    final recs = Recommender.recommend(
       events,
       nowMillis: at.millisecondsSinceEpoch,
       limit: limit,
     );
+    if (live) {
+      _recsHourKey = key;
+      _recsHour = recs;
+    }
+    return recs;
+  }
+
+  /// Rebuilds both recommendation surfaces (widget and 最近 → 推荐) on the
+  /// next use. Called when the input changes on purpose: the switch, or a
+  /// cleared launch history.
+  void _resetRecommendationPicks() {
+    _recsHourKey = null;
+    _recsHour = null;
+    _forgetHour();
   }
 
   /// Wipes every launch timestamp and count, so the 最近 list and suggestions
   /// start over.
   Future<void> clearLaunchHistory() async {
+    _resetRecommendationPicks();
     launchLog = <LaunchEvent>[];
     for (final m in meta.values) {
       m.lastLaunchedAt = 0;
@@ -4092,6 +4206,7 @@ class AppState extends ChangeNotifier {
   /// Forgets one app's usage: drops its launch timestamps, count and last-used
   /// time, so it leaves 最近 / 使用趋势 as if it had never been launched.
   Future<void> clearLaunchHistoryFor(String packageName) async {
+    _resetRecommendationPicks();
     final before = launchLog.length;
     launchLog.removeWhere((e) => e.packageName == packageName);
     if (launchLog.length == before) {
@@ -4255,6 +4370,10 @@ class AppState extends ChangeNotifier {
   static const _kTiles = 'tiles';
   static const _kSettings = 'settings';
   static const _kLaunchLog = 'launch_log';
+
+  /// The recommendation layout kept for the current hour (see
+  /// [buildHomeWidgetData]).
+  static const _kWidgetHourPick = 'widget_hour_pick';
 
   /// Index of the 磁贴 launch sub-tab in the current order
   /// (最近 / 磁贴 / 分类 / 收藏).
