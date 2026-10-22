@@ -1,10 +1,12 @@
 package me.whynbnb.hamstapp
 
 import android.app.Activity
+import android.app.AlarmManager
 import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -147,6 +149,10 @@ object WidgetRenderer {
             )
         }.getOrDefault(IntArray(0))
         for (id in ids) update(context, manager, id)
+        // The system's updatePeriodMillis is only a hint and some launchers
+        // stop honouring it once the app process dies. Re-arm our own alarm on
+        // every render (cancel it when the last widget is gone).
+        WidgetScheduler.schedule(context)
     }
 
     fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
@@ -457,9 +463,77 @@ object WidgetRenderer {
 }
 
 /**
+ * Keeps the widget ticking while 囤囤 is not running.
+ *
+ * `updatePeriodMillis` is only a hint; many launchers/OEMs throttle it (or stop
+ * delivering it) once the app process is gone, which leaves the widget on the
+ * slot from the last time the app ran. An inexact alarm wakes the provider,
+ * repaints from the stored document (it already has one entry per hour) and
+ * re-arms itself. No service and no wake lock: a few RemoteViews every half
+ * hour, roughly one alarm per doze window.
+ */
+object WidgetScheduler {
+    private const val ACTION = "me.whynbnb.hamstapp.action.WIDGET_REFRESH"
+    private const val REQUEST_CODE = 0x77A1
+    private const val INTERVAL_MS = 30 * 60 * 1000L
+
+    fun schedule(context: Context) {
+        val manager = AppWidgetManager.getInstance(context) ?: return
+        val ids = runCatching {
+            manager.getAppWidgetIds(
+                ComponentName(context, HamstappWidgetProvider::class.java),
+            )
+        }.getOrDefault(IntArray(0))
+        if (ids.isEmpty()) {
+            cancel(context)
+            return
+        }
+        val alarms = context.getSystemService(Context.ALARM_SERVICE)
+            as? AlarmManager ?: return
+        val now = System.currentTimeMillis()
+        val next = now - now % INTERVAL_MS + INTERVAL_MS
+        runCatching {
+            // Inexact on purpose: exact alarms need a special permission on
+            // Android 12+ and the widget only needs the current hour, not a
+            // millisecond-precise tick.
+            alarms.setAndAllowWhileIdle(
+                AlarmManager.RTC_WAKEUP,
+                next,
+                pending(context),
+            )
+        }
+    }
+
+    fun cancel(context: Context) {
+        val alarms = context.getSystemService(Context.ALARM_SERVICE)
+            as? AlarmManager ?: return
+        runCatching { alarms.cancel(pending(context)) }
+    }
+
+    private fun pending(context: Context): PendingIntent {
+        val intent = Intent(context, WidgetRefreshReceiver::class.java)
+            .setAction(ACTION)
+        return PendingIntent.getBroadcast(
+            context,
+            REQUEST_CODE,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+}
+
+/** Alarm target: repaint the stored document and keep the chain going. */
+class WidgetRefreshReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        WidgetRenderer.updateAll(context)
+        WidgetScheduler.schedule(context)
+    }
+}
+
+/**
  * The widget itself. It only rebuilds a handful of RemoteViews on the
- * platform's half-hour tick, on resize and when Dart pushes new suggestions;
- * there is no service, no alarm and no wake lock.
+ * platform's tick, on resize, on our own alarm and when Dart pushes new
+ * suggestions; there is no service and no wake lock.
  */
 class HamstappWidgetProvider : AppWidgetProvider() {
     override fun onUpdate(
@@ -479,13 +553,29 @@ class HamstappWidgetProvider : AppWidgetProvider() {
         WidgetRenderer.update(context, appWidgetManager, appWidgetId)
     }
 
+    override fun onEnabled(context: Context) {
+        WidgetScheduler.schedule(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        WidgetScheduler.cancel(context)
+    }
+
     override fun onReceive(context: Context, intent: Intent) {
         super.onReceive(context, intent)
-        // A widget keeps the RemoteViews the old build produced until someone
-        // repaints it. Installing an update must not leave square icons or the
-        // old layout on the home screen.
-        if (intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
-            WidgetRenderer.updateAll(context)
+        when (intent.action) {
+            // A widget keeps the RemoteViews the old build produced until
+            // someone repaints it. Installing an update must not leave the old
+            // layout on the home screen.
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            // Alarms do not survive a reboot; start the chain again. The clock
+            // or timezone moving also changes which hourly slot is current.
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_TIME_CHANGED,
+            Intent.ACTION_TIMEZONE_CHANGED -> {
+                WidgetRenderer.updateAll(context)
+                WidgetScheduler.schedule(context)
+            }
         }
     }
 }
