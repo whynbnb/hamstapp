@@ -235,6 +235,12 @@ const Map<String, String> _en = <String, String>{
   '下半屏滑动切换启动子标签，上半屏滑动切换磁贴页':
       'Swipe the bottom half to switch launch sub-tabs, the top half for tile pages',
   '显示应用名称': 'Show app name',
+  '小组件选项': 'Widget options',
+  '显示个数': 'Apps shown',
+  '最多显示 {n} 个': 'Up to {n} apps',
+  '圆角图标': 'Rounded icons',
+  '裁成圆角方块，默认保留应用自己的形状':
+      'Clip to rounded squares; apps keep their own shape by default',
   '关闭后磁贴只显示图标': 'When off, the tile shows only its icon',
   '内边距': 'Inner padding',
   '关闭后内容填满磁贴': 'When off, content fills the tile',

@@ -99,6 +99,9 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   (icon, label and activity), and hand-added web apps open in their own window (or the chosen browser).
 - The header's right side carries three shortcuts — **Apps**, **Recent** and **Search** — so the
   panel is useful even when the suggestion it shows is not the one you want.
+- **Options** (Settings → Tiles → Home screen widget): hide the app names for a tighter grid, cap it
+  at **4 / 6 / 8 apps** (4 fills exactly one row), and clip the icons to **rounded squares**. Icons
+  keep their own silhouette by default.
 - Add it from **Settings → Tiles → Home screen widget**; the same screen has a live preview and a
   switch to hide app names. A lightweight half-hour alarm keeps repainting it (and switching to the
   current hour's suggestions) even when 囤囤 has not been opened; the suggestion *data* is recomputed
@@ -259,7 +262,8 @@ back as suggestions:
   source breakdown; icon packs, font size / density, two-pane tablets; auto snapshots, WebDAV
   backup, preview/merge import, snapshot-difference export; home-screen widget with hourly
   recommendations whose taps count as launches; recommendation layouts and usage-sorted lists keep
-  their order while you are looking at them, so a launch never shifts the other icons.
+  their order while you are looking at them, so a launch never shifts the other icons; widget options
+  for app names, the 4 / 6 / 8 app limit and rounded icons.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

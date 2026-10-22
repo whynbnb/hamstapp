@@ -268,6 +268,57 @@ void main() {
       expect(data['current'], 0);
     });
 
+    test('the count limit and rounded flag reach the widget', () {
+      final state = AppState(_MemStorage())
+        ..initialized = true
+        ..apps = [for (var i = 0; i < 8; i++) _app('com.$i', 'App$i')]
+        ..tilePages = [TilePage(id: 'p1', name: 'P1', createdAt: 0)]
+        ..tiles = [
+          for (var i = 0; i < 8; i++)
+            Tile(
+              id: 't$i',
+              packageName: 'com.$i',
+              pageId: 'p1',
+              col: i % 4,
+              row: i ~/ 4,
+            ),
+        ]
+        ..settings = {
+          'widget_max_apps': 4,
+          'widget_rounded_icons': true,
+        };
+
+      final data = state.buildHomeWidgetData();
+      expect(data['showLabels'], isTrue);
+      expect(data['roundedIcons'], isTrue);
+      expect(data['fallback'] as List, hasLength(4));
+
+      final slots = (data['slots'] as List).cast<Map<String, dynamic>>();
+      for (final slot in slots) {
+        expect((slot['apps'] as List).length, lessThanOrEqualTo(4));
+      }
+      expect((slots[DateTime.now().hour]['apps'] as List), hasLength(4));
+    });
+
+    test('the widget options are stored', () async {
+      final storage = _MemStorage();
+      final state = AppState(storage)..initialized = true;
+      expect(state.widgetMaxApps, 8);
+      expect(state.widgetRoundedIcons, isFalse);
+
+      await state.setWidgetMaxApps(4);
+      await state.setWidgetRoundedIcons(true);
+      expect(state.widgetMaxApps, 4);
+      expect(state.widgetRoundedIcons, isTrue);
+
+      final restored = AppState(storage)
+        ..initialized = true
+        ..settings = (await storage.readJson('settings') as Map)
+            .cast<String, dynamic>();
+      expect(restored.widgetMaxApps, 4);
+      expect(restored.widgetRoundedIcons, isTrue);
+    });
+
     test('the label setting is stored', () async {
       final storage = _MemStorage();
       final state = AppState(storage)..initialized = true;
@@ -319,20 +370,56 @@ void main() {
 
     expect(find.text('还没有添加到桌面'), findsOneWidget);
     expect(find.text('添加到桌面'), findsOneWidget);
+    expect(find.text('小组件选项'), findsOneWidget);
     expect(find.text('显示应用名称'), findsOneWidget);
+    expect(find.text('显示个数'), findsOneWidget);
+    expect(find.text('圆角图标'), findsOneWidget);
 
-    // The 4x1 strip's section is below the fold.
-    await tester.drag(find.byType(ListView), const Offset(0, -600));
+    // Pin from the top of the page.
+    await tester.scrollUntilVisible(find.text('添加到桌面'), 120);
     await tester.pumpAndSettle();
-    expect(find.text('磁贴页标签条'), findsOneWidget);
-    expect(find.text('添加标签条到桌面'), findsOneWidget);
-
     await tester.tap(find.text('添加到桌面'));
     await tester.pumpAndSettle();
     expect(calls, contains('requestPinWidget'));
 
-    await tester.tap(find.byType(SwitchListTile));
+    // Hide the names.
+    await tester.scrollUntilVisible(
+      find.widgetWithText(SwitchListTile, '显示应用名称'),
+      200,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(SwitchListTile, '显示应用名称'));
     await tester.pumpAndSettle();
     expect(state.widgetShowLabels, isFalse);
+
+    // Limit the number of apps to four.
+    await tester.scrollUntilVisible(
+      find.byType(SegmentedButton<int>),
+      200,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.descendant(
+        of: find.byType(SegmentedButton<int>),
+        matching: find.text('4'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(state.widgetMaxApps, 4);
+
+    // Round the icons.
+    await tester.scrollUntilVisible(
+      find.widgetWithText(SwitchListTile, '圆角图标'),
+      200,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.widgetWithText(SwitchListTile, '圆角图标'));
+    await tester.pumpAndSettle();
+    expect(state.widgetRoundedIcons, isTrue);
+
+    // The 4x1 strip's section is further down.
+    await tester.scrollUntilVisible(find.text('磁贴页标签条'), 300);
+    await tester.pumpAndSettle();
+    expect(find.text('添加标签条到桌面'), findsOneWidget);
   });
 }

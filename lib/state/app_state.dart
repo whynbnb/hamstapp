@@ -2397,6 +2397,37 @@ class AppState extends ChangeNotifier {
     unawaited(syncHomeWidget(force: true));
   }
 
+  /// How many apps the widget shows at most. One row on a 4-wide widget is 4;
+  /// the 4x2 card fits 8. 6 is offered for a balanced 4 + 2 layout.
+  int get widgetMaxApps {
+    final raw = (settings['widget_max_apps'] as num?)?.toInt() ?? 8;
+    return _kWidgetAppCounts.contains(raw) ? raw : 8;
+  }
+
+  static const Set<int> _kWidgetAppCounts = {4, 6, 8};
+
+  Future<void> setWidgetMaxApps(int value) async {
+    final next = _kWidgetAppCounts.contains(value) ? value : 8;
+    if (widgetMaxApps == next) return;
+    settings['widget_max_apps'] = next;
+    await _persistSettings();
+    notifyListeners();
+    unawaited(syncHomeWidget(force: true));
+  }
+
+  /// Whether the widget clips app icons to rounded squares. Off by default so
+  /// every app keeps its own silhouette.
+  bool get widgetRoundedIcons =>
+      settings['widget_rounded_icons'] as bool? ?? false;
+
+  Future<void> setWidgetRoundedIcons(bool value) async {
+    if (widgetRoundedIcons == value) return;
+    settings['widget_rounded_icons'] = value;
+    await _persistSettings();
+    notifyListeners();
+    unawaited(syncHomeWidget(force: true));
+  }
+
   /// Apps the desktop widget shows at [hour] (0-23), plus where they came from:
   /// `recommend`, `recent`, `pinned` or `empty`.
   ///
@@ -2484,6 +2515,7 @@ class AppState extends ChangeNotifier {
     // mis-tap; the recommendation refreshes on the next hour instead.
     final pick = _pickFor(now);
     final icons = <String, String>{};
+    final maxApps = widgetMaxApps;
     final slots = <Map<String, dynamic>>[];
     for (var h = 0; h < 24; h++) {
       final suggestion =
@@ -2491,7 +2523,10 @@ class AppState extends ChangeNotifier {
       slots.add({
         'h': h,
         'title': homeWidgetTitleFor(suggestion.kind),
-        'apps': [for (final a in suggestion.apps) _homeWidgetApp(a, icons)],
+        'apps': [
+          for (final a in suggestion.apps.take(maxApps))
+            _homeWidgetApp(a, icons),
+        ],
       });
     }
     final hour = now.hour;
@@ -2500,6 +2535,7 @@ class AppState extends ChangeNotifier {
       'version': 2,
       'updatedAt': now.millisecondsSinceEpoch,
       'showLabels': widgetShowLabels,
+      'roundedIcons': widgetRoundedIcons,
       'title': current['title'],
       'empty': s.t('在囤囤里启动几次应用，这里就会出现推荐'),
       'slots': slots,

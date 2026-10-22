@@ -15,6 +15,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
@@ -211,8 +214,9 @@ object WidgetRenderer {
             .ifEmpty { context.getString(R.string.widget_title) }
         views.setTextViewText(R.id.widget_title, title)
         val showLabels = data?.optBoolean("showLabels", true) ?: true
+        val roundedIcons = data?.optBoolean("roundedIcons", false) ?: false
 
-        val entries = loadEntries(context, data, columns * 2)
+        val entries = loadEntries(context, data, columns * 2, roundedIcons)
 
         if (entries.isEmpty()) {
             views.setViewVisibility(R.id.widget_rows, View.GONE)
@@ -247,18 +251,14 @@ object WidgetRenderer {
             // The row holds `cols` cells, not necessarily four, so the two
             // axes have different strides.
             val slot = row * cols + col
-            val inRow = row < rows && col < cols
-            val hasApp = inRow && slot < entries.size
+            // A shorter last row (e.g. 6 apps = 4 + 2) hides its unused cells
+            // instead of keeping them blank, so its icons spread evenly across
+            // the width rather than clinging to the left.
+            val rowCount = (entries.size - row * cols).coerceIn(0, cols)
+            val hasApp = row < rows && col < rowCount
             views.setViewVisibility(
                 cellIds[i],
-                when {
-                    hasApp -> View.VISIBLE
-                    // Keep the column width for the tail of a full row, exactly
-                    // like the app's grid does. Cells outside the row collapse
-                    // so a short row spreads evenly.
-                    inRow -> View.INVISIBLE
-                    else -> View.GONE
-                },
+                if (hasApp) View.VISIBLE else View.GONE,
             )
             if (!hasApp) {
                 // A hidden cell must not keep a PendingIntent from the previous
@@ -303,6 +303,7 @@ object WidgetRenderer {
         context: Context,
         data: JSONObject?,
         capacity: Int,
+        roundedIcons: Boolean,
     ): List<Entry> {
         val apps = slotFor(data)?.optJSONArray("apps")
             ?: data?.optJSONArray("fallback")
@@ -322,8 +323,10 @@ object WidgetRenderer {
             val web = item.optJSONObject("w")
             if (web != null) {
                 if (web.optString("url").isEmpty()) continue
-                val icon = bitmapFromData(context, data, pkg)
-                    ?: letterIcon(label, size)
+                val icon = (
+                    bitmapFromData(context, data, pkg)
+                        ?: letterIcon(label, size)
+                    ).let { if (roundedIcons) roundIcon(it) else it }
                 val config = JSONObject(web.toString())
                 data?.optJSONObject("icons")?.optString(pkg)
                     ?.takeIf { it.isNotEmpty() }
@@ -336,8 +339,10 @@ object WidgetRenderer {
             if (!isLaunchable(pm, pkg, activity)) continue
             // An icon sent by Dart (a custom icon) wins over the system one,
             // matching what the tile board shows.
-            val icon = bitmapFromData(context, data, pkg)
-                ?: systemIcon(context, pm, pkg, activity, size)
+            val icon = (
+                bitmapFromData(context, data, pkg)
+                    ?: systemIcon(context, pm, pkg, activity, size)
+                )?.let { if (roundedIcons) roundIcon(it) else it }
                 ?: continue
             out.add(Entry(pkg, label.ifEmpty { pkg }, icon, activity, ""))
         }
@@ -412,6 +417,37 @@ object WidgetRenderer {
         } else {
             Bitmap.createScaledBitmap(source, size, size, true)
         }
+    }
+
+    /**
+     * Clips [source] to the rounded-square silhouette the home screen uses.
+     * Only enabled from the widget options; apps keep their own icon shape by
+     * default.
+     */
+    private fun roundIcon(source: Bitmap): Bitmap {
+        val size = minOf(source.width, source.height)
+        if (size <= 0) return source
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val radius = size * 0.22f
+        canvas.drawRoundRect(
+            0f,
+            0f,
+            size.toFloat(),
+            size.toFloat(),
+            radius,
+            radius,
+            paint,
+        )
+        paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+        canvas.drawBitmap(
+            source,
+            (size - source.width) / 2f,
+            (size - source.height) / 2f,
+            paint,
+        )
+        return output
     }
 
     /** Placeholder for a web app that has no cached icon yet. */

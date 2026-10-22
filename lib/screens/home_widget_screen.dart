@@ -127,6 +127,8 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
               apps: suggestion.apps,
               title: title,
               showLabels: state.widgetShowLabels,
+              maxApps: state.widgetMaxApps,
+              roundedIcons: state.widgetRoundedIcons,
               nameOf: state.displayNameFor,
             ),
           ),
@@ -175,12 +177,53 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
                 label: Text(s.t('添加到桌面')),
               ),
             ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+            child: Text(
+              s.t('小组件选项'),
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
           SwitchListTile(
             secondary: const Icon(Icons.label_outline),
             title: Text(s.t('显示应用名称')),
             subtitle: Text(s.t('关闭后只显示图标，更紧凑')),
             value: state.widgetShowLabels,
             onChanged: (value) => state.setWidgetShowLabels(value),
+          ),
+          ListTile(
+            leading: const Icon(Icons.grid_view_outlined),
+            title: Text(s.t('显示个数')),
+            subtitle: Text(s.t('最多显示 {n} 个', {'n': state.widgetMaxApps})),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(56, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SegmentedButton<int>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment<int>(value: 4, label: Text('4')),
+                  ButtonSegment<int>(value: 6, label: Text('6')),
+                  ButtonSegment<int>(value: 8, label: Text('8')),
+                ],
+                selected: {state.widgetMaxApps},
+                onSelectionChanged: (values) =>
+                    state.setWidgetMaxApps(values.first),
+              ),
+            ),
+          ),
+          SwitchListTile(
+            secondary: const Icon(Icons.rounded_corner),
+            title: Text(s.t('圆角图标')),
+            subtitle: Text(s.t('裁成圆角方块，默认保留应用自己的形状')),
+            value: state.widgetRoundedIcons,
+            onChanged: (value) => state.setWidgetRoundedIcons(value),
           ),
           const Divider(height: 1),
           _Note(
@@ -284,18 +327,55 @@ class _Preview extends StatelessWidget {
     required this.apps,
     required this.title,
     required this.showLabels,
+    required this.maxApps,
+    required this.roundedIcons,
     required this.nameOf,
   });
 
   final List<AppInfo> apps;
   final String title;
   final bool showLabels;
+  final int maxApps;
+  final bool roundedIcons;
   final String Function(String packageName) nameOf;
 
   @override
   Widget build(BuildContext context) {
     final s = context.strings;
     final scheme = Theme.of(context).colorScheme;
+    final shown = apps.take(maxApps).toList();
+
+    Widget cell(AppInfo app) {
+      Widget icon = AppIcon(
+        packageName: app.packageName,
+        label: nameOf(app.packageName),
+        size: 38,
+        showNotificationBadge: false,
+      );
+      if (roundedIcons) {
+        icon = ClipRRect(
+          borderRadius: BorderRadius.circular(38 * 0.22),
+          child: icon,
+        );
+      }
+      return Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          icon,
+          if (showLabels)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Text(
+                nameOf(app.packageName),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11),
+              ),
+            ),
+        ],
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
       decoration: BoxDecoration(
@@ -336,7 +416,7 @@ class _Preview extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          if (apps.isEmpty)
+          if (shown.isEmpty)
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 18),
               child: Center(
@@ -351,41 +431,29 @@ class _Preview extends StatelessWidget {
               ),
             )
           else
-            GridView.builder(
-              shrinkWrap: true,
-              padding: EdgeInsets.zero,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: apps.length < 4 ? apps.length : 4,
-                crossAxisSpacing: 4,
-                mainAxisSpacing: 8,
-                mainAxisExtent: showLabels ? 70 : 52,
-              ),
-              itemCount: apps.length > 8 ? 8 : apps.length,
-              itemBuilder: (context, i) {
-                final app = apps[i];
-                return Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    AppIcon(
-                      packageName: app.packageName,
-                      label: nameOf(app.packageName),
-                      size: 38,
-                      showNotificationBadge: false,
+            Column(
+              children: [
+                for (var start = 0; start < shown.length; start += 4)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      bottom: start + 4 < shown.length ? 8 : 0,
                     ),
-                    if (showLabels)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 3),
-                        child: Text(
-                          nameOf(app.packageName),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 11),
-                        ),
+                    child: SizedBox(
+                      height: showLabels ? 70 : 52,
+                      child: Row(
+                        children: [
+                          for (final app in shown.sublist(
+                            start,
+                            start + 4 <= shown.length
+                                ? start + 4
+                                : shown.length,
+                          ))
+                            Expanded(child: cell(app)),
+                        ],
                       ),
-                  ],
-                );
-              },
+                    ),
+                  ),
+              ],
             ),
         ],
       ),
