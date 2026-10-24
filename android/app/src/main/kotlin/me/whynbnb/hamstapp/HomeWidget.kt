@@ -378,7 +378,12 @@ object WidgetRenderer {
                 val icon = (
                     bitmapFromData(context, data, pkg)
                         ?: letterIcon(label, size)
-                    ).let { if (roundedIcons) roundIcon(it) else it }
+                    )
+                    .let { if (roundedIcons) roundIcon(it) else it }
+                    // A web app is a website behind an icon, so it gets a small
+                    // globe in the corner — the widget has no room for the
+                    // name tag the app list uses.
+                    .let { withPwaBadge(context, it) }
                 val config = JSONObject(web.toString())
                 data?.optJSONObject("icons")?.optString(pkg)
                     ?.takeIf { it.isNotEmpty() }
@@ -469,6 +474,44 @@ object WidgetRenderer {
         } else {
             Bitmap.createScaledBitmap(source, size, size, true)
         }
+    }
+
+    /**
+     * Draws a small globe badge in the bottom-right corner, marking a web app
+     * (PWA). Colours follow the widget theme, so the badge reads on both the
+     * light and the dark backdrop.
+     */
+    private fun withPwaBadge(context: Context, source: Bitmap): Bitmap {
+        val output = Bitmap.createBitmap(
+            source.width,
+            source.height,
+            Bitmap.Config.ARGB_8888,
+        )
+        val canvas = Canvas(output)
+        canvas.drawBitmap(source, 0f, 0f, null)
+
+        val size = minOf(source.width, source.height).toFloat()
+        val badge = size * 0.38f
+        val margin = size * 0.01f
+        val cx = source.width - badge / 2f - margin
+        val cy = source.height - badge / 2f - margin
+        val back = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = context.getColor(R.color.widget_surface)
+        }
+        canvas.drawCircle(cx, cy, badge / 2f, back)
+
+        val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = badge * 0.085f
+            strokeCap = Paint.Cap.ROUND
+            color = context.getColor(R.color.widget_text_dim)
+        }
+        val r = badge * 0.27f
+        canvas.drawCircle(cx, cy, r, stroke)
+        // The meridian (a narrow ellipse) and the equator.
+        canvas.drawOval(RectF(cx - r * 0.5f, cy - r, cx + r * 0.5f, cy + r), stroke)
+        canvas.drawLine(cx - r, cy, cx + r, cy, stroke)
+        return output
     }
 
     /**

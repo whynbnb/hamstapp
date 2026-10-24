@@ -414,6 +414,33 @@ class _Preview extends StatelessWidget {
           child: icon,
         );
       }
+      if (app.isWebEntry) {
+        // The widget marks a web app with a small globe in the corner, since
+        // its name tag has no room there.
+        icon = Stack(
+          clipBehavior: Clip.none,
+          children: [
+            icon,
+            Positioned(
+              right: -2,
+              bottom: -2,
+              child: Container(
+                width: 14,
+                height: 14,
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerHighest,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.public,
+                  size: 9,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        );
+      }
       return Column(
         mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,

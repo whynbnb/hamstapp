@@ -98,6 +98,8 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   囤囤's launch log the next time it opens, so the app also shows up in *Recent*, the usage trends
   and later recommendations. Apps launch through the same pinned launcher entry as the tile board
   (icon, label and activity), and hand-added web apps open in their own window (or the chosen browser).
+  A web app (PWA) also carries a small globe badge in the corner of its icon, matching the *网页* tag
+  the app list shows next to its name.
 - The header's right side carries three shortcuts — **Apps**, **Recent** and **Search** — so the
   panel is useful even when the suggestion it shows is not the one you want.
 - **Options** (Settings → Tiles → Home screen widget): hide the app names for a tighter grid, cap it
@@ -266,7 +268,7 @@ back as suggestions:
   recommendations whose taps count as launches; recommendation layouts and usage-sorted lists keep
   their order while you are looking at them, so a launch never shifts the other icons; widget options
   for app names, the 4 / 6 / 8 app limit, rounded icons and the partial-row layout (even / left /
-  ends); a pill or a dot marking the current page in the 4x1 strip.
+  ends); a pill or a dot marking the current page in the 4x1 strip; a globe badge on web apps.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

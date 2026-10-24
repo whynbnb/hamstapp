@@ -247,6 +247,53 @@ void main() {
       expect(config['display'], 'standalone');
     });
 
+    testWidgets('the preview marks a web app with a globe badge', (
+      tester,
+    ) async {
+      // Without native handlers the widget push awaits a reply that never
+      // comes inside the test zone.
+      final channel = const MethodChannel('hamstapp/apps');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+        switch (call.method) {
+          case 'updateHomeWidget':
+          case 'updateShortcuts':
+            return true;
+          case 'widgetStatus':
+            return {'count': 0, 'supported': true, 'canPin': true};
+        }
+        return null;
+      });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+
+      final state = _state();
+      await state.addWebApp(url: 'https://example.com', name: 'Example');
+      final web = state.webApps.single;
+      state.tiles = [
+        ...state.tiles,
+        Tile(id: 't2', packageName: web.id, pageId: 'p1', col: 1, row: 0),
+      ];
+      // Pinning a tile re-picks the hour's suggestion in the app; do the same
+      // here so the preview is not still showing the earlier lock.
+      await state.refreshHomeWidgetNow();
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<AppState>.value(
+          value: state,
+          child: const MaterialApp(home: HomeWidgetScreen()),
+        ),
+      );
+      // Not pumpAndSettle: the web icon keeps its loading spinner running
+      // because its icon channel is not mocked here.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      expect(find.byIcon(Icons.public), findsWidgets);
+    });
+
     test('a custom icon is sent for the widget to draw', () {
       final state = _state();
       CustomIcons.instance.put('com.a', _tinyPng);
