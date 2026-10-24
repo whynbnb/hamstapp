@@ -179,7 +179,16 @@ object WidgetRenderer {
     }
 
     private fun build(context: Context, widgetId: Int, options: Bundle): RemoteViews {
-        val views = RemoteViews(context.packageName, R.layout.widget_hamstapp)
+        val data = WidgetStore.readData(context)
+        val style = data?.optString("layout").orEmpty()
+        val views = RemoteViews(
+            context.packageName,
+            if (style == "edges") {
+                R.layout.widget_hamstapp_edges
+            } else {
+                R.layout.widget_hamstapp
+            },
+        )
         // Hosts report the portrait size as MIN_* and the landscape size as
         // MAX_*; the larger one is the safe estimate for "how much room is
         // there", and a launcher that only fills one of them still works.
@@ -208,7 +217,6 @@ object WidgetRenderer {
             shortcut(context, widgetId, 22, "search"),
         )
 
-        val data = WidgetStore.readData(context)
         val title = slotFor(data)?.optString("title").orEmpty()
             .ifEmpty { data?.optString("title").orEmpty() }
             .ifEmpty { context.getString(R.string.widget_title) }
@@ -233,11 +241,18 @@ object WidgetRenderer {
         views.setViewVisibility(R.id.widget_rows, View.VISIBLE)
         views.setViewVisibility(R.id.widget_empty, View.GONE)
 
-        // Same layout rule as the 推荐 section in 最近: fewer suggestions than
-        // a full row use one column each (balanced across the width), a full
-        // row keeps four columns, and never more than two rows. A really short
-        // widget (4x1) only has room for the first row.
-        val cols = if (entries.size < columns) entries.size else columns
+        // How a row that is not full is arranged. `spread` (the default)
+        // shares it out evenly, `left` keeps the normal grid positions so the
+        // icons stay packed to the left, and `edges` pushes the row's first
+        // icon to the left edge and its last icon to the right edge. A really
+        // short widget (4x1) only has room for the first row.
+        val cols = if (style != "left" && style != "edges" &&
+            entries.size < columns
+        ) {
+            entries.size
+        } else {
+            columns
+        }
         val rows = if (entries.size > cols && heightDp >= 70) 2 else 1
 
         for (r in 0 until 2) {
@@ -248,19 +263,19 @@ object WidgetRenderer {
         for (i in 0 until CELLS) {
             val row = i / COLUMNS
             val col = i % COLUMNS
-            // The row holds `cols` cells, not necessarily four, so the two
-            // axes have different strides.
-            val slot = row * cols + col
-            // A shorter last row (e.g. 6 apps = 4 + 2) hides its unused cells
-            // instead of keeping them blank, so its icons spread evenly across
-            // the width rather than clinging to the left.
-            val rowCount = (entries.size - row * cols).coerceIn(0, cols)
-            val hasApp = row < rows && col < rowCount
+            val slot = appIndexFor(style, row, col, rows, cols, entries.size)
+            // With the `left` style an unused cell keeps its place instead of
+            // collapsing, which leaves the icons at their normal grid slots.
+            val placeholder = style == "left" && row < rows && slot < 0 && col < cols
             views.setViewVisibility(
                 cellIds[i],
-                if (hasApp) View.VISIBLE else View.GONE,
+                when {
+                    slot >= 0 -> View.VISIBLE
+                    placeholder -> View.INVISIBLE
+                    else -> View.GONE
+                },
             )
-            if (!hasApp) {
+            if (slot < 0) {
                 // A hidden cell must not keep a PendingIntent from the previous
                 // update: a later resize could reveal a stale app. Point it at
                 // the app instead of clearing it, which older RemoteViews
@@ -285,6 +300,43 @@ object WidgetRenderer {
             )
         }
         return views
+    }
+
+    /**
+     * Which suggestion a grid cell holds, or -1 when the cell stays empty.
+     * The cell ids are fixed, so this only decides content and visibility.
+     */
+    private fun appIndexFor(
+        style: String,
+        row: Int,
+        col: Int,
+        rows: Int,
+        cols: Int,
+        count: Int,
+    ): Int {
+        if (row >= rows || col >= cols) return -1
+        return when (style) {
+            "edges" -> {
+                val rowCount = (count - row * cols).coerceIn(0, cols)
+                val slot = when {
+                    rowCount <= 0 -> -1
+                    // A single icon sits in the middle of the row.
+                    rowCount == 1 -> if (col == cols / 2) 0 else -1
+                    col == cols - 1 -> rowCount - 1
+                    col < rowCount - 1 -> col
+                    else -> -1
+                }
+                if (slot < 0) -1 else row * cols + slot
+            }
+            "left" -> {
+                val index = row * cols + col
+                if (index < count) index else -1
+            }
+            else -> {
+                val rowCount = (count - row * cols).coerceIn(0, cols)
+                if (col < rowCount) row * cols + col else -1
+            }
+        }
     }
 
     /** The slot for the current hour, falling back to the first one. */

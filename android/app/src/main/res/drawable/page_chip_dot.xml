@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Alternative current-page marker: no highlight behind the label, only a
+     small dot underneath it. -->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:bottom="3dp"
+        android:gravity="bottom|center_horizontal">
+        <shape android:shape="oval">
+            <size
+                android:width="4dp"
+                android:height="4dp" />
+            <solid android:color="@color/widget_text" />
+        </shape>
+    </item>
+</layer-list>

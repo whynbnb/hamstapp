@@ -129,6 +129,7 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
               showLabels: state.widgetShowLabels,
               maxApps: state.widgetMaxApps,
               roundedIcons: state.widgetRoundedIcons,
+              layout: state.widgetLayout,
               nameOf: state.displayNameFor,
             ),
           ),
@@ -218,6 +219,31 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
               ),
             ),
           ),
+          ListTile(
+            leading: const Icon(Icons.view_column_outlined),
+            title: Text(s.t('布局风格')),
+            subtitle: Text(s.t('数量不足一行时的排布方式')),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(56, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: [
+                  ButtonSegment<String>(
+                    value: 'spread',
+                    label: Text(s.t('均分')),
+                  ),
+                  ButtonSegment<String>(value: 'left', label: Text(s.t('居左'))),
+                  ButtonSegment<String>(value: 'edges', label: Text(s.t('两端'))),
+                ],
+                selected: {state.widgetLayout},
+                onSelectionChanged: (values) =>
+                    state.setWidgetLayout(values.first),
+              ),
+            ),
+          ),
           SwitchListTile(
             secondary: const Icon(Icons.rounded_corner),
             title: Text(s.t('圆角图标')),
@@ -268,6 +294,7 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
             child: _PageBarPreview(
               pages: state.tilePages,
               current: state.currentTilePageIndex,
+              marker: state.pageBarMarker,
             ),
           ),
           Padding(
@@ -278,6 +305,33 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
                 fontSize: 12.5,
                 height: 1.45,
                 color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          ListTile(
+            leading: const Icon(Icons.circle_outlined),
+            title: Text(s.t('选中样式')),
+            subtitle: Text(s.t('当前页的标记方式')),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(56, 0, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SegmentedButton<String>(
+                showSelectedIcon: false,
+                segments: [
+                  ButtonSegment<String>(
+                    value: 'pill',
+                    label: Text(s.t('高亮框')),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'dot',
+                    label: Text(s.t('小圆点')),
+                  ),
+                ],
+                selected: {state.pageBarMarker},
+                onSelectionChanged: (values) =>
+                    state.setPageBarMarker(values.first),
               ),
             ),
           ),
@@ -329,6 +383,7 @@ class _Preview extends StatelessWidget {
     required this.showLabels,
     required this.maxApps,
     required this.roundedIcons,
+    required this.layout,
     required this.nameOf,
   });
 
@@ -337,6 +392,7 @@ class _Preview extends StatelessWidget {
   final bool showLabels;
   final int maxApps;
   final bool roundedIcons;
+  final String layout;
   final String Function(String packageName) nameOf;
 
   @override
@@ -359,6 +415,7 @@ class _Preview extends StatelessWidget {
         );
       }
       return Column(
+        mainAxisSize: MainAxisSize.min,
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           icon,
@@ -374,6 +431,58 @@ class _Preview extends StatelessWidget {
             ),
         ],
       );
+    }
+
+    // Mirrors the widget's row rules for the chosen style.
+    const columns = 4;
+
+    Widget? edgeCell(List<AppInfo> items, int column) {
+      final count = items.length;
+      int? slot;
+      if (count == 1) {
+        slot = column == columns ~/ 2 ? 0 : null;
+      } else if (column == columns - 1) {
+        slot = count >= 2 ? count - 1 : null;
+      } else if (column < count - 1) {
+        slot = column;
+      }
+      if (slot == null) return null;
+      return Align(
+        alignment: column == 0
+            ? Alignment.centerLeft
+            : (column == columns - 1
+                  ? Alignment.centerRight
+                  : Alignment.center),
+        child: cell(items[slot]),
+      );
+    }
+
+    Widget row(List<AppInfo> items) {
+      final count = items.length;
+      switch (layout) {
+        case 'left':
+          return Row(
+            children: [
+              for (var i = 0; i < columns; i++)
+                Expanded(
+                  child: i < count ? cell(items[i]) : const SizedBox.shrink(),
+                ),
+            ],
+          );
+        case 'edges':
+          return Row(
+            children: [
+              for (var i = 0; i < columns; i++)
+                Expanded(
+                  child: edgeCell(items, i) ?? const SizedBox.shrink(),
+                ),
+            ],
+          );
+        default:
+          return Row(
+            children: [for (final app in items) Expanded(child: cell(app))],
+          );
+      }
     }
 
     return Container(
@@ -433,23 +542,20 @@ class _Preview extends StatelessWidget {
           else
             Column(
               children: [
-                for (var start = 0; start < shown.length; start += 4)
+                for (var start = 0; start < shown.length; start += columns)
                   Padding(
                     padding: EdgeInsets.only(
-                      bottom: start + 4 < shown.length ? 8 : 0,
+                      bottom: start + columns < shown.length ? 8 : 0,
                     ),
                     child: SizedBox(
                       height: showLabels ? 70 : 52,
-                      child: Row(
-                        children: [
-                          for (final app in shown.sublist(
-                            start,
-                            start + 4 <= shown.length
-                                ? start + 4
-                                : shown.length,
-                          ))
-                            Expanded(child: cell(app)),
-                        ],
+                      child: row(
+                        shown.sublist(
+                          start,
+                          start + columns <= shown.length
+                              ? start + columns
+                              : shown.length,
+                        ),
                       ),
                     ),
                   ),
@@ -465,10 +571,17 @@ class _Preview extends StatelessWidget {
 /// natural width and the row is centred — matching the widget, which avoids
 /// stretching a short list into wide bars.
 class _PageBarPreview extends StatelessWidget {
-  const _PageBarPreview({required this.pages, required this.current});
+  const _PageBarPreview({
+    required this.pages,
+    required this.current,
+    required this.marker,
+  });
 
   final List<TilePage> pages;
   final int current;
+
+  /// `pill` highlights the current tab, `dot` only marks it underneath.
+  final String marker;
 
   @override
   Widget build(BuildContext context) {
@@ -490,25 +603,42 @@ class _PageBarPreview extends StatelessWidget {
 
     Widget pill(String text, {required bool active}) {
       final textSize = shortName(text) ? 28.0 : 13.0;
+      final dot = active && marker == 'dot';
       return Container(
         height: 52,
         constraints: const BoxConstraints(minWidth: 44),
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
-          color: active
+          color: active && !dot
               ? scheme.onSurface.withValues(alpha: 0.16)
               : Colors.transparent,
           borderRadius: BorderRadius.circular(18),
         ),
         alignment: Alignment.center,
-        child: Text(
-          text,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(
-            fontSize: textSize,
-            color: active ? scheme.onSurface : scheme.onSurfaceVariant,
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              text,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: textSize,
+                color: active ? scheme.onSurface : scheme.onSurfaceVariant,
+              ),
+            ),
+            if (dot)
+              Container(
+                margin: const EdgeInsets.only(top: 2),
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: scheme.onSurface,
+                  shape: BoxShape.circle,
+                ),
+              ),
+          ],
         ),
       );
     }

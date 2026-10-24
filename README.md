@@ -88,8 +88,9 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   landed on the wrong icon). It refreshes at the next hour, or right away from the refresh button in
   the widget settings. 最近 → 推荐 follows the same rule.
 - **Tile page tabs (4×1).** A slim second widget with the tile board's pages; tap a tab to open
-  that page in 囤囤. Only the current page gets a pill — the rest are plain labels, so a short list
-  never turns into stretched grey buttons. Emoji page names are drawn large (up to 30sp) and shrink
+  that page in 囤囤. Only the current page is marked — the rest are plain labels, so a short list
+  never turns into stretched grey buttons. The marker can be a pill behind the label or, from the
+  options, a small dot underneath it. Emoji page names are drawn large (up to 30sp) and shrink
   step by step as pages are added; only when they truly cannot fit do they share the row equally
   (with a “…” for the rest). Its page list is pushed whenever the tabs change, so it does not need a
   periodic refresh.
@@ -100,8 +101,9 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - The header's right side carries three shortcuts — **Apps**, **Recent** and **Search** — so the
   panel is useful even when the suggestion it shows is not the one you want.
 - **Options** (Settings → Tiles → Home screen widget): hide the app names for a tighter grid, cap it
-  at **4 / 6 / 8 apps** (4 fills exactly one row), and clip the icons to **rounded squares**. Icons
-  keep their own silhouette by default.
+  at **4 / 6 / 8 apps** (4 fills exactly one row), lay out a partial row **evenly**, **packed left**
+  or **pushed to the two ends**, and clip the icons to **rounded squares**. Icons keep their own
+  silhouette by default.
 - Add it from **Settings → Tiles → Home screen widget**; the same screen has a live preview and a
   switch to hide app names. A lightweight half-hour alarm keeps repainting it (and switching to the
   current hour's suggestions) even when 囤囤 has not been opened; the suggestion *data* is recomputed
@@ -263,7 +265,8 @@ back as suggestions:
   backup, preview/merge import, snapshot-difference export; home-screen widget with hourly
   recommendations whose taps count as launches; recommendation layouts and usage-sorted lists keep
   their order while you are looking at them, so a launch never shifts the other icons; widget options
-  for app names, the 4 / 6 / 8 app limit and rounded icons.
+  for app names, the 4 / 6 / 8 app limit, rounded icons and the partial-row layout (even / left /
+  ends); a pill or a dot marking the current page in the 4x1 strip.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

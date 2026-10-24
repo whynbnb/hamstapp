@@ -319,6 +319,32 @@ void main() {
       expect(restored.widgetRoundedIcons, isTrue);
     });
 
+    test('the layout and marker settings reach the widgets', () async {
+      final state = AppState(_MemStorage())..initialized = true;
+      expect(state.widgetLayout, 'spread');
+      expect(state.pageBarMarker, 'pill');
+
+      await state.setWidgetLayout('edges');
+      await state.setPageBarMarker('dot');
+
+      expect(state.buildHomeWidgetData()['layout'], 'edges');
+      expect(state.buildPageWidgetData()['marker'], 'dot');
+    });
+
+    test('the layout and marker settings are stored', () async {
+      final storage = _MemStorage();
+      final state = AppState(storage)..initialized = true;
+      await state.setWidgetLayout('left');
+      await state.setPageBarMarker('dot');
+
+      final restored = AppState(storage)
+        ..initialized = true
+        ..settings = (await storage.readJson('settings') as Map)
+            .cast<String, dynamic>();
+      expect(restored.widgetLayout, 'left');
+      expect(restored.pageBarMarker, 'dot');
+    });
+
     test('the label setting is stored', () async {
       final storage = _MemStorage();
       final state = AppState(storage)..initialized = true;
@@ -372,8 +398,6 @@ void main() {
     expect(find.text('添加到桌面'), findsOneWidget);
     expect(find.text('小组件选项'), findsOneWidget);
     expect(find.text('显示应用名称'), findsOneWidget);
-    expect(find.text('显示个数'), findsOneWidget);
-    expect(find.text('圆角图标'), findsOneWidget);
 
     // Pin from the top of the page.
     await tester.scrollUntilVisible(find.text('添加到桌面'), 120);
@@ -407,6 +431,13 @@ void main() {
     await tester.pumpAndSettle();
     expect(state.widgetMaxApps, 4);
 
+    // Pick the two-ends row style.
+    await tester.scrollUntilVisible(find.text('布局风格'), 200);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('两端'));
+    await tester.pumpAndSettle();
+    expect(state.widgetLayout, 'edges');
+
     // Round the icons.
     await tester.scrollUntilVisible(
       find.widgetWithText(SwitchListTile, '圆角图标'),
@@ -416,6 +447,13 @@ void main() {
     await tester.tap(find.widgetWithText(SwitchListTile, '圆角图标'));
     await tester.pumpAndSettle();
     expect(state.widgetRoundedIcons, isTrue);
+
+    // The 4x1 strip marks its current page with a dot.
+    await tester.scrollUntilVisible(find.text('选中样式'), 300);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('小圆点'));
+    await tester.pumpAndSettle();
+    expect(state.pageBarMarker, 'dot');
 
     // The 4x1 strip's section is further down.
     await tester.scrollUntilVisible(find.text('磁贴页标签条'), 300);

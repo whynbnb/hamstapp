@@ -2428,6 +2428,23 @@ class AppState extends ChangeNotifier {
     unawaited(syncHomeWidget(force: true));
   }
 
+  /// How the widget arranges a row that is not full: `spread` shares it out
+  /// evenly, `left` keeps the normal grid positions (packed to the left) and
+  /// `edges` pushes the first and last icon of the row to the two ends.
+  String get widgetLayout {
+    final raw = settings['widget_layout'] as String?;
+    return raw == 'left' || raw == 'edges' ? raw! : 'spread';
+  }
+
+  Future<void> setWidgetLayout(String value) async {
+    final next = value == 'left' || value == 'edges' ? value : 'spread';
+    if (widgetLayout == next) return;
+    settings['widget_layout'] = next;
+    await _persistSettings();
+    notifyListeners();
+    unawaited(syncHomeWidget(force: true));
+  }
+
   /// Apps the desktop widget shows at [hour] (0-23), plus where they came from:
   /// `recommend`, `recent`, `pinned` or `empty`.
   ///
@@ -2536,6 +2553,7 @@ class AppState extends ChangeNotifier {
       'updatedAt': now.millisecondsSinceEpoch,
       'showLabels': widgetShowLabels,
       'roundedIcons': widgetRoundedIcons,
+      'layout': widgetLayout,
       'title': current['title'],
       'empty': s.t('在囤囤里启动几次应用，这里就会出现推荐'),
       'slots': slots,
@@ -2680,11 +2698,26 @@ class AppState extends ChangeNotifier {
     await syncHomeWidget(force: true);
   }
 
+  /// How the page strip marks the current page: `pill` draws the highlight
+  /// behind it, `dot` only a small dot underneath.
+  String get pageBarMarker =>
+      settings['page_bar_marker'] == 'dot' ? 'dot' : 'pill';
+
+  Future<void> setPageBarMarker(String value) async {
+    final next = value == 'dot' ? 'dot' : 'pill';
+    if (pageBarMarker == next) return;
+    settings['page_bar_marker'] = next;
+    await _persistSettings();
+    notifyListeners();
+    unawaited(syncPageWidget());
+  }
+
   /// The 4x1 page-tab strip's document: the page names, in order, and which
   /// one the app is on (drawn highlighted).
   Map<String, dynamic> buildPageWidgetData() {
     final s = AppStrings.current;
     return {
+      'marker': pageBarMarker,
       'pages': [
         for (var i = 0; i < tilePages.length; i++)
           {

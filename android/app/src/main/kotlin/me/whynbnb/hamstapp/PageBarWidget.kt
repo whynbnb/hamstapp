@@ -62,6 +62,9 @@ object PageBarRenderer {
         val pages = data?.optJSONArray("pages")
         val total = pages?.length() ?: 0
         val current = data?.optInt("current", -1) ?: -1
+        // The current page is marked with a pill by default; the `dot` style
+        // only puts a small dot underneath it.
+        val dotMarker = data?.optString("marker") == "dot"
         // The portrait size: the row must fit what is actually on screen. The
         // landscape maximum is wider, but using it would overflow in portrait.
         val widthDp = options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
@@ -220,10 +223,10 @@ object PageBarRenderer {
                 views.setInt(
                     chip,
                     "setBackgroundResource",
-                    if (active) {
-                        R.drawable.page_chip_active
-                    } else {
-                        R.drawable.page_chip_empty
+                    when {
+                        !active -> R.drawable.page_chip_empty
+                        dotMarker -> R.drawable.page_chip_dot
+                        else -> R.drawable.page_chip_active
                     },
                 )
                 views.setTextColor(
