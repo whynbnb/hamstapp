@@ -182,6 +182,8 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 ### 🌐 Remote APK sources
 - Browse and install from **FTP**, **SMB / Samba** and **WebDAV** sources.
 - At a glance: new, update, already installed, or newer-than-yours; one-tap download + install.
+- **Explicit refresh** (the refresh button in the header, or pull down); a thin bar shows the reload.
+- Sort the list **by name** (pinyin-aware) or **by update time** (newest first); the choice is remembered.
 - Download **cache** with per-file version history, *keep all versions*, orphan cleanup and size reporting.
 - **APK analyzer**: SHA-256 / MD5 hashes, manifest flags, component counts, permissions & features,
   native ABIs / DEX / zip breakdown, and v1 / v2 / v3 signing certificates — including a signature

@@ -50,6 +50,10 @@ enum AppFilter {
 
 enum AppSort { name, installTime, updateTime, size }
 
+/// Ordering of the remote APK list on the 同步 page: file names, or the remote
+/// file's modification time (newest first).
+enum SyncSort { name, modified }
+
 /// Ordering for the "recent" quick-launch tab.
 enum RecentSort { recent, frequent }
 
@@ -3619,6 +3623,22 @@ class AppState extends ChangeNotifier {
   // ---------------------------------------------------------------- sync
 
   /// All configured remote APK sources (FTP / SMB / WebDAV), in tab order.
+  /// How the remote APK list is ordered. Remembered across sessions.
+  SyncSort get syncSort {
+    final raw = settings['sync_sort'];
+    for (final value in SyncSort.values) {
+      if (value.name == raw) return value;
+    }
+    return SyncSort.name;
+  }
+
+  Future<void> setSyncSort(SyncSort value) async {
+    if (syncSort == value) return;
+    settings['sync_sort'] = value.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
   List<RemoteSource> get syncSources {
     final raw = settings['sync_sources'];
     if (raw is List) {

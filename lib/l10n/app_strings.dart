@@ -314,6 +314,8 @@ const Map<String, String> _en = <String, String>{
       'Collapsed: tap the top-left button to open navigation, long-press for Launch',
   '手动排序': 'Manual',
   '按名称': 'By name',
+  '刷新列表': 'Refresh list',
+  '排序方式': 'Sort order',
   '按应用数': 'By app count',
   '按时间排序': 'Sort by time',
   '按频次排序': 'Sort by frequency',

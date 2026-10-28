@@ -11,6 +11,7 @@ import '../services/remote_client.dart';
 import '../state/app_state.dart';
 import '../utils/format.dart';
 import '../utils/install_helper.dart';
+import '../utils/search.dart';
 import '../widgets/app_icon.dart';
 import 'orphan_cache_screen.dart';
 import 'apk_analyzer_screen.dart';
@@ -31,6 +32,20 @@ class _SyncScreenState extends State<SyncScreen> with TickerProviderStateMixin {
 
   /// Bumped when the cache is cleared so open tabs reload their cache view.
   int _cacheEpoch = 0;
+
+  /// One key per source, so the refresh action can ask the visible tab to
+  /// re-read its listing without touching the other tabs.
+  final Map<String, GlobalKey<_SyncSourceTabState>> _tabKeys = {};
+
+  GlobalKey<_SyncSourceTabState> _keyFor(String id) =>
+      _tabKeys.putIfAbsent(id, () => GlobalKey<_SyncSourceTabState>());
+
+  void _refreshActive(AppState state, List<RemoteSource> sources) {
+    if (sources.isEmpty) return;
+    final i = sources.indexWhere((s) => s.id == state.activeSyncSourceId);
+    final id = (i < 0 ? sources.first : sources[i]).id;
+    _tabKeys[id]?.currentState?.reload();
+  }
 
   @override
   void dispose() {
@@ -138,6 +153,31 @@ class _SyncScreenState extends State<SyncScreen> with TickerProviderStateMixin {
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
+          if (sources.isNotEmpty) ...[
+            IconButton(
+              tooltip: context.strings.t('刷新列表'),
+              icon: const Icon(Icons.refresh),
+              onPressed: () => _refreshActive(state, sources),
+            ),
+            PopupMenuButton<SyncSort>(
+              tooltip: context.strings.t('排序方式'),
+              icon: const Icon(Icons.sort),
+              initialValue: state.syncSort,
+              onSelected: state.setSyncSort,
+              itemBuilder: (ctx) => [
+                CheckedPopupMenuItem(
+                  value: SyncSort.name,
+                  checked: state.syncSort == SyncSort.name,
+                  child: Text(ctx.strings.t('按名称')),
+                ),
+                CheckedPopupMenuItem(
+                  value: SyncSort.modified,
+                  checked: state.syncSort == SyncSort.modified,
+                  child: Text(ctx.strings.t('按更新时间')),
+                ),
+              ],
+            ),
+          ],
           IconButton(
             tooltip: context.strings.t('新建同步源'),
             icon: const Icon(Icons.add),
@@ -227,7 +267,7 @@ class _SyncScreenState extends State<SyncScreen> with TickerProviderStateMixin {
               children: [
                 for (final s in sources)
                   _SyncSourceTab(
-                    key: ValueKey(s.id),
+                    key: _keyFor(s.id),
                     source: s,
                     reloadToken: _cacheEpoch,
                   ),
@@ -452,6 +492,11 @@ class _SyncSourceTabState extends State<_SyncSourceTab>
     _snack(s.t('已删除该项缓存（{size}）', {'size': Fmt.size(freed)}));
   }
 
+  /// Re-reads this source's listing on demand (the page's refresh button).
+  /// Ignored while a load is already running, so a double tap cannot start
+  /// two listings at once.
+  Future<void> reload() => _loading ? Future<void>.value() : _load();
+
   Future<void> _refreshCache() async {
     final cache = await RemoteClient.cacheIndex(widget.source);
     if (!mounted) return;
@@ -472,6 +517,32 @@ class _SyncSourceTabState extends State<_SyncSourceTab>
       _icons[path] = null;
       return null;
     }
+  }
+
+  /// The name a row shows (a nested file keeps its relative path).
+  static String _rowName(Map<String, dynamic> f) {
+    final name = f['name'] as String? ?? '';
+    final rel = (f['rel'] as String?) ?? name;
+    return rel == name ? name : rel;
+  }
+
+  /// [_files] in the order the user picked. Name order is pinyin-aware, so
+  /// Chinese file names sort the way the app list does.
+  List<Map<String, dynamic>> _ordered(SyncSort sort) {
+    final list = List<Map<String, dynamic>>.of(_files);
+    String byName(Map<String, dynamic> f) =>
+        AppSearch.pinyinKey(_rowName(f));
+    if (sort == SyncSort.modified) {
+      list.sort((a, b) {
+        final am = (a['modified'] as num?)?.toInt() ?? 0;
+        final bm = (b['modified'] as num?)?.toInt() ?? 0;
+        if (am != bm) return bm.compareTo(am);
+        return byName(a).compareTo(byName(b));
+      });
+    } else {
+      list.sort((a, b) => byName(a).compareTo(byName(b)));
+    }
+    return list;
   }
 
   @override
@@ -505,23 +576,32 @@ class _SyncSourceTabState extends State<_SyncSourceTab>
       );
     }
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        itemCount: _files.length + 1,
-        separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, i) {
-          if (i == 0) {
-            return _SourceHeader(
-              source: widget.source,
-              count: _files.length,
-              cacheBytes: _cacheBytes,
-            );
-          }
-          final f = _files[i - 1];
-          return _buildItem(state, byPkg, f);
-        },
-      ),
+    final files = _ordered(state.syncSort);
+    return Column(
+      children: [
+        // A reload with rows already on screen keeps them visible; this bar
+        // is the feedback that the explicit refresh is running.
+        if (_loading) const LinearProgressIndicator(minHeight: 2),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView.separated(
+              itemCount: files.length + 1,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, i) {
+                if (i == 0) {
+                  return _SourceHeader(
+                    source: widget.source,
+                    count: files.length,
+                    cacheBytes: _cacheBytes,
+                  );
+                }
+                return _buildItem(state, byPkg, files[i - 1]);
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 

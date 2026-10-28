@@ -329,4 +329,143 @@ void main() {
     pending.complete('/cache/app.apk');
     await tester.pumpAndSettle();
   });
+
+  testWidgets('the sync page refreshes the visible source on demand', (
+    tester,
+  ) async {
+    var listCalls = 0;
+    mock((call) async {
+      switch (call.method) {
+        case 'remoteList':
+          listCalls++;
+          return [
+            {
+              'name': 'app.apk',
+              'rel': 'app.apk',
+              'path': '/apks/app.apk',
+              'size': 10,
+              'modified': 1,
+            },
+          ];
+        case 'cacheIndex':
+          return {'entries': [], 'totalBytes': 0};
+        case 'cachePrune':
+          return 0;
+      }
+      return null;
+    });
+
+    final source = RemoteSource(
+      id: 's1',
+      protocol: 'ftp',
+      host: 'nas',
+      port: 21,
+      path: '/apks',
+      anonymous: true,
+    );
+    final state = AppState(_MemStorage())..initialized = true;
+    state.settings = {
+      'sync_sources': [source.toMap()],
+      'sync_active': source.id,
+    };
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: SyncScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(find.text('app.apk'), findsOneWidget);
+    expect(listCalls, 1);
+
+    // The explicit refresh re-reads the listing (pull-to-refresh still works).
+    await tester.tap(find.byTooltip('刷新列表'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(listCalls, 2);
+  });
+
+  testWidgets('the remote list sorts by name or time and remembers it', (
+    tester,
+  ) async {
+    mock((call) async {
+      switch (call.method) {
+        case 'remoteList':
+          return [
+            {
+              'name': 'b.apk',
+              'rel': 'b.apk',
+              'path': '/apks/b.apk',
+              'size': 10,
+              'modified': 100,
+            },
+            {
+              'name': 'a.apk',
+              'rel': 'a.apk',
+              'path': '/apks/a.apk',
+              'size': 10,
+              'modified': 300,
+            },
+            {
+              'name': 'c.apk',
+              'rel': 'c.apk',
+              'path': '/apks/c.apk',
+              'size': 10,
+              'modified': 200,
+            },
+          ];
+        case 'cacheIndex':
+          return {'entries': [], 'totalBytes': 0};
+        case 'cachePrune':
+          return 0;
+      }
+      return null;
+    });
+
+    final storage = _MemStorage();
+    final source = RemoteSource(
+      id: 's1',
+      protocol: 'ftp',
+      host: 'nas',
+      port: 21,
+      path: '/apks',
+      anonymous: true,
+    );
+    final state = AppState(storage)..initialized = true;
+    state.settings = {
+      'sync_sources': [source.toMap()],
+      'sync_active': source.id,
+    };
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: const MaterialApp(home: SyncScreen()),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 50));
+
+    double y(String name) => tester.getTopLeft(find.text(name)).dy;
+    // Default: file names, A→Z.
+    expect(y('a.apk') < y('b.apk'), isTrue);
+    expect(y('b.apk') < y('c.apk'), isTrue);
+
+    await tester.tap(find.byTooltip('排序方式'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('按更新时间'));
+    await tester.pumpAndSettle();
+
+    // Newest modification first: a (300), c (200), b (100).
+    expect(y('a.apk') < y('c.apk'), isTrue);
+    expect(y('c.apk') < y('b.apk'), isTrue);
+    expect(state.syncSort, SyncSort.modified);
+
+    // The choice is written to the settings file, so it survives a restart.
+    final saved = await storage.readJson('settings') as Map;
+    expect(saved['sync_sort'], 'modified');
+  });
 }
