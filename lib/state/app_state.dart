@@ -1503,7 +1503,9 @@ class AppState extends ChangeNotifier {
   /// by [AppIcon], so nothing the user made is lost; this only frees the file.
   Future<void> clearIconCache() async {
     IconCache.instance.replaceAll(<String, Uint8List>{});
+    _iconStamps = <String, int>{};
     await _persistIcons();
+    await _persistIconStamps();
     AppLog.instance.log(LogModule.apps, '存储 · 已清理图标缓存');
     notifyListeners();
   }
@@ -1517,6 +1519,10 @@ class AppState extends ChangeNotifier {
   }
 
   Future<int>? _iconRefresh;
+
+  /// When the package stamps were last checked (see [refreshUpdatedIcons]).
+  int _lastIconCheckAt = 0;
+  static const int kIconCheckGapMs = 2 * 60 * 1000;
 
   /// Drop the icon cache and re-read icons for every installed app from the
   /// system. Returns how many icons were (re)loaded.
@@ -1534,8 +1540,13 @@ class AppState extends ChangeNotifier {
   /// scan saw and re-reads the icons of apps that changed since. Cheap enough
   /// to run on start-up and whenever 囤囤 returns to the foreground, so an app
   /// updated while it was closed still gets its new icon without a full scan.
-  Future<int> refreshUpdatedIcons() async {
+  Future<int> refreshUpdatedIcons({bool force = false}) async {
     if (installedApps.isEmpty) return 0;
+    // Cheap, but not free (it walks every package): a resume a few seconds
+    // after the last check does not need to do it again.
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!force && now - _lastIconCheckAt < kIconCheckGapMs) return 0;
+    _lastIconCheckAt = now;
     final systemStamps = await NativeApps.packageStamps();
     if (systemStamps.isEmpty) return 0;
     final due = <AppInfo>[];
@@ -1616,19 +1627,31 @@ class AppState extends ChangeNotifier {
     List<AppInfo>? only,
   }) async {
     final due = only ?? <AppInfo>[];
+    var stampsChanged = false;
     if (only == null) {
       for (final a in installedApps) {
         final slot = IconCache.instance.slotFor(a.packageName);
         final baseline = a.lastUpdateTime;
         final known = _iconStamps[a.packageName];
-        if (!IconCache.instance.containsKey(slot) ||
-            known == null ||
-            known < baseline) {
-          due.add(a);
+        final cached = IconCache.instance.containsKey(slot);
+        if (known == null) {
+          // An icon painted before stamps existed is taken as belonging to
+          // the version the list knows; it is not re-read. Apps with no icon
+          // are left to AppIcon's on-demand fetch — prefetching every one of
+          // them after each scan made the whole app crawl.
+          if (cached) {
+            _iconStamps[a.packageName] = baseline;
+            stampsChanged = true;
+          }
+          continue;
         }
+        if (known < baseline || !cached) due.add(a);
       }
     }
-    if (due.isEmpty) return 0;
+    if (due.isEmpty) {
+      if (stampsChanged) await _persistIconStamps();
+      return 0;
+    }
 
     var count = 0;
     for (final a in due) {
@@ -1657,7 +1680,7 @@ class AppState extends ChangeNotifier {
     _iconStamps.removeWhere((pkg, _) => !installed.contains(pkg));
     await _persistIconStamps();
     if (count > 0) {
-      await _persistIcons();
+      // IconCache writes the file itself (coalesced); this is only the repaint.
       IconCache.instance.notifyUpdated();
       notifyListeners();
     }
@@ -1700,7 +1723,6 @@ class AppState extends ChangeNotifier {
           ? app.lastUpdateTime
           : known;
     }
-    await _persistIcons();
     await _persistIconStamps();
     notifyListeners();
     AppLog.instance.log(LogModule.apps, '图标 · 已刷新 · $label');

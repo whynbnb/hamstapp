@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
+import '../services/icon_cache.dart';
 import '../services/native_apps.dart';
 import '../state/app_state.dart';
 import '../utils/actions.dart';
@@ -108,6 +109,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Icon decodes are written back in a delayed batch; do not lose the last
+    // batch if the app is backgrounded right after a list was painted.
+    if (state == AppLifecycleState.paused) {
+      unawaited(IconCache.instance.flush());
+      return;
+    }
     // Notification events that arrive while the app is backgrounded can be
     // missed, so re-read the counts whenever we come back to the foreground.
     if (state == AppLifecycleState.resumed) {

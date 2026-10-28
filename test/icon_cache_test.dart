@@ -93,6 +93,33 @@ void main() {
     expect(find.byType(Image), findsOneWidget);
   });
 
+  test('batch saves are coalesced and identical bytes are skipped', () async {
+    final cache = IconCache.instance;
+    cache.replaceAll(<String, Uint8List>{});
+    final previousHook = cache.onDirty;
+    var writes = 0;
+    cache.onDirty = () async => writes++;
+    addTearDown(() {
+      cache.onDirty = previousHook;
+      cache.replaceAll(<String, Uint8List>{});
+    });
+
+    cache.put('com.a', _png);
+    await cache.flush();
+    expect(writes, 1);
+
+    // Same picture again: nothing to write.
+    cache.put('com.a', Uint8List.fromList(_png));
+    await cache.flush();
+    expect(writes, 1);
+
+    // A burst of different icons writes once, not once per icon.
+    cache.put('com.b', Uint8List.fromList([1, 2, 3]));
+    cache.put('com.c', Uint8List.fromList([4, 5, 6]));
+    await cache.flush();
+    expect(writes, 2);
+  });
+
   test('icon slots follow the pinned entry', () {
     final cache = IconCache.instance;
     cache.setActivities(<String, String>{});

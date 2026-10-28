@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -87,12 +88,16 @@ class IconCache extends ChangeNotifier {
   Future<void> Function()? onDirty;
 
   bool _dirty = false;
-  Future<void>? _flush;
+  bool _flushing = false;
+  Timer? _persistTimer;
 
   /// Store one icon without notifying: the widget that fetched it repaints
   /// itself, so the rest of the tree does not need to rebuild.
   void put(String slotKey, Uint8List bytes) {
     if (bytes.isEmpty) return;
+    final existing = _bytes[slotKey];
+    // A refresh that produced the same picture must not dirty the file.
+    if (existing != null && listEquals(existing, bytes)) return;
     _bytes[slotKey] = bytes;
     _schedulePersist();
   }
@@ -101,29 +106,52 @@ class IconCache extends ChangeNotifier {
   /// refresh of several apps, where no single widget fetched the icon itself).
   void notifyUpdated() => notifyListeners();
 
+  /// Icon loading is bursty (a list paints dozens of rows at once). Writing the
+  /// whole base64 map after each one stalled the UI thread, so saves are
+  /// coalesced into a single write once the burst goes quiet.
   void _schedulePersist() {
     if (onDirty == null) return;
     _dirty = true;
-    _flush ??= Future.microtask(_runFlush);
+    _persistTimer?.cancel();
+    _persistTimer = Timer(const Duration(milliseconds: 1000), _flushNow);
   }
 
-  Future<void> _runFlush() async {
-    while (_dirty) {
-      _dirty = false;
-      final hook = onDirty;
-      if (hook == null) break;
-      try {
-        await hook();
-      } catch (_) {
-        // A failed write must not wedge later flushes.
+  /// Writes pending changes now. Called when the app goes to the background
+  /// and by tests, so a save is never lost to the timer.
+  Future<void> flush() async {
+    _persistTimer?.cancel();
+    _persistTimer = null;
+    await _flushNow();
+  }
+
+  Future<void> _flushNow() async {
+    if (_flushing) return;
+    _flushing = true;
+    try {
+      while (_dirty) {
+        _dirty = false;
+        final hook = onDirty;
+        if (hook == null) break;
+        try {
+          await hook();
+        } catch (_) {
+          // A failed write must not wedge later flushes.
+        }
       }
+    } finally {
+      _flushing = false;
     }
-    _flush = null;
   }
 
   /// Replace the whole cache and notify listeners. Used after a refresh, an
   /// import, or a full clear, where every visible icon should repaint.
+  ///
+  /// Cancels a pending batch save: the caller is replacing the contents, and a
+  /// late write of the old map would be pointless.
   void replaceAll(Map<String, Uint8List> next) {
+    _persistTimer?.cancel();
+    _persistTimer = null;
+    _dirty = false;
     _bytes
       ..clear()
       ..addAll(next);
@@ -132,7 +160,12 @@ class IconCache extends ChangeNotifier {
 
   /// Drop the contents without notifying (callers notify via [replaceAll] once
   /// the replacement is ready, so icons never flash a placeholder in between).
-  void clearSilent() => _bytes.clear();
+  void clearSilent() {
+    _persistTimer?.cancel();
+    _persistTimer = null;
+    _dirty = false;
+    _bytes.clear();
+  }
 
   /// JSON-safe view (base64) for persistence / export.
   Map<String, String> toJson() =>

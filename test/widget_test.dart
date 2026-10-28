@@ -222,9 +222,8 @@ void main() {
     final first = AppState(storage);
     final bytes = Uint8List.fromList([9, 8, 7]);
     first.rememberIcon('com.a', bytes);
-    // Let the coalesced write run.
-    await Future<void>.delayed(Duration.zero);
-    await Future<void>.delayed(Duration.zero);
+    // Batch saves are debounced; flush them explicitly.
+    await IconCache.instance.flush();
 
     final second = AppState(storage);
     await second.init();
@@ -300,16 +299,12 @@ void main() {
 
     final storage = _MemStorage();
     final state = AppState(storage)..apps = [_ai('com.a', 'A')];
-    expect(state.iconNeedsRefresh('com.a'), isTrue);
-
-    expect(await state.refreshChangedIcons(), 1);
-    expect(iconCalls, 1);
-    expect(sawRefresh, isTrue, reason: 'must bypass the native copy');
-    expect(state.iconNeedsRefresh('com.a'), isFalse);
-
-    // Nothing changed: no second read.
+    // An icon cached before stamps existed belongs to the list's version: it
+    // is not re-read (that was the slow part).
+    state.rememberIcon('com.a', Uint8List.fromList([1, 2, 3]));
     expect(await state.refreshChangedIcons(), 0);
-    expect(iconCalls, 1);
+    expect(iconCalls, 0);
+    expect(state.iconNeedsRefresh('com.a'), isFalse);
 
     // The app is updated: its icon is read again.
     state.apps = [
@@ -331,7 +326,8 @@ void main() {
     ];
     expect(state.iconNeedsRefresh('com.a'), isTrue);
     expect(await state.refreshChangedIcons(), 1);
-    expect(iconCalls, 2);
+    expect(iconCalls, 1);
+    expect(sawRefresh, isTrue, reason: 'must bypass the native copy');
     expect(state.iconNeedsRefresh('com.a'), isFalse);
 
     // The stamp survives a restart.
@@ -416,11 +412,12 @@ void main() {
     expect(state.iconFor('com.a'), next);
   });
 
-  test('scanning the app list also refreshes the icon cache', () async {
+  test('a scan re-reads only the icons of apps that changed', () async {
     IconCache.instance.replaceAll(<String, Uint8List>{});
     const channel = MethodChannel('hamstapp/apps');
     final bytes = Uint8List.fromList([7, 7, 7]);
     var iconCalls = 0;
+    var stamp = 0;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'getInstalledApps') {
@@ -431,7 +428,7 @@ void main() {
             'versionName': '1',
             'versionCode': 1,
             'firstInstallTime': 0,
-            'lastUpdateTime': 0,
+            'lastUpdateTime': stamp,
             'isSystem': false,
             'enabled': true,
             'apkPath': '',
@@ -454,14 +451,21 @@ void main() {
       IconCache.instance.replaceAll(<String, Uint8List>{});
     });
 
-    final state = AppState(_MemStorage());
+    final state = AppState(_MemStorage())..apps = [_ai('com.a', 'A')];
+    state.rememberIcon('com.a', Uint8List.fromList([1, 2, 3]));
+    // Record the version the cached icon belongs to; nothing is re-read.
+    expect(await state.refreshChangedIcons(), 0);
+    expect(iconCalls, 0);
+
+    // The app updated in the meantime: the next scan reads its icon again.
+    stamp = 5000;
     await state.scan();
     // The icon refresh runs alongside the scan; let it finish.
     await Future<void>.delayed(Duration.zero);
     await Future<void>.delayed(Duration.zero);
 
     expect(iconCalls, 1);
-    expect(state.iconFor('com.a'), isNotNull);
+    expect(state.iconFor('com.a'), bytes);
   });
 
   test('uninstalled snapshot entries are not treated as removed again', () {

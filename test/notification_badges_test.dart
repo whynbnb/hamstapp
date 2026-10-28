@@ -7,6 +7,7 @@ import 'package:hamstapp/models/app_info.dart';
 import 'package:hamstapp/models/tile.dart';
 import 'package:hamstapp/models/tile_page.dart';
 import 'package:hamstapp/screens/quick_launch_screen.dart';
+import 'package:hamstapp/services/icon_cache.dart';
 import 'package:hamstapp/services/notification_badges.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
@@ -81,6 +82,7 @@ Widget _icon({
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
 
   group('NotificationBadges', () {
     test('labelFor caps at 99+', () {
@@ -297,6 +299,10 @@ void main() {
       expect(badgeRect.right, greaterThan(iconRect.right));
       expect((tileRect.right - badgeRect.right).abs(), lessThan(8));
       expect((badgeRect.top - tileRect.top).abs(), lessThan(8));
+
+      // The fetched icon scheduled a batched cache save; complete it inside the
+      // test so the save timer does not outlive the fake-async body.
+      await IconCache.instance.flush();
     });
 
     testWidgets('the page chip shows the page total on the page surface', (

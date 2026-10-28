@@ -113,12 +113,33 @@ class PackageScannerPlugin(
      */
     private data class CachedIcon(val bytes: ByteArray, val stamp: Long)
 
+    /**
+     * A package's stamp and when it was read. A burst of icon requests (first
+     * paint of a list, or a cache sweep) would otherwise query the package
+     * manager once per icon on the worker threads.
+     */
+    private data class StampEntry(val stamp: Long, val checkedAt: Long)
+
     private val iconCache = ConcurrentHashMap<String, CachedIcon>()
+    private val stampCache = ConcurrentHashMap<String, StampEntry>()
+
+    /** How long a looked-up stamp is reused before asking the package manager. */
+    private val stampTtlMs = 2_000L
 
     /** The package's install/update time, used as its icon's stamp. */
-    private fun iconStamp(packageName: String): Long = runCatching {
-        context.packageManager.getPackageInfo(packageName, 0).lastUpdateTime
-    }.getOrDefault(0L)
+    private fun iconStamp(packageName: String, force: Boolean = false): Long {
+        val now = SystemClock.elapsedRealtime()
+        if (!force) {
+            stampCache[packageName]?.let {
+                if (now - it.checkedAt < stampTtlMs) return it.stamp
+            }
+        }
+        val stamp = runCatching {
+            context.packageManager.getPackageInfo(packageName, 0).lastUpdateTime
+        }.getOrDefault(0L)
+        stampCache[packageName] = StampEntry(stamp, now)
+        return stamp
+    }
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -154,22 +175,22 @@ class PackageScannerPlugin(
                     return
                 }
                 val cacheKey = "$pkg|${activity ?: ""}|$iconPack@$size"
-                if (refresh) {
-                    iconCache.remove(cacheKey)
-                } else {
-                    iconCache[cacheKey]?.let { cached ->
-                        if (cached.stamp == iconStamp(pkg)) {
-                            result.success(cached.bytes)
-                            return
-                        }
-                        // The package was installed or updated since this
-                        // icon was read: drop it and look again.
-                        iconCache.remove(cacheKey)
-                    }
-                }
+                // Everything — including the stamp lookup that tells whether
+                // the cached copy is stale — runs off the platform thread. A
+                // package query per icon on the UI thread made every list
+                // scroll and repaint stutter.
                 executor.execute {
                     try {
-                        val stamp = iconStamp(pkg)
+                        val stamp = iconStamp(pkg, force = refresh)
+                        if (refresh) iconCache.remove(cacheKey)
+                        val cached = iconCache[cacheKey]
+                        if (cached != null && cached.stamp == stamp) {
+                            mainHandler.post { result.success(cached.bytes) }
+                            return@execute
+                        }
+                        // The package was installed or updated since this icon
+                        // was read: drop it and look again.
+                        if (cached != null) iconCache.remove(cacheKey)
                         val bytes = loadIcon(pkg, size, activity, iconPack)
                         if (bytes != null) {
                             iconCache[cacheKey] = CachedIcon(bytes, stamp)
@@ -184,6 +205,7 @@ class PackageScannerPlugin(
             // this before reading them all again).
             "clearIconCache" -> {
                 iconCache.clear()
+                stampCache.clear()
                 result.success(true)
             }
             // Just the install/update time of every package: lets the Dart
