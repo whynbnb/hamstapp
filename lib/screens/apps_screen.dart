@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -517,117 +519,120 @@ class _UninstalledList extends StatelessWidget {
   }
 }
 
-/// The search entry point: a tappable bar that opens the 搜索与筛选 page. The
-/// list is only narrowed down when that page's button is pressed, so a
-/// half-typed query never thrashes it, and an applied search is shown in the
-/// bar — the conditions and the results always belong together.
-class _SearchBar extends StatelessWidget {
+/// The quick search: typing filters the list right away, like it always did.
+/// Everything that needs combining (scope, state, category, sort, grouping and
+/// the `key:value` syntax) lives one tap away behind 高级, so the two never
+/// fight over what the list should show.
+class _SearchBar extends StatefulWidget {
   const _SearchBar({required this.state});
   final AppState state;
 
   @override
-  Widget build(BuildContext context) {
-    final s = context.strings;
-    final scheme = Theme.of(context).colorScheme;
-    final query = state.query.trim();
-    final active = query.isNotEmpty;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Row(
-        children: [
-          Expanded(
-            child: Material(
-              color: active
-                  ? scheme.primaryContainer.withValues(alpha: 0.5)
-                  : scheme.surfaceContainerHighest.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(14),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const AppFinderScreen()),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 13,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.search,
-                        size: 20,
-                        color: active
-                            ? scheme.onPrimaryContainer
-                            : scheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          active
-                              ? query
-                              : s.t('搜索应用名 / 包名 / 拼音首字母'),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: active
-                                ? scheme.onPrimaryContainer
-                                : scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
-                      if (active)
-                        IconButton(
-                          tooltip: MaterialLocalizations.of(
-                            context,
-                          ).clearButtonTooltip,
-                          visualDensity: VisualDensity.compact,
-                          iconSize: 18,
-                          icon: const Icon(Icons.close),
-                          onPressed: () {
-                            state.query = '';
-                            state.refresh();
-                          },
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          _FilterButton(state: state),
-        ],
-      ),
-    );
-  }
+  State<_SearchBar> createState() => _SearchBarState();
 }
 
-/// Opens the same 搜索与筛选 page from the filter side, with a badge counting
-/// the active conditions.
-class _FilterButton extends StatelessWidget {
-  const _FilterButton({required this.state});
-  final AppState state;
+class _SearchBarState extends State<_SearchBar> {
+  late final TextEditingController _controller = TextEditingController(
+    text: widget.state.query,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    // The advanced page, a condition chip or 清除 can change the query while
+    // this field is alive; keep the text in step with it.
+    widget.state.addListener(_syncFromState);
+  }
+
+  @override
+  void dispose() {
+    widget.state.removeListener(_syncFromState);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _syncFromState() {
+    final query = widget.state.query;
+    if (_controller.text == query) return;
+    _controller.value = TextEditingValue(
+      text: query,
+      selection: TextSelection.collapsed(offset: query.length),
+    );
+  }
+
+  void _setQuery(String value) {
+    widget.state.query = value;
+    widget.state.refresh();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final state = widget.state;
     final s = context.strings;
     final scheme = Theme.of(context).colorScheme;
-    final count = state.activeAppFilterCount;
-    return IconButton(
-      tooltip: s.t('筛选与排序'),
-      onPressed: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => const AppFinderScreen(focusSearch: false),
-        ),
-      ),
-      icon: Badge(
-        isLabelVisible: count > 0,
-        label: Text('$count'),
-        backgroundColor: scheme.primary,
-        child: const Icon(Icons.tune),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 8, 2),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  textInputAction: TextInputAction.search,
+                  onChanged: _setQuery,
+                  onSubmitted: (value) {
+                    unawaited(state.rememberQuery(value));
+                    FocusManager.instance.primaryFocus?.unfocus();
+                  },
+                  decoration: InputDecoration(
+                    hintText: s.t('快速搜索'),
+                    // The field itself stays uncluttered; a long press on the
+                    // magnifier explains how it differs from 高级.
+                    prefixIcon: Tooltip(
+                      message: s.t('输入即筛选；组合范围、状态、分类与排序用「高级」'),
+                      child: const Icon(Icons.search),
+                    ),
+                    suffixIcon: _controller.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: MaterialLocalizations.of(
+                              context,
+                            ).clearButtonTooltip,
+                            icon: const Icon(Icons.clear),
+                            onPressed: () {
+                              _controller.clear();
+                              _setQuery('');
+                            },
+                          ),
+                    isDense: true,
+                    filled: true,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 4),
+              TextButton.icon(
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const AppFinderScreen(focusSearch: false),
+                  ),
+                ),
+                icon: Badge(
+                  isLabelVisible: state.activeAppFilterCount > 0,
+                  label: Text('${state.activeAppFilterCount}'),
+                  backgroundColor: scheme.primary,
+                  child: const Icon(Icons.tune, size: 20),
+                ),
+                label: Text(s.t('高级')),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }

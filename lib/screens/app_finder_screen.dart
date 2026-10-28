@@ -102,7 +102,7 @@ class _AppFinderScreenState extends State<AppFinderScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(s.t('搜索与筛选')),
+        title: Text(s.t('高级搜索')),
         actions: [
           IconButton(
             tooltip: s.t('筛选语法'),
@@ -134,8 +134,15 @@ class _AppFinderScreenState extends State<AppFinderScreen> {
                     onSubmitted: (_) => _apply(),
                     onChanged: (value) => setState(() => _query = value),
                     decoration: InputDecoration(
-                      hintText: s.t('搜索应用名 / 包名 / 拼音首字母'),
-                      prefixIcon: const Icon(Icons.search),
+                      hintText: s.t('高级搜索'),
+                      // Same gesture as the quick field: long-press the
+                      // magnifier for what this page does.
+                      prefixIcon: Tooltip(
+                        message: s.t(
+                          '组合搜索词、范围、状态、分类、排序与分组，点「应用筛选」写回列表',
+                        ),
+                        child: const Icon(Icons.search),
+                      ),
                       isDense: true,
                       filled: true,
                       border: OutlineInputBorder(
@@ -164,6 +171,38 @@ class _AppFinderScreenState extends State<AppFinderScreen> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               children: [
+                if (state.searchHistory.isNotEmpty &&
+                    _query.trim().isEmpty) ...[
+                  Row(
+                    children: [
+                      Expanded(child: _label(s.t('最近搜索'))),
+                      TextButton(
+                        onPressed: state.clearSearchHistory,
+                        child: Text(s.t('清除')),
+                      ),
+                    ],
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    children: [
+                      for (final q in state.searchHistory)
+                        ActionChip(
+                          label: Text(q),
+                          onPressed: () {
+                            _controller.value = TextEditingValue(
+                              text: q,
+                              selection: TextSelection.collapsed(
+                                offset: q.length,
+                              ),
+                            );
+                            setState(() => _query = q);
+                          },
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 18),
+                ],
                 _label(s.t('应用类型')),
                 Wrap(
                   spacing: 8,

@@ -9,6 +9,7 @@ import 'package:hamstapp/models/category.dart';
 import 'package:hamstapp/models/tile.dart';
 import 'package:hamstapp/models/tile_page.dart';
 import 'package:hamstapp/screens/app_detail_screen.dart';
+import 'package:hamstapp/screens/app_finder_screen.dart';
 import 'package:hamstapp/screens/apps_screen.dart';
 import 'package:hamstapp/screens/categories_tab.dart';
 import 'package:hamstapp/screens/quick_launch_screen.dart';
@@ -608,7 +609,7 @@ void main() {
     await tester.tap(find.byIcon(Icons.tune));
     await tester.pumpAndSettle();
 
-    expect(find.text('搜索与筛选'), findsOneWidget);
+    expect(find.byType(AppFinderScreen), findsOneWidget);
 
     // Nothing is applied while the page is being edited.
     await tester.tap(find.text('倒序'));

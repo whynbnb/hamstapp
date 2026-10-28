@@ -1112,7 +1112,12 @@ const Map<String, String> _en = <String, String>{
   '已导出 {n} 个应用到 {name}': 'Exported {n} apps to {name}',
   '安装来源：{installer}': 'Install source: {installer}',
   '最近搜索': 'Recent searches',
-  '搜索与筛选': 'Search & filters',
+  '高级搜索': 'Advanced search',
+  '快速搜索': 'Quick search',
+  '输入即筛选；组合范围、状态、分类与排序用「高级」':
+      'Filters as you type; use Advanced to combine scope, state, category and sorting',
+  '组合搜索词、范围、状态、分类、排序与分组，点「应用筛选」写回列表':
+      'Combine a search with scope, state, category, sort and grouping; Apply writes it back to the list',
   '用户应用': 'User apps',
   '全部分类': 'All categories',
   '应用筛选 · {n} 个': 'Apply · {n}',

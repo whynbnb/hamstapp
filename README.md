@@ -113,16 +113,18 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 
 ### 📦 App manager
 - Scan installed apps (optionally including system apps); the list is cached for instant launch.
-- **Search and filters share one page**: tap the search bar at the top of the app list or the filter
-  button beside it, then type **name, package, pinyin initials, full pinyin** or a fuzzy subsequence
-  and pick a scope (all / user / system), state (favorite, categorised, has a reason, unorganized,
-  uninstalled…), category, sort order and grouping. The bar at the bottom shows how many apps match;
-  **Apply** writes the conditions to the list, which is never interrupted while you are still
-  choosing. The × beside the field clears just the search text and keeps every other condition;
-  only 重置 clears them all. The `size:`, `cat:`, `source:` … syntax still works, with its
-  reference behind the ?.
-- Applied conditions stay visible above the list (search, scope, state, category); remove one
-  individually or clear them all. The filter and sort you leave behind are remembered.
+- **Quick search**: the field at the top of the app list (hinted *Quick search*) filters as you
+  type — **name, package, pinyin initials, full pinyin** or a fuzzy subsequence. The × in the field
+  clears just the search text, **Advanced** beside it opens the full page, and a long press on the
+  magnifier explains the split.
+- **Advanced search**: tap Advanced to combine a search with a scope (all / user / system), state
+  (favorite, categorised, has a reason, unorganized, uninstalled…), category, sort order and
+  grouping, plus your recent searches. The bottom bar shows how many apps match; **Apply** writes the
+  conditions to the list, which is never interrupted while you are still choosing. The × beside the
+  field clears just the search text; only 重置 clears everything. The `size:`, `cat:`, `source:` …
+  syntax works in both, with its reference behind the ?.
+- Applied conditions stay visible above the list (scope, state, category); remove one individually or
+  clear them all. The filter and sort you leave behind are remembered.
 - Per-app page: launch, favourite, pin to tiles, install **reason**, **note**, categories, usage stats,
   APK analysis, export / share the APK, open the system app-info screen, uninstall — plus three cards:
   - **Storage** — APK, data and cache, a proportion bar, and a shortcut into the system screen to clear it.
@@ -281,8 +283,9 @@ back as suggestions:
   for app names, the 4 / 6 / 8 app limit, rounded icons and the partial-row layout (even / left /
   ends); a pill or a dot marking the current page in the 4x1 strip; a globe badge on web apps;
   icons refresh promptly after an app update, and a single icon can be force-refreshed from its
-  detail page; app search and filters merged into one page with a live result count and an Apply
-  button; queued, atomic settings saves so a preference file can no longer be lost.
+  detail page; a quick search (filters as you type) and an Advanced search (combined filters, sort
+  and a live result count); queued, atomic settings saves so a preference file can no longer be
+  lost.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 
