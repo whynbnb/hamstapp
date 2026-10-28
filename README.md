@@ -287,7 +287,10 @@ back as suggestions:
   icons refresh promptly after an app update, and a single icon can be force-refreshed from its
   detail page; a quick search (filters as you type) and an Advanced search (combined filters, sort
   and a live result count); queued, atomic settings saves so a preference file can no longer be
-  lost; icon lookups moved off the UI thread and icon saves batched, so lists and scans stay smooth.
+  lost; icon lookups moved off the UI thread and icon saves batched, so lists and scans stay smooth;
+  the launch tab underline cross-fades between the two ends at a loop wrap instead of sliding
+  against the gesture; the virtual page is folded back after each wrap, so repeated swipes cannot
+  strand the indicator, and the content always follows the finger.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

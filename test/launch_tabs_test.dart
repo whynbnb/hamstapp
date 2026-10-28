@@ -55,7 +55,7 @@ Future<PageController> _pump(WidgetTester tester, AppState state) async {
 }
 
 Finder _tab(String label) =>
-    find.descendant(of: find.byType(TabBar), matching: find.text(label));
+    find.descendant(of: find.byType(LaunchTabBar), matching: find.text(label));
 
 void main() {
   testWidgets('tapping a later tab slides forward through the tabs between', (
@@ -102,8 +102,103 @@ void main() {
     expect(pager.page!.round() % 4, kTiles, reason: 'settles on 磁贴');
   });
 
+  testWidgets('swiping past an edge wraps one page to the other side', (
+    tester,
+  ) async {
+    // Backwards from 最近 lands on 收藏 (one page, not a three-page detour).
+    final pager = await _pump(tester, _state(startTab: 0));
+    // The strip paints from the pager's position, so a scroll must notify it.
+    var updates = 0;
+    pager.addListener(() => updates++);
+    await tester.timedDrag(
+      find.byType(PageView).first,
+      const Offset(480, 0),
+      const Duration(milliseconds: 260),
+    );
+    await tester.pumpAndSettle();
+    expect(updates, greaterThan(1), reason: 'the strip follows the pager');
+    // The index is folded back into the base cycle once at rest, so repeated
+    // wraps cannot drift further and further away (which used to freeze the
+    // underline on the wrong end).
+    expect(pager.page!.round(), 4003);
+    expect(
+      tester.widget<LaunchTabBar>(find.byType(LaunchTabBar)).controller.index,
+      kFavorites,
+    );
+
+    // Forwards from 收藏 lands on 最近 again.
+    await tester.timedDrag(
+      find.byType(PageView).first,
+      const Offset(-480, 0),
+      const Duration(milliseconds: 260),
+    );
+    await tester.pumpAndSettle();
+    expect(pager.page!.round(), 4000);
+    expect(
+      tester.widget<LaunchTabBar>(find.byType(LaunchTabBar)).controller.index,
+      0,
+    );
+  });
+
+  testWidgets('a gesture wrap moves the pager with the hand, one page', (
+    tester,
+  ) async {
+    // Split swipe mode drives the launch tabs by gesture. From 收藏, swiping
+    // forward must slide to 最近 (the next page), not back through 分类/磁贴.
+    final state = _state(startTab: kFavorites);
+    state.settings['tile_swipe_mode'] = 'topLaunch';
+    final pager = await _pump(tester, state);
+    final start = pager.page!;
+
+    final body = tester.getRect(find.byType(PageView).first);
+    await tester.timedDragFrom(
+      Offset(body.center.dx + 150, body.center.dy),
+      const Offset(-380, 0),
+      const Duration(milliseconds: 240),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+    expect(
+      pager.page!,
+      greaterThan(start),
+      reason: 'the content must follow the finger, not take the loop\'s long way',
+    );
+
+    await tester.pumpAndSettle();
+    expect(
+      pager.page!.round(),
+      4000,
+      reason: 'folded back into the base cycle after the wrap',
+    );
+  });
+
+  testWidgets('repeated swipes stay on the base cycle', (tester) async {
+    final state = _state(startTab: 0);
+    final pager = await _pump(tester, state);
+
+    // Walking all the way round must not push the virtual page further away
+    // from the base: that drift is what used to freeze the underline.
+    for (var i = 0; i < 6; i++) {
+      await tester.timedDrag(
+        find.byType(PageView).first,
+        const Offset(-480, 0),
+        const Duration(milliseconds: 260),
+      );
+      await tester.pumpAndSettle();
+      final page = pager.page!.round();
+      expect(page, inInclusiveRange(4000, 4003));
+      expect(page % 4, state.lastLaunchTab);
+    }
+  });
+
   testWidgets('最近 sits to the left of 磁贴 in the tab bar', (tester) async {
     await _pump(tester, _state());
+
+    // The strip fills the header, so the four tabs split it evenly.
+    expect(
+      tester.getSize(find.byType(LaunchTabBar)).width,
+      greaterThan(250),
+    );
 
     final recentX = tester.getCenter(_tab('最近')).dx;
     final tilesX = tester.getCenter(_tab('磁贴')).dx;

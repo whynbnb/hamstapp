@@ -48,6 +48,10 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
   /// swipe modes (the launch pager itself no longer scrolls natively there).
   double _bodySwipeDx = 0;
 
+  /// Set while a swipe gesture moves the sub-tab itself, so [_onTabChanged]
+  /// leaves the pager to it (one page in the gesture direction).
+  bool _indexFromGesture = false;
+
   /// The four launch sections (磁贴/分类/收藏/最近). The pager loops, so pages
   /// are addressed by a large "virtual" index reduced modulo [_tabCount].
   static const int _tabCount = 4;
@@ -92,8 +96,11 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     _haptics.indexChanged(i);
     // Tapping the bar moves the index but not the pager, so drive the pager to
     // follow. When the pager itself changed the index it is already aligned and
-    // this is skipped.
-    if (_tabPager.hasClients && _tabPagerLogical != i) _animateLaunchPager(i);
+    // this is skipped. A gesture-driven move has picked its own direction and
+    // must not be sent the long way round instead.
+    if (!_indexFromGesture && _tabPager.hasClients && _tabPagerLogical != i) {
+      _animateLaunchPager(i);
+    }
     setState(() {});
   }
 
@@ -164,7 +171,20 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     // Use the standard sub-tab tick so the gesture feels the same as tapping or
     // swiping between 磁贴/分类/收藏/最近.
     _haptics.tickNow(target);
-    _tabs.index = target; // _onTabChanged animates the pager to follow
+    final current = (_tabPager.hasClients && _tabPager.page != null)
+        ? _tabPager.page!.round()
+        : _tabVirtual(_tabs.index);
+    _indexFromGesture = true;
+    _tabs.index = target;
+    _indexFromGesture = false;
+    // One page in the direction the finger moved, even when the tab wraps from
+    // 收藏 to 最近: taking the loop's short way here would make the content
+    // slide against the gesture.
+    _tabPager.animateToPage(
+      current + delta,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOut,
+    );
   }
 
   /// Boils a sub-tab swipe down to at most one tick, fired the moment the
@@ -175,7 +195,26 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
     // views inside a tab (e.g. the tile board) and must be ignored.
     if (n.depth != 0 || n.metrics.axis != Axis.horizontal) return false;
     _haptics.handleScroll(n);
+    if (n is ScrollEndNotification) {
+      // A swipe across the loop leaves the virtual page one past the base
+      // (3999 or 4004). Jump back to the equivalent page once at rest so
+      // repeated wraps cannot walk the index further and further away.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _rebasePager());
+    }
     return false;
+  }
+
+  /// Moves the pager back to the base cycle without changing what is on
+  /// screen: pages repeat every [_tabCount], so a jump by whole cycles looks
+  /// identical.
+  void _rebasePager() {
+    if (!mounted || !_tabPager.hasClients) return;
+    final page = _tabPager.page;
+    if (page == null || !page.isFinite) return;
+    final rounded = page.round();
+    final logical = ((rounded % _tabCount) + _tabCount) % _tabCount;
+    final target = _tabVirtual(logical);
+    if (rounded != target) _tabPager.jumpToPage(target);
   }
 
   @override
@@ -210,22 +249,17 @@ class _QuickLaunchScreenState extends State<QuickLaunchScreen>
 
     // The four sections live directly in the header (no title text) to save a
     // whole row of vertical space.
-    final tabs = TabBar(
+    final tabs = LaunchTabBar(
       controller: _tabs,
-      labelPadding: const EdgeInsets.symmetric(horizontal: 6),
-      indicatorSize: TabBarIndicatorSize.label,
-      dividerColor: Colors.transparent,
-      labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-      unselectedLabelStyle: const TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-      ),
-      tabs: [
-        Tab(height: 40, text: context.strings.t('最近')),
-        Tab(height: 40, text: context.strings.t('磁贴')),
-        Tab(height: 40, text: context.strings.t('分类')),
-        Tab(height: 40, text: context.strings.t('收藏')),
+      pager: _tabPager,
+      base: _tabBase,
+      labels: [
+        context.strings.t('最近'),
+        context.strings.t('磁贴'),
+        context.strings.t('分类'),
+        context.strings.t('收藏'),
       ],
+      onSelected: (i) => _tabs.animateTo(i),
     );
 
     return Scaffold(
@@ -3008,6 +3042,236 @@ class _FavoritesTab extends StatelessWidget {
 }
 
 // ---------------------------------------------------------------- 最近
+
+/// The launch tab strip.
+///
+/// A plain [TabBar] cannot follow this pager around the loop: swiping from 最近
+/// back to 收藏 crosses the strip's edges, so its underline would jump from one
+/// end to the other while the content slides one page. The indicator is painted
+/// from the pager's continuous position instead — it slides off one edge and
+/// back in from the other. Around the loop the ends cross-fade instead, so the
+/// underline never runs against the gesture or across every tab in between.
+class LaunchTabBar extends StatelessWidget {
+  const LaunchTabBar({
+    super.key,
+    required this.controller,
+    required this.pager,
+    required this.base,
+    required this.labels,
+    required this.onSelected,
+  });
+
+  final TabController controller;
+
+  /// The pager these tabs mirror (an infinite one, addressed from [base]).
+  final PageController pager;
+  final int base;
+  final List<String> labels;
+  final ValueChanged<int> onSelected;
+
+  static const double _height = 40;
+  static const double _indicatorHeight = 3;
+
+  /// Width of a label in [style]; the underline is label-sized, like TabBar's.
+  double _labelWidth(BuildContext context, String text, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textDirection: Directionality.of(context),
+      textScaler: MediaQuery.textScalerOf(context),
+      maxLines: 1,
+    )..layout();
+    final width = painter.width;
+    painter.dispose();
+    return width;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final labelStyle = const TextStyle(fontSize: 13, fontWeight: FontWeight.w700);
+    final unselected = const TextStyle(
+      fontSize: 13,
+      fontWeight: FontWeight.w500,
+    );
+    final widths = [
+      for (final text in labels) _labelWidth(context, text, labelStyle),
+    ];
+
+    // The AppBar's title slot hands out loose width; fill it so the four tabs
+    // split the whole strip (the indicator maths uses that width).
+    return SizedBox(
+      width: double.infinity,
+      height: _height,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final tabWidth = labels.isEmpty
+              ? 0.0
+              : constraints.maxWidth / labels.length;
+          return AnimatedBuilder(
+            animation: pager,
+            builder: (context, _) {
+              // Continuous position in tab units. It goes below 0 or past the
+              // last tab while the looping pager crosses an edge.
+              double position = controller.index.toDouble();
+              final page = pager.hasClients ? pager.page : null;
+              if (page != null && page.isFinite) position = page - base;
+              // A layout frame in between can report a non-finite page; fall
+              // back to the selected tab rather than freezing the painter.
+              if (!position.isFinite) position = controller.index.toDouble();
+
+              // Around the loop the underline cross-fades (the painter does
+              // that); the bold label switches at the halfway point. Round on
+              // the virtual index and fold it back into the tab range, so a
+              // pager that drifted a cycle cannot choose the wrong tab.
+              final count = labels.length;
+              final selectedTab = count == 0
+                  ? 0
+                  : ((position.round() % count) + count) % count;
+              return Stack(
+                children: [
+                  Row(
+                    children: [
+                      for (var i = 0; i < labels.length; i++)
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => onSelected(i),
+                            child: Center(
+                              child: Text(
+                                labels[i],
+                                style: (selectedTab == i
+                                        ? labelStyle
+                                        : unselected)
+                                    .copyWith(
+                                      color: selectedTab == i
+                                          ? scheme.onSurface
+                                          : scheme.onSurfaceVariant,
+                                    ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: CustomPaint(
+                        painter: _WrappingIndicatorPainter(
+                          position: position,
+                          tabWidth: tabWidth,
+                          widths: widths,
+                          color: scheme.primary,
+                          height: _indicatorHeight,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// Paints the label-sized underline at [position] tab units.
+///
+/// Inside the strip it slides continuously with the pager. Around the loop the
+/// two ends are fixed and cross-fade instead: sliding one of them would have to
+/// run against the gesture (or through every tab in the middle) to land on the
+/// opposite side.
+class _WrappingIndicatorPainter extends CustomPainter {
+  _WrappingIndicatorPainter({
+    required this.position,
+    required this.tabWidth,
+    required this.widths,
+    required this.color,
+    required this.height,
+  });
+
+  final double position;
+  final double tabWidth;
+  final List<double> widths;
+  final Color color;
+  final double height;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final count = widths.length;
+    if (count == 0 || tabWidth <= 0 || size.width <= 0) return;
+    final last = count - 1.0;
+
+    // Only the single page either side of the ends is a loop transition.
+    if (position < 0 && position > -1) {
+      _fade(canvas, size, from: 0, to: last, progress: -position);
+      return;
+    }
+    if (position > last && position < last + 1) {
+      _fade(canvas, size, from: last, to: 0, progress: position - last);
+      return;
+    }
+
+    // Deeper into the loop (a long drift or a multi-page fling): bring the
+    // index back into the cycle and paint it like any other position.
+    var at = position;
+    while (at < 0) {
+      at += count;
+    }
+    while (at > last) {
+      at -= count;
+    }
+    _tab(canvas, size, at, 1);
+  }
+
+  /// Fades the old end out over the first half of the transition and the new
+  /// end in over the second half.
+  void _fade(
+    Canvas canvas,
+    Size size, {
+    required double from,
+    required double to,
+    required double progress,
+  }) {
+    final p = progress.clamp(0.0, 1.0);
+    final fadingOut = (1 - p * 2).clamp(0.0, 1.0);
+    final fadingIn = (p * 2 - 1).clamp(0.0, 1.0);
+    if (fadingOut > 0) _tab(canvas, size, from, fadingOut);
+    if (fadingIn > 0) _tab(canvas, size, to, fadingIn);
+  }
+
+  void _tab(Canvas canvas, Size size, double at, double opacity) {
+    final count = widths.length;
+    final first = at.floor().clamp(0, count - 1);
+    final second = (first + 1).clamp(0, count - 1);
+    final fraction = at - first;
+    final width =
+        widths[first] + (widths[second] - widths[first]) * fraction;
+    if (width <= 0) return;
+    final center = (at + 0.5) * tabWidth;
+    final left = center - width / 2;
+    canvas.drawRRect(
+      RRect.fromLTRBR(
+        left,
+        size.height - height,
+        left + width,
+        size.height,
+        const Radius.circular(1.5),
+      ),
+      Paint()..color = color.withValues(alpha: opacity),
+    );
+  }
+
+  @override
+  bool shouldRepaint(_WrappingIndicatorPainter old) =>
+      old.position != position ||
+      old.tabWidth != tabWidth ||
+      old.color != color ||
+      old.height != height ||
+      // A fresh list is built when the labels or text scale change.
+      old.widths != widths;
+}
 
 class _RecentTab extends StatefulWidget {
   const _RecentTab({
