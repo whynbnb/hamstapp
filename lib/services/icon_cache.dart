@@ -97,6 +97,10 @@ class IconCache extends ChangeNotifier {
     _schedulePersist();
   }
 
+  /// Repaint every visible icon after a batch of [put] calls (a background
+  /// refresh of several apps, where no single widget fetched the icon itself).
+  void notifyUpdated() => notifyListeners();
+
   void _schedulePersist() {
     if (onDirty == null) return;
     _dirty = true;

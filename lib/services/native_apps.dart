@@ -772,14 +772,46 @@ class NativeApps {
     int size = 144,
     String? activity,
     String iconPack = '',
+    bool refresh = false,
   }) async {
     final bytes = await _channel.invokeMethod<Uint8List>('getAppIcon', {
       'packageName': packageName,
       'size': size,
       if (activity != null && activity.isNotEmpty) 'activity': activity,
       if (iconPack.isNotEmpty) 'iconPack': iconPack,
+      // The native side keeps decoded icons for the app's lifetime; a refresh
+      // must bypass that copy or an updated icon never appears.
+      if (refresh) 'refresh': true,
     });
     return bytes;
+  }
+
+  /// Drops the native side's decoded-icon cache, so the next read of a package
+  /// comes from the system rather than a copy taken earlier in this session.
+  static Future<void> clearIconCache() async {
+    try {
+      await _channel.invokeMethod<bool>('clearIconCache');
+    } catch (_) {
+      // Native side unavailable (e.g. widget tests).
+    }
+  }
+
+  /// Install/update time of every installed package, keyed by package name.
+  /// Lets the icon cache notice an app update without a full app scan.
+  static Future<Map<String, int>> packageStamps() async {
+    try {
+      final raw = await _channel.invokeMethod<Map<dynamic, dynamic>>(
+        'packageStamps',
+      );
+      if (raw == null) return const <String, int>{};
+      return {
+        for (final e in raw.entries)
+          if (e.key is String && e.value is num)
+            e.key as String: (e.value as num).toInt(),
+      };
+    } catch (_) {
+      return const <String, int>{};
+    }
   }
 
   /// Per-app foreground time for today / 7 / 30 days (usage access needed).

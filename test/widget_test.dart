@@ -276,6 +276,146 @@ void main() {
     expect(state.iconFor('com.b'), isNotNull);
   });
 
+  test('refreshChangedIcons only re-reads apps that were updated', () async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    const channel = MethodChannel('hamstapp/apps');
+    final bytes = Uint8List.fromList([8, 8, 8]);
+    var iconCalls = 0;
+    var sawRefresh = false;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getAppIcon') {
+        iconCalls++;
+        final args = (call.arguments as Map?)?.cast<dynamic, dynamic>();
+        sawRefresh = args?['refresh'] == true;
+        return bytes;
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      IconCache.instance.replaceAll(<String, Uint8List>{});
+    });
+
+    final storage = _MemStorage();
+    final state = AppState(storage)..apps = [_ai('com.a', 'A')];
+    expect(state.iconNeedsRefresh('com.a'), isTrue);
+
+    expect(await state.refreshChangedIcons(), 1);
+    expect(iconCalls, 1);
+    expect(sawRefresh, isTrue, reason: 'must bypass the native copy');
+    expect(state.iconNeedsRefresh('com.a'), isFalse);
+
+    // Nothing changed: no second read.
+    expect(await state.refreshChangedIcons(), 0);
+    expect(iconCalls, 1);
+
+    // The app is updated: its icon is read again.
+    state.apps = [
+      AppInfo(
+        packageName: 'com.a',
+        appName: 'A',
+        versionName: '2',
+        versionCode: 2,
+        firstInstallTime: 0,
+        lastUpdateTime: 5000,
+        isSystem: false,
+        enabled: true,
+        apkPath: '',
+        sizeBytes: 0,
+        targetSdk: 33,
+        minSdk: 21,
+        uid: 0,
+      ),
+    ];
+    expect(state.iconNeedsRefresh('com.a'), isTrue);
+    expect(await state.refreshChangedIcons(), 1);
+    expect(iconCalls, 2);
+    expect(state.iconNeedsRefresh('com.a'), isFalse);
+
+    // The stamp survives a restart.
+    final stored = await storage.readJson('icon_stamps') as Map;
+    expect((stored['com.a'] as num).toInt(), 5000);
+  });
+
+  test('refreshUpdatedIcons only reads apps updated while away', () async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    const channel = MethodChannel('hamstapp/apps');
+    var iconCalls = 0;
+    var stampCalls = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getAppIcon') {
+        iconCalls++;
+        return Uint8List.fromList([9, 9, 9]);
+      }
+      if (call.method == 'packageStamps') {
+        stampCalls++;
+        // com.a was updated (100 > 0); com.b is unchanged.
+        return {'com.a': 100, 'com.b': 0};
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      IconCache.instance.replaceAll(<String, Uint8List>{});
+    });
+
+    final state = AppState(_MemStorage())
+      ..apps = [_ai('com.a', 'A'), _ai('com.b', 'B')];
+
+    expect(await state.refreshUpdatedIcons(), 1);
+    expect(stampCalls, 1);
+    expect(iconCalls, 1);
+    expect(state.iconFor('com.a'), isNotNull);
+    expect(state.iconFor('com.b'), isNull);
+
+    // The version already read is not read again on the next check.
+    expect(await state.refreshUpdatedIcons(), 0);
+    expect(iconCalls, 1);
+  });
+
+  test('refreshAppIcon replaces the cached copy', () async {
+    IconCache.instance.replaceAll(<String, Uint8List>{});
+    const channel = MethodChannel('hamstapp/apps');
+    final first = Uint8List.fromList([1, 1, 1]);
+    final next = Uint8List.fromList([2, 2, 2]);
+    Uint8List? reply = first;
+    var refreshes = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+      if (call.method == 'getAppIcon') {
+        final args = (call.arguments as Map?)?.cast<dynamic, dynamic>();
+        if (args?['refresh'] == true) refreshes++;
+        return reply;
+      }
+      return null;
+    });
+    addTearDown(() {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+      IconCache.instance.replaceAll(<String, Uint8List>{});
+    });
+
+    final state = AppState(_MemStorage())..apps = [_ai('com.a', 'A')];
+    state.rememberIcon('com.a', first);
+    expect(state.iconFor('com.a'), first);
+
+    reply = next;
+    expect(await state.refreshAppIcon('com.a'), isTrue);
+    expect(refreshes, 1);
+    expect(state.iconFor('com.a'), next);
+    expect(state.iconNeedsRefresh('com.a'), isFalse);
+
+    // The system has nothing to give: the old icon stays, and this is reported
+    // rather than silently showing a placeholder.
+    reply = null;
+    expect(await state.refreshAppIcon('com.a'), isFalse);
+    expect(state.iconFor('com.a'), next);
+  });
+
   test('scanning the app list also refreshes the icon cache', () async {
     IconCache.instance.replaceAll(<String, Uint8List>{});
     const channel = MethodChannel('hamstapp/apps');

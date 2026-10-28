@@ -105,7 +105,20 @@ class PackageScannerPlugin(
 
     private val mainHandler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(4)
-    private val iconCache = ConcurrentHashMap<String, ByteArray>()
+
+    /**
+     * A decoded icon plus the app version it was drawn from. Comparing the
+     * stamp on every lookup means an app whose icon changed with an update is
+     * never served from a stale entry, without needing a restart.
+     */
+    private data class CachedIcon(val bytes: ByteArray, val stamp: Long)
+
+    private val iconCache = ConcurrentHashMap<String, CachedIcon>()
+
+    /** The package's install/update time, used as its icon's stamp. */
+    private fun iconStamp(packageName: String): Long = runCatching {
+        context.packageManager.getPackageInfo(packageName, 0).lastUpdateTime
+    }.getOrDefault(0L)
 
     override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
@@ -133,24 +146,54 @@ class PackageScannerPlugin(
                 val size = call.argument<Int>("size") ?: 144
                 val activity = call.argument<String>("activity")
                 val iconPack = call.argument<String>("iconPack") ?: ""
+                // Set after the app was updated (or by the detail page's
+                // refresh action): ignore the entry held for the old version.
+                val refresh = call.argument<Boolean>("refresh") ?: false
                 if (pkg == null) {
                     result.error("BAD_ARGS", "packageName is required", null)
                     return
                 }
                 val cacheKey = "$pkg|${activity ?: ""}|$iconPack@$size"
-                iconCache[cacheKey]?.let {
-                    result.success(it)
-                    return
+                if (refresh) {
+                    iconCache.remove(cacheKey)
+                } else {
+                    iconCache[cacheKey]?.let { cached ->
+                        if (cached.stamp == iconStamp(pkg)) {
+                            result.success(cached.bytes)
+                            return
+                        }
+                        // The package was installed or updated since this
+                        // icon was read: drop it and look again.
+                        iconCache.remove(cacheKey)
+                    }
                 }
                 executor.execute {
                     try {
+                        val stamp = iconStamp(pkg)
                         val bytes = loadIcon(pkg, size, activity, iconPack)
-                        if (bytes != null) iconCache[cacheKey] = bytes
+                        if (bytes != null) {
+                            iconCache[cacheKey] = CachedIcon(bytes, stamp)
+                        }
                         mainHandler.post { result.success(bytes) }
                     } catch (t: Throwable) {
                         mainHandler.post { result.error("ICON_FAILED", t.message, null) }
                     }
                 }
+            }
+            // Drop every decoded icon (the settings "refresh icon cache" does
+            // this before reading them all again).
+            "clearIconCache" -> {
+                iconCache.clear()
+                result.success(true)
+            }
+            // Just the install/update time of every package: lets the Dart
+            // side notice an app update (new icon) without a full scan.
+            "packageStamps" -> executor.execute {
+                val stamps = runCatching {
+                    context.packageManager.getInstalledPackages(0)
+                        .associate { it.packageName to it.lastUpdateTime }
+                }.getOrDefault(emptyMap<String, Long>())
+                mainHandler.post { result.success(stamps) }
             }
             // Installed icon packs (ADW/Nova/Lawnchair-compatible themes).
             "iconPacks" -> executor.execute {

@@ -128,6 +128,10 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   reason, notes); the 「隐藏」 filter is where it comes back from.
 - **Custom icons** — pick an image for any app; it is shrunk to 192 px and used everywhere (list,
   tiles, search) until you restore the launcher icon.
+- **Icons follow app updates** — after an app is installed or updated, 囤囤 re-reads only the icons
+  that changed (judged by the system's install / update time) on start-up, when it returns to the
+  foreground, or on a scan. If one icon is still wrong, the app detail menu has **Force refresh
+  icon**, which skips both the in-memory and the on-disk copy and asks the system again.
 - **整理与体检 (Health)** — one screen for the things worth noticing: updates that added sensitive
   permissions or changed signer, the install-source breakdown, apps sharing a name (highlighted when
   their certificates differ), packages with several downloaded versions, and the hidden apps.
@@ -188,7 +192,8 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   permissions, signer changes) to a Markdown file.
 - **Automatic snapshots** — off by default; when enabled, a scan that finds changes after N days
   takes one on its own.
-- A persistent **icon cache** so icons appear instantly, with an on-demand refresh.
+- A persistent **icon cache** so icons appear instantly, stamped with the app version each icon was
+  read from so an update only re-reads the icons that changed; a full refresh is in Settings.
 - **Offline by default** — the only network access is the remote sources you configure yourself.
 - **Notification badges** are read on-device from the system notification access you grant; nothing is uploaded.
 - An **opt-in log** (off by default) records scan / install / sync / launch / notification events on-device;
@@ -268,7 +273,9 @@ back as suggestions:
   recommendations whose taps count as launches; recommendation layouts and usage-sorted lists keep
   their order while you are looking at them, so a launch never shifts the other icons; widget options
   for app names, the 4 / 6 / 8 app limit, rounded icons and the partial-row layout (even / left /
-  ends); a pill or a dot marking the current page in the 4x1 strip; a globe badge on web apps.
+  ends); a pill or a dot marking the current page in the 4x1 strip; a globe badge on web apps;
+  icons refresh promptly after an app update, and a single icon can be force-refreshed from its
+  detail page.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

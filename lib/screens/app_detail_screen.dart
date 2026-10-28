@@ -70,6 +70,12 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     _note = TextEditingController(text: meta.note);
     _loadEntries();
     _loadHandler();
+    // An app updated since its icon was read may carry a new one: read it now
+    // so this page (and the lists behind it) never show the old version's
+    // icon. Quiet and best effort.
+    if (_appState.iconNeedsRefresh(widget.packageName)) {
+      unawaited(_appState.refreshAppIcon(widget.packageName));
+    }
   }
 
   Future<void> _loadEntries() async {
@@ -371,6 +377,19 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
       ..showSnackBar(SnackBar(content: Text(text)));
   }
 
+  /// Re-reads this app's icon from the system, ignoring the copies kept in
+  /// memory and on disk. A new version (or an icon the system did not report
+  /// earlier) shows up immediately, in the list too.
+  Future<void> _forceRefreshIcon(AppState state) async {
+    final ok = await state.refreshAppIcon(widget.packageName);
+    if (!mounted) return;
+    _snack(
+      ok
+          ? context.strings.t('图标已刷新')
+          : context.strings.t('刷新失败，系统没有返回图标'),
+    );
+  }
+
   /// Lets the user pick a square image and stores it as this app's icon. The
   /// image is shrunk before it is saved, so a photo does not bloat the data.
   Future<void> _pickCustomIcon(AppState state) async {
@@ -496,6 +515,8 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                           }
                         case 'icon':
                           await _pickCustomIcon(state);
+                        case 'refreshIcon':
+                          await _forceRefreshIcon(state);
                         case 'resetIcon':
                           await state.clearCustomIcon(widget.packageName);
                       }
@@ -562,6 +583,16 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                 title: Text(ctx.strings.t('更换图标')),
                               ),
                             ),
+                            // A custom icon wins over the launcher one, so
+                            // re-reading the system icon would change nothing.
+                            if (meta.customIcon.isEmpty)
+                              PopupMenuItem(
+                                value: 'refreshIcon',
+                                child: ListTile(
+                                  leading: const Icon(Icons.refresh),
+                                  title: Text(ctx.strings.t('强制刷新图标')),
+                                ),
+                              ),
                             if (meta.customIcon.isNotEmpty)
                               PopupMenuItem(
                                 value: 'resetIcon',

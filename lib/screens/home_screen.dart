@@ -117,6 +117,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       // launch statistics now; the schedule is refreshed right after.
       unawaited(app.consumeHomeWidgetLaunches());
       unawaited(app.syncHomeWidget());
+      // An app installed or updated while 囤囤 was in the background may carry
+      // a new icon; read those without a full scan.
+      unawaited(app.refreshUpdatedIcons());
       // A changed wallpaper should change the theme without a restart.
       unawaited(app.refreshWallpaperColor());
     }

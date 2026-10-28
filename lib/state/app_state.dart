@@ -467,6 +467,7 @@ class AppState extends ChangeNotifier {
     IconCache.instance.replaceAll(
       IconCache.decode(await storage.readJson(_kIcons)),
     );
+    await _loadIconStamps();
     _applyLanguage();
     _applyFormat();
     // A theme that follows the wallpaper must be re-seeded before the first
@@ -537,6 +538,18 @@ class AppState extends ChangeNotifier {
     apps = _parseApps(await storage.readJson(_kAppsCache));
     webApps = _parseWebApps(await storage.readJson(_kWebApps));
     _rebuildApps();
+    // Icons cached before stamps existed are taken as belonging to the version
+    // the cached scan knows about; the system check below then only refreshes
+    // the apps that changed since, instead of re-reading everything.
+    var seededStamps = false;
+    for (final a in installedApps) {
+      if (_iconStamps.containsKey(a.packageName)) continue;
+      final slot = IconCache.instance.slotFor(a.packageName);
+      if (!IconCache.instance.containsKey(slot)) continue;
+      _iconStamps[a.packageName] = a.lastUpdateTime;
+      seededStamps = true;
+    }
+    if (seededStamps) unawaited(_persistIconStamps());
     _applyNotificationBadges();
     _applyLogging();
     NativeApps.startListening();
@@ -563,6 +576,8 @@ class AppState extends ChangeNotifier {
     unawaited(consumeHomeWidgetLaunches());
     unawaited(syncHomeWidget(force: true));
     unawaited(syncPageWidget());
+    // An app updated while 囤囤 was closed: read its icon now, without a scan.
+    unawaited(refreshUpdatedIcons());
   }
 
   void _onNotificationCounts(Map<String, int> counts) {
@@ -983,10 +998,11 @@ class AppState extends ChangeNotifier {
       scanning = false;
       notifyListeners();
     }
-    // Refresh the icon cache together with the app list, so updated app icons
-    // show up without a separate trip to Settings.
+    // Refresh the icons of apps that were installed or updated since their
+    // icon was read, so a new version's icon shows up without re-reading the
+    // whole list (Settings still has a full "refresh icon cache").
     if (scanError == null) {
-      unawaited(refreshIconCache());
+      unawaited(refreshChangedIcons());
       // An uninstalled app must not stay on the long-press list.
       unawaited(syncRecentShortcuts());
       // Read permissions/certificates, warn about updates that added some and
@@ -1388,10 +1404,41 @@ class AppState extends ChangeNotifier {
 
   // ------------------------------------------------------------------- icons
 
+  /// When each app's icon was last read, keyed by package: the app's
+  /// `lastUpdateTime` at that moment. A scan uses it to tell which apps were
+  /// installed or updated since, and therefore may show a new icon.
+  Map<String, int> _iconStamps = <String, int>{};
+
+  Future<void> _loadIconStamps() async {
+    final raw = await storage.readJson(_kIconStamps);
+    if (raw is! Map) return;
+    _iconStamps = {
+      for (final e in raw.entries)
+        if (e.key is String && e.value is num)
+          e.key as String: (e.value as num).toInt(),
+    };
+  }
+
+  Future<void> _persistIconStamps() =>
+      storage.writeJson(_kIconStamps, _iconStamps);
+
   /// Cached icon bytes for [packageName], accounting for a pinned entry, or
   /// null when never fetched.
   Uint8List? iconFor(String packageName) =>
       IconCache.instance[IconCache.instance.slotFor(packageName)];
+
+  /// Whether [packageName]'s icon was read before its current version, so it
+  /// may have changed with an update (or was never read at all).
+  bool iconNeedsRefresh(String packageName) {
+    final app = appByPackage(packageName);
+    if (app == null || app.isWebEntry) return false;
+    final slot = IconCache.instance.slotFor(packageName);
+    if (!IconCache.instance.containsKey(slot)) return true;
+    final stamp = _iconStamps[packageName];
+    // An icon read from a *newer* system version than the last scan knows is
+    // already current (see [refreshUpdatedIcons]), so `<` rather than `!=`.
+    return stamp == null || stamp < app.lastUpdateTime;
+  }
 
   /// Store a freshly fetched icon; [IconCache] persists it (coalesced).
   void rememberIcon(String packageName, Uint8List bytes) {
@@ -1433,50 +1480,190 @@ class AppState extends ChangeNotifier {
   /// Drop the icon cache and re-read icons for every installed app from the
   /// system. Returns how many icons were (re)loaded.
   ///
-  /// Called by the settings "refresh icon cache" action and automatically after
-  /// an app-list scan; concurrent calls share the same run.
-  Future<int> refreshIconCache() {
+  /// Called by the settings "refresh icon cache" action. Concurrent calls share
+  /// the same run.
+  Future<int> refreshIconCache() => _startIconRefresh(all: true);
+
+  /// Re-read only the icons of apps installed or updated since their icon was
+  /// last read. A scan calls this, so an updated app shows its new icon without
+  /// re-reading the whole list; returns how many icons were re-read.
+  Future<int> refreshChangedIcons() => _startIconRefresh(all: false);
+
+  /// Compares the package manager's install/update times with what the last
+  /// scan saw and re-reads the icons of apps that changed since. Cheap enough
+  /// to run on start-up and whenever 囤囤 returns to the foreground, so an app
+  /// updated while it was closed still gets its new icon without a full scan.
+  Future<int> refreshUpdatedIcons() async {
+    if (installedApps.isEmpty) return 0;
+    final systemStamps = await NativeApps.packageStamps();
+    if (systemStamps.isEmpty) return 0;
+    final due = <AppInfo>[];
+    for (final a in installedApps) {
+      final fresh = systemStamps[a.packageName];
+      if (fresh == null || fresh <= a.lastUpdateTime) continue;
+      final known = _iconStamps[a.packageName];
+      if (known != null && known >= fresh) continue;
+      due.add(a);
+    }
+    if (due.isEmpty) return 0;
+    return _startIconRefresh(all: false, systemStamps: systemStamps, only: due);
+  }
+
+  Future<int> _startIconRefresh({
+    required bool all,
+    Map<String, int>? systemStamps,
+    List<AppInfo>? only,
+  }) {
     final running = _iconRefresh;
     if (running != null) return running;
-    final run = _runIconRefresh();
+    final run = all
+        ? _runIconRefresh()
+        : _runChangedIconRefresh(systemStamps: systemStamps, only: only);
     _iconRefresh = run;
+    // Clear the guard in a microtask, not inside the body: a run that returns
+    // before its first await would otherwise be pinned for the whole session.
+    unawaited(
+      run.whenComplete(() {
+        if (identical(_iconRefresh, run)) _iconRefresh = null;
+      }),
+    );
     return run;
   }
 
   Future<int> _runIconRefresh() async {
-    try {
-      // Web entries are not installed apps, so their icons are never refetched
-      // — read them out *before* the sweep clears the cache, or they are lost
-      // until the next background re-read.
-      final webIcons = _webEntryIcons();
-      IconCache.instance.clearSilent();
-      final next = <String, Uint8List>{};
+    // Web entries are not installed apps, so their icons are never refetched
+    // — read them out *before* the sweep clears the cache, or they are lost
+    // until the next background re-read.
+    final webIcons = _webEntryIcons();
+    IconCache.instance.clearSilent();
+    // The native side holds decoded icons for the app's lifetime; drop its
+    // copy too, or the sweep reads back the very bytes it is replacing.
+    await NativeApps.clearIconCache();
+    final next = <String, Uint8List>{};
+    final stamps = <String, int>{};
+    for (final a in installedApps) {
+      try {
+        // Fetch the icon of the entry this app launches, not blindly the
+        // application's own: they can differ.
+        final activity = IconCache.instance.activityFor(a.packageName);
+        final bytes = await NativeApps.getAppIcon(
+          a.packageName,
+          size: IconCache.fetchSize,
+          activity: activity.isEmpty ? null : activity,
+          refresh: true,
+        );
+        if (bytes != null && bytes.isNotEmpty) {
+          next[IconCache.instance.slotFor(a.packageName)] = bytes;
+          stamps[a.packageName] = a.lastUpdateTime;
+        }
+      } catch (_) {
+        // Keep going: one unreadable icon must not abort the refresh.
+      }
+    }
+    // Put the hand-added web entries' icons back on top of the fresh map.
+    next.addAll(webIcons);
+    IconCache.instance.replaceAll(next);
+    _iconStamps = stamps;
+    await _persistIcons();
+    await _persistIconStamps();
+    notifyListeners();
+    return next.length;
+  }
+
+  Future<int> _runChangedIconRefresh({
+    Map<String, int>? systemStamps,
+    List<AppInfo>? only,
+  }) async {
+    final due = only ?? <AppInfo>[];
+    if (only == null) {
       for (final a in installedApps) {
-        try {
-          // Fetch the icon of the entry this app launches, not blindly the
-          // application's own: they can differ.
-          final activity = IconCache.instance.activityFor(a.packageName);
-          final bytes = await NativeApps.getAppIcon(
-            a.packageName,
-            size: IconCache.fetchSize,
-            activity: activity.isEmpty ? null : activity,
-          );
-          if (bytes != null && bytes.isNotEmpty) {
-            next[IconCache.instance.slotFor(a.packageName)] = bytes;
-          }
-        } catch (_) {
-          // Keep going: one unreadable icon must not abort the refresh.
+        final slot = IconCache.instance.slotFor(a.packageName);
+        final baseline = a.lastUpdateTime;
+        final known = _iconStamps[a.packageName];
+        if (!IconCache.instance.containsKey(slot) ||
+            known == null ||
+            known < baseline) {
+          due.add(a);
         }
       }
-      // Put the hand-added web entries' icons back on top of the fresh map.
-      next.addAll(webIcons);
-      IconCache.instance.replaceAll(next);
-      await _persistIcons();
-      notifyListeners();
-      return next.length;
-    } finally {
-      _iconRefresh = null;
     }
+    if (due.isEmpty) return 0;
+
+    var count = 0;
+    for (final a in due) {
+      try {
+        final activity = IconCache.instance.activityFor(a.packageName);
+        final bytes = await NativeApps.getAppIcon(
+          a.packageName,
+          size: IconCache.fetchSize,
+          activity: activity.isEmpty ? null : activity,
+          refresh: true,
+        );
+        if (bytes == null || bytes.isEmpty) continue;
+        IconCache.instance.put(
+          IconCache.instance.slotFor(a.packageName),
+          bytes,
+        );
+        _iconStamps[a.packageName] =
+            systemStamps?[a.packageName] ?? a.lastUpdateTime;
+        count++;
+      } catch (_) {
+        // Keep going: one unreadable icon must not abort the refresh.
+      }
+    }
+    // Forget packages that are gone, so the map cannot grow forever.
+    final installed = installedApps.map((a) => a.packageName).toSet();
+    _iconStamps.removeWhere((pkg, _) => !installed.contains(pkg));
+    await _persistIconStamps();
+    if (count > 0) {
+      await _persistIcons();
+      IconCache.instance.notifyUpdated();
+      notifyListeners();
+    }
+    return count;
+  }
+
+  /// Re-reads one app's icon from the system, ignoring both the copy the native
+  /// side holds and the one on disk. Returns false when the system reports no
+  /// icon (e.g. the package vanished).
+  ///
+  /// The detail page's 强制刷新图标 action uses this; the app list picks it up
+  /// through [IconCache]'s notification.
+  Future<bool> refreshAppIcon(String packageName) async {
+    final app = appByPackage(packageName);
+    Uint8List? bytes;
+    try {
+      final activity = IconCache.instance.activityFor(packageName);
+      bytes = await NativeApps.getAppIcon(
+        packageName,
+        size: IconCache.fetchSize,
+        activity: activity.isEmpty ? null : activity,
+        refresh: true,
+      );
+    } catch (_) {
+      bytes = null;
+    }
+    final label = app?.appName ?? packageName;
+    if (bytes == null || bytes.isEmpty) {
+      AppLog.instance.log(LogModule.apps, '图标 · 刷新失败 · $label');
+      return false;
+    }
+    IconCache.instance.put(IconCache.instance.slotFor(packageName), bytes);
+    IconCache.instance.notifyUpdated();
+    if (app != null) {
+      // Keep a stamp taken from a *newer* system version (see
+      // [refreshUpdatedIcons]); never move it backwards.
+      final known = _iconStamps[packageName];
+      _iconStamps[packageName] =
+          known == null || known < app.lastUpdateTime
+          ? app.lastUpdateTime
+          : known;
+    }
+    await _persistIcons();
+    await _persistIconStamps();
+    notifyListeners();
+    AppLog.instance.log(LogModule.apps, '图标 · 已刷新 · $label');
+    return true;
   }
 
   /// The icons of hand-added web entries, as they are right now: a bulk refresh
@@ -4435,6 +4622,10 @@ class AppState extends ChangeNotifier {
   /// no scan can drop them.
   static const _kWebApps = 'web_apps';
   static const _kIcons = Storage.iconsFile;
+
+  /// Package -> `lastUpdateTime` at the moment its icon was read (see
+  /// [iconNeedsRefresh]).
+  static const _kIconStamps = 'icon_stamps';
   static const _kTilePages = 'tile_pages';
   static const _kTiles = 'tiles';
   static const _kSettings = 'settings';
