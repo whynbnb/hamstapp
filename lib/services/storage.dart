@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,10 @@ import 'package:path_provider/path_provider.dart';
 /// Simple JSON-file backed persistence inside the app documents directory.
 class Storage {
   Storage._(this._dir);
+
+  /// Storage rooted at [dir]. The app always uses [instance]; this seam lets
+  /// tests exercise the writer without the platform documents directory.
+  Storage.at(Directory dir) : _dir = dir;
 
   final Directory _dir;
 
@@ -72,6 +77,11 @@ class Storage {
 
   File _file(String name) => File('${_dir.path}/$name.json');
 
+  /// Writes still running, one chain per file. App state is saved often (and
+  /// sometimes from two places at once), so two writes must never interleave.
+  final Map<String, Future<void>> _writes = <String, Future<void>>{};
+  int _writeSeq = 0;
+
   Future<dynamic> readJson(String name) async {
     try {
       final f = _file(name);
@@ -84,11 +94,41 @@ class Storage {
     }
   }
 
-  Future<void> writeJson(String name, dynamic data) async {
+  /// Writes are queued per file and land atomically.
+  ///
+  /// The old version wrote to a shared `<name>.json.tmp` and deleted the real
+  /// file before renaming, so two overlapping saves of the same document could
+  /// delete it for good (next launch = defaults). Now each write gets its own
+  /// temp file and `rename` replaces the target in one step; readers see
+  /// either the previous document or the new one.
+  Future<void> writeJson(String name, dynamic data) {
+    final previous = _writes[name] ?? Future<void>.value();
+    final next = previous
+        .catchError((Object _) {})
+        .then((_) => _writeNow(name, data));
+    _writes[name] = next;
+    final cleanup = next.whenComplete(() {
+      if (identical(_writes[name], next)) _writes.remove(name);
+    });
+    // The caller still sees [next]'s error; this copy only runs the cleanup.
+    unawaited(cleanup.catchError((Object _) {}));
+    return next;
+  }
+
+  Future<void> _writeNow(String name, dynamic data) async {
     final f = _file(name);
-    final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(jsonEncode(data), flush: true);
-    if (await f.exists()) await f.delete();
-    await tmp.rename(f.path);
+    final tmp = File('${f.path}.${_writeSeq++}.tmp');
+    try {
+      await tmp.writeAsString(jsonEncode(data), flush: true);
+      await tmp.rename(f.path);
+    } catch (_) {
+      // A failed write must not leave scratch files behind.
+      try {
+        if (await tmp.exists()) await tmp.delete();
+      } catch (_) {
+        // Best effort.
+      }
+      rethrow;
+    }
   }
 }

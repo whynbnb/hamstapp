@@ -17,7 +17,6 @@ import 'package:hamstapp/state/app_state.dart';
 import 'package:hamstapp/widgets/app_icon.dart';
 import 'package:hamstapp/widgets/app_tile.dart';
 import 'package:hamstapp/widgets/category_editor.dart';
-import 'package:hamstapp/widgets/chip_scroller.dart';
 
 class _MemStorage implements Storage {
   final Map<String, dynamic> _data = <String, dynamic>{};
@@ -591,7 +590,9 @@ void main() {
     expect(state.categories.single.emoji, '🦄');
   });
 
-  testWidgets('filter panel toggles sort order and resets', (tester) async {
+  testWidgets('filter panel toggles sort order and applies on demand', (
+    tester,
+  ) async {
     final state = AppState(_MemStorage())
       ..initialized = true
       ..apps = [_ai('com.a', 'Alpha'), _ai('com.b', 'Beta')];
@@ -605,31 +606,40 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.byIcon(Icons.tune));
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
 
-    expect(find.text('筛选与排序'), findsOneWidget);
+    expect(find.text('搜索与筛选'), findsOneWidget);
 
-    // Direction toggle.
+    // Nothing is applied while the page is being edited.
     await tester.tap(find.text('倒序'));
     await tester.pump();
-    expect(state.sortAscending, isFalse);
-
-    // Pick a sort field; it switches to its natural direction.
     await tester.tap(find.text('按大小'));
     await tester.pump();
+    await tester.tap(find.text('用户应用'));
+    await tester.pump();
+    expect(state.sortAscending, isTrue);
+    expect(state.scope, AppScope.all);
+
+    await tester.tap(find.text('应用筛选 · 2 个'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(state.sort, AppSort.size);
     expect(state.sortAscending, isFalse);
-
-    // Choose a filter so the badge/reset activate.
-    await tester.tap(find.text('用户'));
-    await tester.pump();
     expect(state.scope, AppScope.user);
+    // Scope, sort field and sort direction.
+    expect(state.activeAppFilterCount, 3);
 
+    // 重置 clears the form; applying it returns to the defaults.
+    await tester.tap(find.byIcon(Icons.tune));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('重置'));
     await tester.pump();
+    await tester.tap(find.text('应用筛选 · 2 个'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
     expect(state.activeAppFilterCount, 0);
     expect(state.scope, AppScope.all);
+    expect(state.sort, AppSort.name);
   });
 
   testWidgets('apps tab merges info into refresh and shows stats on scan', (
@@ -669,8 +679,7 @@ void main() {
     expect(find.byType(SnackBar), findsOneWidget);
   });
 
-  testWidgets('long category list stays on one scrollable row', (    tester,
-  ) async {
+  testWidgets('a long category list becomes one dropdown', (tester) async {
     final state = AppState(_MemStorage())
       ..initialized = true
       ..apps = [_ai('com.a', 'Alpha')]
@@ -678,6 +687,7 @@ void main() {
         for (var i = 0; i < 12; i++)
           AppCategory(id: 'c$i', name: '分类$i', emoji: '📁'),
       ];
+    state.metaFor('com.a').categoryIds.add('c0');
 
     await tester.pumpWidget(
       ChangeNotifierProvider<AppState>.value(
@@ -688,16 +698,20 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.byIcon(Icons.tune));
+    await tester.pumpAndSettle();
+
+    final dropdown = find.byType(DropdownButtonFormField<String>);
+    expect(dropdown, findsOneWidget);
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    expect(find.text('📁 分类0'), findsWidgets);
+
+    await tester.tap(find.text('📁 分类0').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('应用筛选 · 1 个'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
-
-    final scroller = find.byType(ChipScroller);
-    expect(scroller, findsOneWidget);
-    expect(tester.getSize(scroller).height, 48);
-    final list = tester.widget<ListView>(
-      find.descendant(of: scroller, matching: find.byType(ListView)),
-    );
-    expect(list.scrollDirection, Axis.horizontal);
+    expect(state.filterCategoryId, 'c0');
   });
 
   testWidgets('app detail exports the APK through the native share channel', (

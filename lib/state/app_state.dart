@@ -436,12 +436,49 @@ class AppState extends ChangeNotifier {
   }
 
   void resetAppFilters() {
+    query = '';
     scope = AppScope.all;
     filter = AppFilter.all;
     filterCategoryId = null;
     sort = AppSort.name;
     sortAscending = true;
     refresh();
+  }
+
+  /// Applies a whole set of list conditions at once — what the 搜索与筛选 page
+  /// collects — with a single settings write instead of one per field.
+  Future<void> applyAppFilters({
+    required String query,
+    required AppScope scope,
+    required AppFilter filter,
+    required String? filterCategoryId,
+    required AppSort sort,
+    required bool sortAscending,
+    required AppGroupMode group,
+  }) async {
+    this.query = query.trim();
+    this.scope = scope;
+    this.filter = filter;
+    this.filterCategoryId = filterCategoryId;
+    this.sort = sort;
+    this.sortAscending = sortAscending;
+    settings['app_group'] = group.name;
+    if (rememberAppFilters) {
+      settings['app_filter_remember'] = true;
+      settings['app_scope'] = scope.name;
+      settings['app_filter'] = filter.name;
+      settings['app_filter_category'] = filterCategoryId ?? '';
+      settings['app_sort'] = sort.name;
+      settings['app_sort_asc'] = sortAscending;
+    }
+    if (this.query.isNotEmpty) {
+      final list = List<String>.from(searchHistory)
+        ..removeWhere((e) => e == this.query)
+        ..insert(0, this.query);
+      settings['search_history'] = list.take(kSearchHistoryMax).toList();
+    }
+    notifyListeners();
+    await _persistSettings();
   }
 
   String _newId() =>
@@ -4124,8 +4161,21 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<AppInfo> get visibleApps {
-    final parsed = parsedQuery;
+  /// The app list a given set of conditions would show, without touching the
+  /// current ones. The 搜索与筛选 page uses it for its live result count, and
+  /// [visibleApps] is just this with the current state.
+  List<AppInfo> appsFor({
+    required String query,
+    required AppScope scope,
+    required AppFilter filter,
+    required String? filterCategoryId,
+    required AppSort sort,
+    required bool sortAscending,
+  }) {
+    final parsed = AppQuery.parse(
+      query,
+      now: DateTime.now().millisecondsSinceEpoch,
+    );
     // Only the free text goes through the fuzzy matcher; the filters are
     // predicates below.
     final q = parsed.text.trim();
@@ -4151,19 +4201,19 @@ class AppState extends ChangeNotifier {
       }
       switch (filter) {
         case AppFilter.favorite:
-          if (!metaFor(app.packageName).favorite) return false;
+          if (!meta.favorite) return false;
           break;
         case AppFilter.categorized:
-          if (metaFor(app.packageName).categoryIds.isEmpty) return false;
+          if (meta.categoryIds.isEmpty) return false;
           break;
         case AppFilter.uncategorized:
-          if (metaFor(app.packageName).categoryIds.isNotEmpty) return false;
+          if (meta.categoryIds.isNotEmpty) return false;
           break;
         case AppFilter.hasReason:
-          if (metaFor(app.packageName).reason.isEmpty) return false;
+          if (meta.reason.isEmpty) return false;
           break;
         case AppFilter.unorganized:
-          if (!isUnorganized(metaFor(app.packageName))) return false;
+          if (!isUnorganized(meta)) return false;
           break;
         case AppFilter.uninstalled:
           // Handled separately via [uninstalledApps].
@@ -4174,43 +4224,11 @@ class AppState extends ChangeNotifier {
         case AppFilter.all:
           break;
       }
-      if (filterCategoryId != null) {
-        if (!metaFor(app.packageName).categoryIds.contains(filterCategoryId)) {
-          return false;
-        }
+      if (filterCategoryId != null &&
+          !meta.categoryIds.contains(filterCategoryId)) {
+        return false;
       }
-      if (parsed.hasFilters) {
-        final installer = appFacts[app.packageName]?.installer ?? app.installer;
-        final installerLabel = installer.isEmpty
-            ? ''
-            : '${displayNameFor(installer)} $installer';
-        final ok = parsed.matches(
-          sizeBytes: app.sizeBytes,
-          firstInstallTime: app.firstInstallTime,
-          lastUpdateTime: app.lastUpdateTime,
-          isSystem: app.isSystem,
-          categoryNames: [
-            for (final id in meta.categoryIds) categoryById(id)?.name ?? '',
-          ].join(' '),
-          reason: meta.reason,
-          installerLabel: installerLabel,
-          sideloaded: installer.isEmpty,
-        );
-        if (!ok) return false;
-      }
-      // Match either name: the package's own label, or the name of a pinned
-      // launcher entry (which is what the row shows).
-      var score = AppSearch.score(app.packageName, app.appName, q);
-      if (score == null) {
-        final display = displayNameFor(app.packageName);
-        if (display != app.appName) {
-          score = AppSearch.score(app.packageName, display, q);
-        }
-      }
-      // A web entry is worth finding by its address as well.
-      if (score == null && app.webUrl.isNotEmpty) {
-        score = AppSearch.score(app.webUrl, app.appName, q);
-      }
+      final score = _matchScore(app, meta, parsed, q);
       if (score == null) return false;
       if (q.isNotEmpty) scores[app.packageName] = score;
       return true;
@@ -4245,6 +4263,53 @@ class AppState extends ChangeNotifier {
     list.sort(sortAscending ? cmp : (a, b) => cmp(b, a));
     return list;
   }
+
+  /// Relevance of [app] for [parsed], or null when it does not match. Shared by
+  /// [visibleApps] and [searchApps], so both understand the same syntax.
+  int? _matchScore(AppInfo app, AppMeta meta, AppQuery parsed, String q) {
+    if (parsed.hasFilters) {
+      final installer = appFacts[app.packageName]?.installer ?? app.installer;
+      final installerLabel = installer.isEmpty
+          ? ''
+          : '${displayNameFor(installer)} $installer';
+      final ok = parsed.matches(
+        sizeBytes: app.sizeBytes,
+        firstInstallTime: app.firstInstallTime,
+        lastUpdateTime: app.lastUpdateTime,
+        isSystem: app.isSystem,
+        categoryNames: [
+          for (final id in meta.categoryIds) categoryById(id)?.name ?? '',
+        ].join(' '),
+        reason: meta.reason,
+        installerLabel: installerLabel,
+        sideloaded: installer.isEmpty,
+      );
+      if (!ok) return null;
+    }
+    // Match either name: the package's own label, or the name of a pinned
+    // launcher entry (which is what the row shows).
+    var score = AppSearch.score(app.packageName, app.appName, q);
+    if (score == null) {
+      final display = displayNameFor(app.packageName);
+      if (display != app.appName) {
+        score = AppSearch.score(app.packageName, display, q);
+      }
+    }
+    // A web entry is worth finding by its address as well.
+    if (score == null && app.webUrl.isNotEmpty) {
+      score = AppSearch.score(app.webUrl, app.appName, q);
+    }
+    return score;
+  }
+
+  List<AppInfo> get visibleApps => appsFor(
+        query: query,
+        scope: scope,
+        filter: filter,
+        filterCategoryId: filterCategoryId,
+        sort: sort,
+        sortAscending: sortAscending,
+      );
 
   /// Sort/compare key: the name shown to the user, which can come from a pinned
   /// launcher entry (联系人 vs 电话) instead of the package's own label.
