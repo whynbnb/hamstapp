@@ -217,6 +217,12 @@ const Map<String, String> _en = <String, String>{
   '每个应用一种纯色，醒目活泼': 'A solid color per app, bold and lively',
   '毛玻璃半透明，轻盈通透': 'Frosted and translucent, light and airy',
   '导航栏模式': 'Navigation style',
+  '折叠按钮长按': 'Long-press collapsed button',
+  '长按左上角折叠按钮时执行': 'Runs when the collapsed nav button is pressed long',
+  '无': 'None',
+  '启动-最近': 'Launch · Recent',
+  '启动-磁贴': 'Launch · Tiles',
+  '应用-同步': 'Apps · Sync',
   '显示系统状态栏': 'Show system status bar',
   '关闭后隐藏系统状态栏，内容更沉浸；向下滑动可临时唤出':
       'Hide the system status bar for a more immersive view; swipe down to reveal it temporarily.',

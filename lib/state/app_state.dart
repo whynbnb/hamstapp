@@ -70,6 +70,21 @@ enum CategorySort { manual, name, count }
 ///   navigation (long-press it to jump back to Launch).
 enum NavMode { auto, bottom, rail, collapsed }
 
+/// What a long press on the collapsed navigation button does.
+///
+/// The plain [launch] action returns to the Launch tab exactly as it was left;
+/// [launchRecent] / [launchTiles] also pick that sub-tab, [appsSync] opens the
+/// APK sync screen, and [none] disables the gesture.
+enum CollapsedNavLongPress {
+  none,
+  launch,
+  launchRecent,
+  launchTiles,
+  apps,
+  appsSync,
+  settings,
+}
+
 /// Where the page chips sit on the bottom bar when the pages do not fill its
 /// width. [center] is the default; [left] is how a plain list behaves.
 enum TileBarAlign { center, left, right }
@@ -3242,6 +3257,23 @@ class AppState extends ChangeNotifier {
 
   Future<void> setNavMode(NavMode mode) async {
     settings['nav_mode'] = mode.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// What long-pressing the collapsed nav button does. Defaults to the old
+  /// behaviour: jump back to the Launch tab.
+  CollapsedNavLongPress get collapsedNavLongPress {
+    final raw = settings['collapsed_nav_long_press'];
+    for (final action in CollapsedNavLongPress.values) {
+      if (action.name == raw) return action;
+    }
+    return CollapsedNavLongPress.launch;
+  }
+
+  Future<void> setCollapsedNavLongPress(CollapsedNavLongPress action) async {
+    if (collapsedNavLongPress == action) return;
+    settings['collapsed_nav_long_press'] = action.name;
     await _persistSettings();
     notifyListeners();
   }

@@ -15,6 +15,7 @@ import 'apps_screen.dart';
 import 'quick_launch_screen.dart';
 import 'settings_screen.dart';
 import 'snapshots_screen.dart';
+import 'sync_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -143,6 +144,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
   }
 
+  /// Runs the long-press action configured for the collapsed nav button.
+  void _onCollapsedNavLongPress(AppState state, CollapsedNavLongPress action) {
+    setState(() => _navOpen = false);
+    switch (action) {
+      case CollapsedNavLongPress.none:
+        break;
+      case CollapsedNavLongPress.launch:
+        _select(state, 0, forceHaptic: true);
+      case CollapsedNavLongPress.launchRecent:
+        state.requestLaunchTab(0);
+        _select(state, 0, forceHaptic: true);
+      case CollapsedNavLongPress.launchTiles:
+        state.requestLaunchTab(1);
+        _select(state, 0, forceHaptic: true);
+      case CollapsedNavLongPress.apps:
+        _select(state, 1, forceHaptic: true);
+      case CollapsedNavLongPress.appsSync:
+        _select(state, 1, forceHaptic: true);
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(builder: (_) => const SyncScreen()),
+        );
+      case CollapsedNavLongPress.settings:
+        _select(state, _settingsTab, forceHaptic: true);
+    }
+  }
+
   void _select(AppState state, int i, {bool forceHaptic = false}) {
     if (state.tileEditMode) {
       ScaffoldMessenger.of(context)
@@ -212,14 +239,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
     // The scope lets every top-level screen render the fixed top-left button
     // without knowing about the home layout. Tapping it opens the panel;
-    // long-pressing it jumps back to the Launch tab with a haptic tick.
+    // long-pressing it runs whichever action was picked in Settings (or
+    // nothing, when that action is 无).
+    final longPress = state.collapsedNavLongPress;
     final body = CollapsedNavScope(
       active: collapsed,
       onOpen: () => setState(() => _navOpen = !_navOpen),
-      onLongPress: () {
-        setState(() => _navOpen = false);
-        _select(state, 0, forceHaptic: true);
-      },
+      onLongPress: longPress == CollapsedNavLongPress.none
+          ? null
+          : () => _onCollapsedNavLongPress(state, longPress),
       child: IndexedStack(index: _index, children: screens),
     );
 

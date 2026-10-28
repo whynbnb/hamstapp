@@ -6,9 +6,10 @@ import '../l10n/app_strings.dart';
 ///
 /// When [active] is true, each screen shows a fixed menu button as its AppBar
 /// leading. Tapping it calls [onOpen], which is handled by [HomeScreen] to
-/// reveal the navigation panel; long-pressing it calls [onLongPress], which
-/// jumps back to the Launch tab. The button lives in the AppBar so the
-/// collapsed state never covers page content (unlike a floating button).
+/// reveal the navigation panel; long-pressing it calls [onLongPress], whose
+/// action is configurable (Launch, Apps, Settings, …) and may be absent. The
+/// button lives in the AppBar so the collapsed state never covers page content
+/// (unlike a floating button).
 class CollapsedNavScope extends InheritedWidget {
   const CollapsedNavScope({
     super.key,
@@ -20,7 +21,9 @@ class CollapsedNavScope extends InheritedWidget {
 
   final bool active;
   final VoidCallback onOpen;
-  final VoidCallback onLongPress;
+
+  /// Null when the configured long-press action is 无.
+  final VoidCallback? onLongPress;
 
   static CollapsedNavScope? maybeOf(BuildContext context) =>
       context.dependOnInheritedWidgetOfExactType<CollapsedNavScope>();
@@ -37,7 +40,8 @@ class CollapsedNavScope extends InheritedWidget {
 
 /// Fixed top-left navigation button shown while [CollapsedNavScope.active].
 ///
-/// Tap to open the navigation panel, long-press to jump back to Launch.
+/// Tap to open the navigation panel; a long press runs the action chosen in
+/// Settings (or does nothing when that action is 无).
 class CollapsedNavButton extends StatelessWidget {
   const CollapsedNavButton({super.key});
 

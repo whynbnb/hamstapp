@@ -214,7 +214,9 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - **Date format** — five styles (`2026-10-17`, `2026/10/17`, `10/17/2026`, `17/10/2026`,
   `2026年10月17日`) and 24-hour or `1:05 PM`; one setting drives every screen and tile.
   Relative times (`3 days ago`, `today`) stay relative.
-- Navigation: bottom bar, side rail, or a collapsed button.
+- Navigation: bottom bar, side rail, or a collapsed button. In collapsed mode the button's long
+  press is configurable: none, Launch, Launch · Recent, Launch · Tiles, Apps, Apps · Sync or
+  Settings (Launch by default).
 - **Icon packs** — use the icons of an installed icon pack instead of the launcher's (the platform
   appfilter convention; system icons stay the default).
 - **Font size and density** — 85 / 100 / 115 / 130 % on top of the device's own scale, and a compact
@@ -290,7 +292,8 @@ back as suggestions:
   lost; icon lookups moved off the UI thread and icon saves batched, so lists and scans stay smooth;
   the launch tab underline cross-fades between the two ends at a loop wrap instead of sliding
   against the gesture; the virtual page is folded back after each wrap, so repeated swipes cannot
-  strand the indicator, and the content always follows the finger.
+  strand the indicator, and the content always follows the finger; the collapsed nav button's
+  long press is configurable (Launch / Apps / Settings / Sync …).
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

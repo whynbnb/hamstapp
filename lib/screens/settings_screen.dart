@@ -301,6 +301,28 @@ class SettingsScreen extends StatelessWidget {
               ],
             ),
           ),
+          if (state.navMode == NavMode.collapsed)
+            ListTile(
+              leading: const Icon(Icons.touch_app_outlined),
+              title: Text(context.strings.t('折叠按钮长按')),
+              subtitle: Text(context.strings.t('长按左上角折叠按钮时执行')),
+              trailing: DropdownButton<CollapsedNavLongPress>(
+                value: state.collapsedNavLongPress,
+                underline: const SizedBox.shrink(),
+                onChanged: (v) {
+                  if (v != null) state.setCollapsedNavLongPress(v);
+                },
+                items: [
+                  for (final action in CollapsedNavLongPress.values)
+                    DropdownMenuItem(
+                      value: action,
+                      child: Text(
+                        _collapsedNavLongPressLabel(context.strings, action),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           const Divider(height: 1),
           _SectionHeader(context.strings.t('磁贴')),
           ListTile(
@@ -826,6 +848,28 @@ IconData _themeModeIcon(AppThemeMode mode) {
       return Icons.light_mode_outlined;
     case AppThemeMode.dark:
       return Icons.dark_mode_outlined;
+  }
+}
+
+String _collapsedNavLongPressLabel(
+  AppStrings s,
+  CollapsedNavLongPress action,
+) {
+  switch (action) {
+    case CollapsedNavLongPress.none:
+      return s.t('无');
+    case CollapsedNavLongPress.launch:
+      return s.t('启动');
+    case CollapsedNavLongPress.launchRecent:
+      return s.t('启动-最近');
+    case CollapsedNavLongPress.launchTiles:
+      return s.t('启动-磁贴');
+    case CollapsedNavLongPress.apps:
+      return s.t('应用');
+    case CollapsedNavLongPress.appsSync:
+      return s.t('应用-同步');
+    case CollapsedNavLongPress.settings:
+      return s.t('设置');
   }
 }
 
