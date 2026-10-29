@@ -192,6 +192,12 @@ const Map<String, String> _en = <String, String>{
   '提示': 'Tips',
   '分组': 'Groups',
   '排序': 'Sort',
+  '升序': 'Ascending',
+  '降序': 'Descending',
+  '改为升序': 'Switch to ascending',
+  '改为降序': 'Switch to descending',
+  '还没有收藏的应用': 'No favorites yet',
+  '这个分类还没有应用': 'No apps in this category yet',
   '筛选与排序': 'Filter & sort',
   '筛选': 'Filter',
   '正序': 'Ascending',
@@ -319,6 +325,10 @@ const Map<String, String> _en = <String, String>{
   '折叠：点左上角按钮展开导航，长按直达启动页':
       'Collapsed: tap the top-left button to open navigation, long-press for Launch',
   '手动排序': 'Manual',
+  '拖动右侧的手柄调整收藏顺序': 'Drag the handle on the right to reorder favorites',
+  '长按图标拖动调整顺序': 'Press and hold an icon, then drag it into place',
+  '切换为列表': 'Switch to list',
+  '切换为网格': 'Switch to grid',
   '按名称': 'By name',
   '刷新列表': 'Refresh list',
   '排序方式': 'Sort order',
@@ -492,6 +502,7 @@ const Map<String, String> _en = <String, String>{
   '{n} 个分类': '{n} categories',
   '{n} 个应用': '{n} apps',
   '· 拖动行可排序': '· drag rows to reorder',
+  '· 长按拖动可排序': '· press and hold to drag',
 
   // ---- tiles
   '页面名称': 'Page name',
@@ -1358,6 +1369,10 @@ const Map<String, String> _en = <String, String>{
   '最近常用': 'Recently used',
   '重新推送推荐': 'Push suggestions again',
   '磁贴页标签条': 'Tile page tabs',
+  '收藏 / 分类小组件': 'Favorites / category widget',
+  '把收藏或某个分类放到桌面；每个小组件单独选择内容和显示个数。':
+      'Put favorites or a category on the home screen; each widget picks its own content and count.',
+  '添加到桌面（收藏 / 分类）': 'Add to home screen (favorites / category)',
   '4×1 的小长条，显示磁贴页标签；点标签直接跳到那一页，标签太多时出现「…」': 'A 4×1 strip with the tile-page tabs. Tap one to open that page; when they do not fit, “…” opens the board.',
   '已添加标签条 · {n} 个': 'Tab strips on the home screen · {n}',
   '还没有添加标签条': 'No tab strip yet',

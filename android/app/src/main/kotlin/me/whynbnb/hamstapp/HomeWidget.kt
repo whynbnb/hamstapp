@@ -22,8 +22,16 @@ import android.graphics.Typeface
 import android.net.Uri
 import android.os.Bundle
 import android.util.Base64
+import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
+import android.widget.ArrayAdapter
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.ListView
 import android.widget.RemoteViews
+import android.widget.Spinner
+import android.widget.TextView
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.Calendar
@@ -73,6 +81,72 @@ object WidgetStore {
         val raw = prefs(context).getString(KEY_PAGES, null)
         if (raw.isNullOrEmpty()) null else JSONObject(raw)
     }.getOrNull()
+
+    // ---- collection widget: one source and count per instance ------------
+
+    /** `fav` or `c:<category id>`; '' before the widget is configured. */
+    fun collectionSource(context: Context, widgetId: Int): String =
+        prefs(context).getString("collection_source_$widgetId", "").orEmpty()
+
+    /** How many apps the instance shows: 4, 6 or 8. */
+    fun collectionCount(context: Context, widgetId: Int): Int =
+        prefs(context).getInt("collection_count_$widgetId", 8).coerceIn(4, 8)
+
+    fun setCollectionConfig(
+        context: Context,
+        widgetId: Int,
+        source: String,
+        count: Int,
+    ) {
+        prefs(context).edit()
+            .putString("collection_source_$widgetId", source)
+            .putInt("collection_count_$widgetId", count.coerceIn(4, 8))
+            .apply()
+    }
+
+    fun removeCollectionConfig(context: Context, widgetId: Int) {
+        prefs(context).edit()
+            .remove("collection_source_$widgetId")
+            .remove("collection_count_$widgetId")
+            .apply()
+    }
+
+    /** The pushed collection this widget is configured for, or null. */
+    fun collection(context: Context, widgetId: Int): JSONObject? {
+        val source = collectionSource(context, widgetId)
+        if (source.isEmpty()) return null
+        val collections = readData(context)?.optJSONArray("collections") ?: return null
+        for (i in 0 until collections.length()) {
+            val item = collections.optJSONObject(i) ?: continue
+            if (item.optString("key") == source) return item
+        }
+        return null
+    }
+
+    /**
+     * What the setup screen can offer: the collections Dart pushed, favorites
+     * first. Falls back to favorites alone when the app has not pushed yet.
+     */
+    fun collectionSources(context: Context): List<Pair<String, String>> {
+        val out = ArrayList<Pair<String, String>>()
+        val collections = readData(context)?.optJSONArray("collections")
+        if (collections != null) {
+            for (i in 0 until collections.length()) {
+                val item = collections.optJSONObject(i) ?: continue
+                val key = item.optString("key")
+                if (key.isEmpty()) continue
+                val title = item.optString("title").ifEmpty { key }
+                out.add(key to title)
+            }
+        }
+        if (out.none { it.first == "fav" }) {
+            out.add(
+                0,
+                "fav" to context.getString(R.string.collection_widget_title_default),
+            )
+        }
+        return out
+    }
 
     /**
      * Remembers one launch. `commit` (not `apply`) on purpose: the launcher may
@@ -165,10 +239,42 @@ object WidgetRenderer {
             )
         }.getOrDefault(IntArray(0))
         for (id in ids) update(context, manager, id)
+        // Collection widgets share the same pushed document, so every push
+        // that refreshes recommendations refreshes them too.
+        updateAllCollections(context)
         // The system's updatePeriodMillis is only a hint and some launchers
         // stop honouring it once the app process dies. Re-arm our own alarm on
         // every render (cancel it when the last widget is gone).
         WidgetScheduler.schedule(context)
+    }
+
+    /** Repaints every collection widget (favorites / one category). */
+    fun updateAllCollections(context: Context) {
+        val manager = AppWidgetManager.getInstance(context) ?: return
+        val ids = runCatching {
+            manager.getAppWidgetIds(
+                ComponentName(context, CollectionWidgetProvider::class.java),
+            )
+        }.getOrDefault(IntArray(0))
+        for (id in ids) updateCollection(context, manager, id)
+    }
+
+    fun updateCollection(context: Context, widgetId: Int) {
+        val manager = AppWidgetManager.getInstance(context) ?: return
+        updateCollection(context, manager, widgetId)
+    }
+
+    fun updateCollection(
+        context: Context,
+        manager: AppWidgetManager,
+        widgetId: Int,
+    ) {
+        runCatching {
+            manager.updateAppWidget(
+                widgetId,
+                buildCollection(context, widgetId, manager.getAppWidgetOptions(widgetId)),
+            )
+        }
     }
 
     fun update(context: Context, manager: AppWidgetManager, widgetId: Int) {
@@ -225,15 +331,131 @@ object WidgetRenderer {
         val roundedIcons = data?.optBoolean("roundedIcons", false) ?: false
 
         val entries = loadEntries(context, data, columns * 2, roundedIcons)
+        return renderEntries(
+            context = context,
+            views = views,
+            widgetId = widgetId,
+            entries = entries,
+            columns = columns,
+            heightDp = heightDp,
+            style = style,
+            showLabels = showLabels,
+            emptyText = data?.optString("empty").orEmpty()
+                .ifEmpty { context.getString(R.string.widget_empty_default) },
+        )
+    }
 
+    /**
+     * A widget for one collection: favorites, or a category.
+     *
+     * The source and how many apps to show are per instance (chosen in
+     * [CollectionWidgetConfigActivity]); the apps themselves come from the
+     * pushed document already ordered by the sort picked in the app.
+     */
+    private fun buildCollection(
+        context: Context,
+        widgetId: Int,
+        options: Bundle,
+    ): RemoteViews {
+        val data = WidgetStore.readData(context)
+        val style = data?.optString("layout").orEmpty()
+        val views = RemoteViews(
+            context.packageName,
+            if (style == "edges") {
+                R.layout.widget_hamstapp_edges
+            } else {
+                R.layout.widget_hamstapp
+            },
+        )
+        val widthDp = maxOf(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH),
+        ).takeIf { it > 0 } ?: 250
+        val heightDp = maxOf(
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT),
+            options.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT),
+        ).takeIf { it > 0 } ?: 150
+        val columns = ((widthDp - 20) / 52).coerceIn(2, COLUMNS)
+
+        views.setOnClickPendingIntent(R.id.widget_header, openApp(context, widgetId))
+        // The recommendation widget's quick actions do not apply here: the
+        // first one becomes the "choose collection / count" button and the
+        // other two are hidden.
+        views.setViewVisibility(R.id.widget_quick_recent, View.GONE)
+        views.setViewVisibility(R.id.widget_quick_search, View.GONE)
+        views.setImageViewResource(
+            R.id.widget_quick_apps,
+            R.drawable.ic_widget_settings,
+        )
+        views.setContentDescription(
+            R.id.widget_quick_apps,
+            context.getString(R.string.widget_quick_settings),
+        )
+        views.setOnClickPendingIntent(
+            R.id.widget_quick_apps,
+            configureCollection(context, widgetId),
+        )
+
+        val source = WidgetStore.collectionSource(context, widgetId)
+        val collection = WidgetStore.collection(context, widgetId)
+        val title = collection?.optString("title").orEmpty()
+            .ifEmpty { context.getString(R.string.collection_widget_title_default) }
+        views.setTextViewText(R.id.widget_title, title)
+
+        val showLabels = data?.optBoolean("showLabels", true) ?: true
+        val roundedIcons = data?.optBoolean("roundedIcons", false) ?: false
+        val count = WidgetStore.collectionCount(context, widgetId)
+        val entries = if (collection == null) {
+            emptyList()
+        } else {
+            loadEntriesFrom(
+                context,
+                data,
+                collection.optJSONArray("apps"),
+                count,
+                roundedIcons,
+            )
+        }
+        val emptyText = when {
+            collection != null -> collection.optString("empty").orEmpty()
+                .ifEmpty { context.getString(R.string.collection_widget_empty) }
+            source.isEmpty() -> context.getString(R.string.collection_widget_unconfigured)
+            else -> context.getString(R.string.collection_widget_missing)
+        }
+        return renderEntries(
+            context = context,
+            views = views,
+            widgetId = widgetId,
+            entries = entries,
+            columns = columns,
+            heightDp = heightDp,
+            style = style,
+            showLabels = showLabels,
+            emptyText = emptyText,
+        )
+    }
+
+    /**
+     * Fills the fixed grid with [entries], hiding unused cells.
+     *
+     * Shared by the recommendation widget and the collection widget, so their
+     * cells click, wrap and re-arrange the same way.
+     */
+    private fun renderEntries(
+        context: Context,
+        views: RemoteViews,
+        widgetId: Int,
+        entries: List<Entry>,
+        columns: Int,
+        heightDp: Int,
+        style: String,
+        showLabels: Boolean,
+        emptyText: String,
+    ): RemoteViews {
         if (entries.isEmpty()) {
             views.setViewVisibility(R.id.widget_rows, View.GONE)
             views.setViewVisibility(R.id.widget_empty, View.VISIBLE)
-            views.setTextViewText(
-                R.id.widget_empty,
-                data?.optString("empty").orEmpty()
-                    .ifEmpty { context.getString(R.string.widget_empty_default) },
-            )
+            views.setTextViewText(R.id.widget_empty, emptyText)
             views.setOnClickPendingIntent(R.id.widget_empty, openApp(context, widgetId))
             return views
         }
@@ -356,10 +578,22 @@ object WidgetRenderer {
         data: JSONObject?,
         capacity: Int,
         roundedIcons: Boolean,
+    ): List<Entry> = loadEntriesFrom(
+        context,
+        data,
+        slotFor(data)?.optJSONArray("apps") ?: data?.optJSONArray("fallback"),
+        capacity,
+        roundedIcons,
+    )
+
+    private fun loadEntriesFrom(
+        context: Context,
+        data: JSONObject?,
+        apps: JSONArray?,
+        capacity: Int,
+        roundedIcons: Boolean,
     ): List<Entry> {
-        val apps = slotFor(data)?.optJSONArray("apps")
-            ?: data?.optJSONArray("fallback")
-            ?: return emptyList()
+        if (apps == null) return emptyList()
         val pm = context.packageManager
         val size = iconSizePx(context)
         val out = ArrayList<Entry>(capacity)
@@ -601,6 +835,23 @@ object WidgetRenderer {
         )
     }
 
+    /** Re-opens the collection setup for this instance. */
+    private fun configureCollection(
+        context: Context,
+        widgetId: Int,
+    ): PendingIntent {
+        val intent = Intent(context, CollectionWidgetConfigActivity::class.java).apply {
+            putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        return PendingIntent.getActivity(
+            context,
+            widgetId * 32 + 31,
+            intent,
+            flags(),
+        )
+    }
+
     private fun openApp(context: Context, widgetId: Int): PendingIntent {
         val intent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_MAIN
@@ -645,9 +896,9 @@ object WidgetRenderer {
  * `updatePeriodMillis` is only a hint; many launchers/OEMs throttle it (or stop
  * delivering it) once the app process is gone, which leaves the widget on the
  * slot from the last time the app ran. An inexact alarm wakes the provider,
- * repaints from the stored document (it already has one entry per hour) and
- * re-arms itself. No service and no wake lock: a few RemoteViews every half
- * hour, roughly one alarm per doze window.
+ * repaints from the stored document (recommendations already have one entry per
+ * hour, collections are fixed lists) and re-arms itself. No service and no wake
+ * lock: a few RemoteViews every half hour, roughly one alarm per doze window.
  */
 object WidgetScheduler {
     private const val ACTION = "me.whynbnb.hamstapp.action.WIDGET_REFRESH"
@@ -656,12 +907,16 @@ object WidgetScheduler {
 
     fun schedule(context: Context) {
         val manager = AppWidgetManager.getInstance(context) ?: return
-        val ids = runCatching {
-            manager.getAppWidgetIds(
-                ComponentName(context, HamstappWidgetProvider::class.java),
-            )
+        fun widgetIds(provider: Class<*>) = runCatching {
+            manager.getAppWidgetIds(ComponentName(context, provider))
         }.getOrDefault(IntArray(0))
-        if (ids.isEmpty()) {
+        // The alarm repaints both kinds of data widgets: the recommendations
+        // (which also move to the next hour) and collections (whose system
+        // icons may have changed after an app update).
+        val hasWidgets =
+            widgetIds(HamstappWidgetProvider::class.java).isNotEmpty() ||
+                widgetIds(CollectionWidgetProvider::class.java).isNotEmpty()
+        if (!hasWidgets) {
             cancel(context)
             return
         }
@@ -754,6 +1009,198 @@ class HamstappWidgetProvider : AppWidgetProvider() {
                 WidgetScheduler.schedule(context)
             }
         }
+    }
+}
+
+/**
+ * The collection widget: favorites, or one category, in the order that
+ * collection uses in the app.
+ *
+ * Content and count are per instance (see [CollectionWidgetConfigActivity]),
+ * so a user can put several of them on the desktop. The apps themselves come
+ * from the pushed document, already sorted.
+ */
+class CollectionWidgetProvider : AppWidgetProvider() {
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray,
+    ) {
+        for (id in appWidgetIds) {
+            WidgetRenderer.updateCollection(context, appWidgetManager, id)
+        }
+    }
+
+    override fun onAppWidgetOptionsChanged(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetId: Int,
+        newOptions: Bundle?,
+    ) {
+        WidgetRenderer.updateCollection(context, appWidgetManager, appWidgetId)
+    }
+
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        for (id in appWidgetIds) WidgetStore.removeCollectionConfig(context, id)
+    }
+
+    override fun onEnabled(context: Context) {
+        WidgetScheduler.schedule(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        // Cancels only when no recommendation widget is left, too.
+        WidgetScheduler.schedule(context)
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        super.onReceive(context, intent)
+        when (intent.action) {
+            // A new build or a reboot leaves the launcher with the previous
+            // RemoteViews; repaint from the stored document.
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_BOOT_COMPLETED -> {
+                WidgetRenderer.updateAllCollections(context)
+            }
+        }
+    }
+}
+
+/**
+ * Configure a collection widget: which collection it shows, and how many apps.
+ *
+ * Runs when the widget is added (Android's configure contract) and again from
+ * the gear in its header. The list comes from the document Dart pushed, so the
+ * categories have the same names and order as in the app.
+ */
+class CollectionWidgetConfigActivity : Activity() {
+    private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
+    private val keys = ArrayList<String>()
+    private var selected = 0
+    private lateinit var list: ListView
+    private lateinit var countPicker: Spinner
+    private val counts = intArrayOf(4, 6, 8)
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setResult(RESULT_CANCELED)
+        widgetId = intent?.getIntExtra(
+            AppWidgetManager.EXTRA_APPWIDGET_ID,
+            AppWidgetManager.INVALID_APPWIDGET_ID,
+        ) ?: AppWidgetManager.INVALID_APPWIDGET_ID
+        if (widgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+            finish()
+            return
+        }
+        title = getString(R.string.collection_widget_label)
+        val density = resources.displayMetrics.density
+        fun dp(value: Int) = (value * density).toInt()
+
+        val sources = WidgetStore.collectionSources(this)
+        keys.addAll(sources.map { it.first })
+
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(16), dp(20), dp(12))
+        }
+        root.addView(
+            TextView(this).apply {
+                text = getString(R.string.collection_widget_choose)
+                textSize = 18f
+                typeface = Typeface.DEFAULT_BOLD
+            },
+        )
+        root.addView(
+            TextView(this).apply {
+                text = getString(R.string.collection_widget_choose_hint)
+                textSize = 13f
+                setPadding(0, dp(6), 0, dp(10))
+            },
+        )
+        list = ListView(this).apply {
+            choiceMode = ListView.CHOICE_MODE_SINGLE
+            adapter = ArrayAdapter(
+                this@CollectionWidgetConfigActivity,
+                android.R.layout.simple_list_item_single_choice,
+                sources.map { it.second },
+            )
+            setOnItemClickListener { _, _, position, _ -> selected = position }
+        }
+        root.addView(
+            list,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f,
+            ),
+        )
+
+        val countRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, dp(12), 0, 0)
+        }
+        countRow.addView(
+            TextView(this).apply {
+                text = getString(R.string.collection_widget_count)
+                textSize = 15f
+            },
+        )
+        countPicker = Spinner(this).apply {
+            adapter = ArrayAdapter(
+                this@CollectionWidgetConfigActivity,
+                android.R.layout.simple_spinner_dropdown_item,
+                counts.map { it.toString() },
+            )
+        }
+        countRow.addView(
+            countPicker,
+            LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f),
+        )
+        root.addView(countRow)
+
+        val buttons = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            setPadding(0, dp(10), 0, 0)
+        }
+        buttons.addView(
+            Button(this).apply {
+                text = getString(android.R.string.cancel)
+                setOnClickListener { finish() }
+            },
+        )
+        buttons.addView(
+            Button(this).apply {
+                text = getString(R.string.collection_widget_save)
+                setOnClickListener { save() }
+            },
+        )
+        root.addView(buttons)
+        setContentView(root)
+
+        val current = WidgetStore.collectionSource(this, widgetId)
+        selected = keys.indexOf(current).coerceAtLeast(0)
+        list.setItemChecked(selected, true)
+        val count = WidgetStore.collectionCount(this, widgetId)
+        countPicker.setSelection(counts.indexOf(count).coerceAtLeast(0))
+    }
+
+    private fun save() {
+        if (keys.isEmpty()) {
+            finish()
+            return
+        }
+        val source = keys[selected.coerceIn(0, keys.lastIndex)]
+        val position = countPicker.selectedItemPosition
+            .coerceIn(0, counts.lastIndex)
+        WidgetStore.setCollectionConfig(this, widgetId, source, counts[position])
+        WidgetRenderer.updateCollection(this, widgetId)
+        setResult(
+            RESULT_OK,
+            Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId),
+        )
+        finish()
     }
 }
 

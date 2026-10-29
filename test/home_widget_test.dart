@@ -304,6 +304,160 @@ void main() {
       expect(icons['com.a'], isNotEmpty);
     });
 
+    test('collections carry favorites and each category in its own order', () async {
+      final state = _state();
+      final category = await state.addCategory('工具');
+      await state.updateMeta('com.a', categoryIds: [category.id]);
+      await state.updateMeta('com.a', favorite: true);
+      await state.updateMeta('com.b', favorite: true);
+      await state.setFavoritesSort(AppSort.name, false);
+
+      final data = state.buildHomeWidgetData();
+      final collections =
+          (data['collections'] as List).cast<Map<String, dynamic>>();
+      expect(collections, hasLength(2));
+
+      final favorites = collections.first;
+      expect(favorites['key'], 'fav');
+      expect(favorites['title'], '收藏');
+      expect(
+        [
+          for (final a
+              in (favorites['apps'] as List).cast<Map<String, dynamic>>())
+            a['p'],
+        ],
+        ['com.b', 'com.a'],
+        reason: 'names descending is what favorites is set to',
+      );
+
+      final categoryData = collections.last;
+      expect(categoryData['key'], 'c:${category.id}');
+      expect(categoryData['title'], contains('工具'));
+      expect(
+        [
+          for (final a
+              in (categoryData['apps'] as List).cast<Map<String, dynamic>>())
+            a['p'],
+        ],
+        ['com.a'],
+      );
+    });
+
+    test('a collection keeps at most the eight apps a widget can show', () async {
+      final state = AppState(_MemStorage())
+        ..initialized = true
+        ..apps = [for (var i = 0; i < 12; i++) _app('com.$i', 'App$i')];
+      final category = await state.addCategory('全部');
+      for (var i = 0; i < 12; i++) {
+        await state.updateMeta('com.$i', categoryIds: [category.id]);
+      }
+
+      final collections =
+          (state.buildHomeWidgetData()['collections'] as List)
+              .cast<Map<String, dynamic>>();
+      final data = collections.singleWhere(
+        (c) => c['key'] == 'c:${category.id}',
+      );
+      expect((data['apps'] as List), hasLength(8));
+    });
+
+    test('sortApps orders by the visible name, dates and size', () {
+      AppInfo app(String pkg, String name, int install, int update, int size) =>
+          AppInfo(
+            packageName: pkg,
+            appName: name,
+            versionName: '1',
+            versionCode: 1,
+            firstInstallTime: install,
+            lastUpdateTime: update,
+            isSystem: false,
+            enabled: true,
+            apkPath: '',
+            sizeBytes: size,
+            targetSdk: 34,
+            minSdk: 24,
+            uid: 0,
+          );
+      final state = AppState(_MemStorage())..initialized = true;
+      final apps = [
+        app('com.a', 'Alpha', 10, 100, 300),
+        app('com.b', 'Beta', 30, 300, 100),
+        app('com.c', 'Gamma', 20, 200, 200),
+      ];
+
+      List<String> names(AppSort sort, bool ascending) => [
+        for (final a in state.sortApps(apps, sort, ascending)) a.appName,
+      ];
+
+      expect(names(AppSort.name, true), ['Alpha', 'Beta', 'Gamma']);
+      expect(names(AppSort.name, false), ['Gamma', 'Beta', 'Alpha']);
+      expect(names(AppSort.updateTime, false), ['Beta', 'Gamma', 'Alpha']);
+      expect(names(AppSort.installTime, true), ['Alpha', 'Gamma', 'Beta']);
+      expect(names(AppSort.size, false), ['Alpha', 'Gamma', 'Beta']);
+    });
+
+    test('favorites can be ordered by hand; the widget follows', () async {
+      final state = _state();
+      await state.updateMeta('com.a', favorite: true);
+      await state.updateMeta('com.b', favorite: true);
+
+      await state.setFavoritesManual(true);
+      expect(state.favoritesManual, isTrue);
+      expect(state.favorites.map((a) => a.packageName), ['com.a', 'com.b']);
+
+      await state.moveFavorite(0, 1);
+      expect(state.favorites.map((a) => a.packageName), ['com.b', 'com.a']);
+      expect(state.settings['favorites_order'], ['com.b', 'com.a']);
+
+      final collections =
+          (state.buildHomeWidgetData()['collections'] as List)
+              .cast<Map<String, dynamic>>();
+      final favorites = collections.singleWhere((c) => c['key'] == 'fav');
+      expect(
+        [
+          for (final a
+              in (favorites['apps'] as List).cast<Map<String, dynamic>>())
+            a['p'],
+        ],
+        ['com.b', 'com.a'],
+        reason: 'the widget shows the hand-picked order too',
+      );
+
+      // Picking a field order leaves manual mode behind.
+      await state.setFavoritesSort(AppSort.name, true);
+      expect(state.favoritesManual, isFalse);
+      expect(state.favorites.map((a) => a.packageName), ['com.a', 'com.b']);
+    });
+
+    test('favorites and category views start at their old layout and persist', () async {
+      final state = _state();
+      expect(state.favoritesView, AppViewMode.grid);
+      expect(state.categoryListView, AppViewMode.list);
+      expect(state.categoryAppsView('c1'), AppViewMode.list);
+
+      await state.setFavoritesView(AppViewMode.list);
+      await state.setCategoryListView(AppViewMode.grid);
+      await state.setCategoryAppsView('c1', AppViewMode.grid);
+      expect(state.favoritesView, AppViewMode.list);
+      expect(state.categoryListView, AppViewMode.grid);
+      expect(state.categoryAppsView('c1'), AppViewMode.grid);
+      expect(state.settings['favorites_view'], 'list');
+      expect(state.settings['category_list_view'], 'grid');
+      expect(state.settings['category_apps_view_c1'], 'grid');
+    });
+
+    test('a category sort choice is stored and can be read back', () async {
+      final state = _state();
+      final category = await state.addCategory('工具');
+      await state.setCategoryAppsSort(category.id, AppSort.size, false);
+      expect(state.categoryAppsSort(category.id), AppSort.size);
+      expect(state.categoryAppsSortAscending(category.id), isFalse);
+
+      await state.setFavoritesSort(AppSort.updateTime, true);
+      expect(state.favoritesSort, AppSort.updateTime);
+      expect(state.favoritesSortAscending, isTrue);
+    });
+
     test('the 4x1 strip carries the pages and the current one', () {
       final state = _state();
       state.currentTilePageIndex = 0;

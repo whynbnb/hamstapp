@@ -8,8 +8,11 @@ import '../state/app_state.dart';
 import '../utils/actions.dart';
 import '../utils/search.dart';
 import '../widgets/app_icon.dart';
+import '../widgets/app_icon_tile.dart';
+import '../widgets/app_sort_button.dart';
 import '../widgets/category_editor.dart';
 import '../widgets/info_tile_sheets.dart';
+import '../widgets/reorderable_grid.dart';
 import '../widgets/search_field.dart';
 import '../widgets/web_app_editor.dart';
 import 'app_detail_screen.dart';
@@ -34,6 +37,20 @@ class CategoriesTab extends StatelessWidget {
     }
     final cats = state.sortedCategories;
     final manual = state.categorySort == CategorySort.manual;
+    final view = state.categoryListView;
+    final hint = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    void open(AppCategory c) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CategoryAppsScreen(state: state, category: c),
+        ),
+      );
+    }
+
+    void edit(AppCategory c) => showCategoryEditor(context, state, c);
+    void remove(AppCategory c) => confirmDeleteCategory(context, state, c);
 
     Widget tile(BuildContext context, AppCategory c) {
       final count = state.categoryAppCount(c.id);
@@ -50,8 +67,8 @@ class CategoriesTab extends StatelessWidget {
         subtitle: Text(context.strings.t('{n} 个应用', {'n': count})),
         trailing: PopupMenuButton<String>(
           onSelected: (v) {
-            if (v == 'edit') showCategoryEditor(context, state, c);
-            if (v == 'delete') confirmDeleteCategory(context, state, c);
+            if (v == 'edit') edit(c);
+            if (v == 'delete') remove(c);
           },
           itemBuilder: (_) => [
             PopupMenuItem(
@@ -64,32 +81,120 @@ class CategoriesTab extends StatelessWidget {
             ),
           ],
         ),
-        onTap: () => Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CategoryAppsScreen(state: state, category: c),
+        onTap: () => open(c),
+      );
+    }
+
+    Widget card(BuildContext context, AppCategory c) {
+      final count = state.categoryAppCount(c.id);
+      final color = Color(c.colorValue);
+      return Material(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(14),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => open(c),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 2, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: color.withValues(alpha: 0.22),
+                      child: Text(c.emoji, style: const TextStyle(fontSize: 15)),
+                    ),
+                    const Spacer(),
+                    PopupMenuButton<String>(
+                      tooltip: context.strings.t('更多'),
+                      iconSize: 18,
+                      padding: EdgeInsets.zero,
+                      onSelected: (v) {
+                        if (v == 'edit') edit(c);
+                        if (v == 'delete') remove(c);
+                      },
+                      itemBuilder: (_) => [
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Text(context.strings.t('编辑')),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Text(context.strings.t('删除')),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                Text(
+                  c.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  context.strings.t('{n} 个应用', {'n': count}),
+                  style: TextStyle(fontSize: 11.5, color: hint),
+                ),
+              ],
+            ),
           ),
         ),
       );
     }
 
+    const cardGrid = SliverGridDelegateWithMaxCrossAxisExtent(
+      maxCrossAxisExtent: 170,
+      mainAxisSpacing: 10,
+      crossAxisSpacing: 10,
+      childAspectRatio: 1.25,
+    );
+
     return Column(
       children: [
-        _SortBar(state: state, total: cats.length, manual: manual),
+        _SortBar(
+          state: state,
+          total: cats.length,
+          manual: manual,
+          view: view,
+        ),
         Expanded(
-          child: manual
+          child: switch ((view, manual)) {
+            (AppViewMode.list, true) =>
               // Manual mode: drag a row by its handle to persist the order.
-              ? ReorderableListView.builder(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: cats.length,
-                  onReorderItem: state.moveCategory,
-                  itemBuilder: (context, i) => tile(context, cats[i]),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 24),
-                  itemCount: cats.length,
-                  itemBuilder: (context, i) => tile(context, cats[i]),
-                ),
+              ReorderableListView.builder(
+                padding: const EdgeInsets.only(bottom: 24),
+                itemCount: cats.length,
+                onReorderItem: state.moveCategory,
+                itemBuilder: (context, i) => tile(context, cats[i]),
+              ),
+            (AppViewMode.list, false) => ListView.builder(
+              padding: const EdgeInsets.only(bottom: 24),
+              itemCount: cats.length,
+              itemBuilder: (context, i) => tile(context, cats[i]),
+            ),
+            (AppViewMode.grid, true) => ReorderableGrid(
+              itemCount: cats.length,
+              onReorder: state.moveCategory,
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
+              gridDelegate: cardGrid,
+              feedbackSize: const Size(160, 128),
+              itemBuilder: (context, i) => card(context, cats[i]),
+            ),
+            (AppViewMode.grid, false) => GridView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 6, 12, 24),
+              gridDelegate: cardGrid,
+              itemCount: cats.length,
+              itemBuilder: (context, i) => card(context, cats[i]),
+            ),
+          },
         ),
       ],
     );
@@ -102,11 +207,13 @@ class _SortBar extends StatelessWidget {
     required this.state,
     required this.total,
     required this.manual,
+    required this.view,
   });
 
   final AppState state;
   final int total;
   final bool manual;
+  final AppViewMode view;
 
   @override
   Widget build(BuildContext context) {
@@ -117,17 +224,42 @@ class _SortBar extends StatelessWidget {
       CategorySort.count: context.strings.t('按应用数'),
     };
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 4, 6, 0),
+      padding: const EdgeInsets.fromLTRB(16, 4, 2, 0),
       child: Row(
         children: [
-          Text(context.strings.t('{n} 个分类', {'n': total}),
-              style: TextStyle(fontSize: 12, color: hint)),
-          if (manual) ...[
+          Text(
+            context.strings.t('{n} 个分类', {'n': total}),
+            style: TextStyle(fontSize: 12, color: hint),
+          ),
+          if (manual && view == AppViewMode.list) ...[
             const SizedBox(width: 8),
-            Text(context.strings.t('· 拖动行可排序'),
-                style: TextStyle(fontSize: 12, color: hint)),
+            Text(
+              context.strings.t('· 拖动行可排序'),
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
+          ],
+          if (manual && view == AppViewMode.grid) ...[
+            const SizedBox(width: 8),
+            Text(
+              context.strings.t('· 长按拖动可排序'),
+              style: TextStyle(fontSize: 12, color: hint),
+            ),
           ],
           const Spacer(),
+          IconButton(
+            tooltip: view == AppViewMode.grid
+                ? context.strings.t('切换为列表')
+                : context.strings.t('切换为网格'),
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              view == AppViewMode.grid ? Icons.view_list : Icons.grid_view,
+            ),
+            onPressed: () => state.setCategoryListView(
+              view == AppViewMode.grid
+                  ? AppViewMode.list
+                  : AppViewMode.grid,
+            ),
+          ),
           PopupMenuButton<CategorySort>(
             tooltip: context.strings.t('分类排序'),
             icon: const Icon(Icons.sort, size: 20),
@@ -163,23 +295,40 @@ class CategoryAppsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = context.watch<AppState>();
-    final apps =
-        s.apps
-            .where(
-              (a) => s.metaFor(a.packageName).categoryIds.contains(category.id),
-            )
-            .toList()
-          ..sort(
-            (a, b) => s
-                .displayNameFor(a.packageName)
-                .toLowerCase()
-                .compareTo(s.displayNameFor(b.packageName).toLowerCase()),
-          );
+    final apps = s.sortApps(
+      s.apps.where(
+        (a) => s.metaFor(a.packageName).categoryIds.contains(category.id),
+      ),
+      s.categoryAppsSort(category.id),
+      s.categoryAppsSortAscending(category.id),
+    );
+    final view = s.categoryAppsView(category.id);
 
     return Scaffold(
       appBar: AppBar(
         title: Text('${category.emoji} ${category.name}'),
         actions: [
+          IconButton(
+            tooltip: view == AppViewMode.grid
+                ? context.strings.t('切换为列表')
+                : context.strings.t('切换为网格'),
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              view == AppViewMode.grid ? Icons.view_list : Icons.grid_view,
+            ),
+            onPressed: () => s.setCategoryAppsView(
+              category.id,
+              view == AppViewMode.grid
+                  ? AppViewMode.list
+                  : AppViewMode.grid,
+            ),
+          ),
+          AppSortButton(
+            sort: s.categoryAppsSort(category.id),
+            ascending: s.categoryAppsSortAscending(category.id),
+            onChanged: (sort, ascending) =>
+                s.setCategoryAppsSort(category.id, sort, ascending),
+          ),
           IconButton(
             tooltip: context.strings.t('添加应用到该分类'),
             icon: const Icon(Icons.add),
@@ -197,6 +346,33 @@ class CategoryAppsScreen extends StatelessWidget {
                   style: TextStyle(color: Colors.grey.shade600),
                 ),
               ),
+            )
+          : view == AppViewMode.grid
+          ? GridView.builder(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 110,
+                mainAxisSpacing: 12,
+                crossAxisSpacing: 12,
+                childAspectRatio: 0.82,
+              ),
+              itemCount: apps.length,
+              itemBuilder: (context, i) {
+                final app = apps[i];
+                final name = state.displayNameFor(app.packageName);
+                return AppIconTile(
+                  packageName: app.packageName,
+                  label: name,
+                  onTap: () => launchApp(context, app.packageName),
+                  onLongPress: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          AppDetailScreen(packageName: app.packageName),
+                    ),
+                  ),
+                );
+              },
             )
           : ListView.builder(
               itemCount: apps.length,

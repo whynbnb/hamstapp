@@ -100,6 +100,18 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   (icon, label and activity), and hand-added web apps open in their own window (or the chosen browser).
   A web app (PWA) also carries a small globe badge in the corner of its icon, matching the *网页* tag
   the app list shows next to its name.
+- **Favorites / category widget (4×2).** A third widget showing **favorites** or one **category**.
+  Each instance chooses its own content and count (**4 / 6 / 8**), so several can sit side by side;
+  the gear in its header reopens the choice. The order follows the category / favorites screen and
+  is pushed from the app.
+- **Favorites, the category list and a category's apps all have grid and list views**, switched
+  from their header and remembered (favorites start as a grid; the category list and category app
+  screens as lists).
+- **Categories and favorites can be sorted** by **name / install time / update time / size**, in
+  **ascending or descending** order — from the sort menu in a category's header, and above the
+  favorites grid. The choice is remembered and is exactly what the widget shows. Favorites can also
+  use a **manual order**: in the grid, press and hold an icon and drag it; in the list, drag the
+  handle on the right. The widget follows either way.
 - The header's right side carries three shortcuts — **Apps**, **Recent** and **Search** — so the
   panel is useful even when the suggestion it shows is not the one you want.
 - **Options** (Settings → Tiles → Home screen widget): hide the app names for a tighter grid, cap it
@@ -178,7 +190,11 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   anonymous visitors to a login/activation page can still be recognised; a redirect to a *different* site
   never donates its manifest. With no manifest the entry always launches the address you typed — not the
   redirect target — and an advanced **detection address** can name the manifest or a signed-in page when
-  even that is not enough; a web entry's icon can also be re-fetched on its own.
+  even that is not enough; a web entry's icon can also be re-fetched on its own; a new favorites /
+  category widget (per-instance content and 4 / 6 / 8 apps, editable from its gear), and sorting for
+  categories and favorites by name / install / update / size with either direction, shared with the
+  widget, plus a hand-picked order for favorites (drag an icon in the grid, or the row handle in the
+  list) and remembered grid / list views for favorites, the category list and category app lists.
 - A web entry's detail menu can **fetch the icon again** on its own (manifest icon first, then the page's),
   leaving its name, address and open mode untouched.
 - A page that will not open does not leave just a splash: a load error, a bad certificate, a dead renderer

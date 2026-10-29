@@ -21,8 +21,10 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
     with WidgetsBindingObserver {
   HomeWidgetStatus _status = const HomeWidgetStatus();
   HomeWidgetStatus _pagesStatus = const HomeWidgetStatus();
+  HomeWidgetStatus _collectionStatus = const HomeWidgetStatus();
   bool _pinning = false;
   bool _pinningPages = false;
+  bool _pinningCollection = false;
 
   @override
   void initState() {
@@ -47,10 +49,12 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
   Future<void> _load() async {
     final status = await NativeApps.homeWidgetStatus();
     final pages = await NativeApps.homeWidgetStatus(target: 'pages');
+    final collections = await NativeApps.homeWidgetStatus(target: 'collection');
     if (!mounted) return;
     setState(() {
       _status = status;
       _pagesStatus = pages;
+      _collectionStatus = collections;
     });
   }
 
@@ -83,6 +87,23 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
           content: Text(
             context.strings.t('这个桌面不支持直接添加，请长按桌面空白处 → 小组件 → 囤囤'),
           ),
+        ),
+      );
+      return;
+    }
+    await _load();
+  }
+
+  Future<void> _pinCollection() async {
+    if (_pinningCollection) return;
+    setState(() => _pinningCollection = true);
+    final ok = await NativeApps.requestPinHomeWidget(target: 'collection');
+    if (!mounted) return;
+    setState(() => _pinningCollection = false);
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.strings.t('这个桌面不支持直接添加，请长按桌面空白处 → 小组件 → 囤囤')),
         ),
       );
       return;
@@ -260,6 +281,80 @@ class _HomeWidgetScreenState extends State<HomeWidgetScreen>
             icon: Icons.battery_saver_outlined,
             text: s.t('小组件大约每 30 分钟刷新一次，不使用后台服务'),
           ),
+          const Divider(height: 32),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.star_outline,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  s.t('收藏 / 分类小组件'),
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  '4×2',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
+            child: Text(
+              s.t('把收藏或某个分类放到桌面；每个小组件单独选择内容和显示个数。'),
+              style: TextStyle(
+                fontSize: 12.5,
+                height: 1.45,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+          ListTile(
+            leading: Icon(
+              _collectionStatus.count > 0
+                  ? Icons.check_circle_outline
+                  : Icons.widgets_outlined,
+              color: _collectionStatus.count > 0
+                  ? Theme.of(context).colorScheme.primary
+                  : null,
+            ),
+            title: Text(
+              _collectionStatus.count > 0
+                  ? s.t('已添加到桌面 · {n} 个', {'n': _collectionStatus.count})
+                  : s.t('还没有添加到桌面'),
+            ),
+            subtitle:
+                _collectionStatus.count == 0 && !_collectionStatus.canPin
+                ? Text(s.t('这个桌面不支持直接添加，请长按桌面空白处 → 小组件 → 囤囤'))
+                : null,
+          ),
+          if (_collectionStatus.canPin)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+              child: FilledButton.tonalIcon(
+                onPressed: _pinningCollection ? null : _pinCollection,
+                icon: _pinningCollection
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_to_home_screen),
+                label: Text(s.t('添加到桌面（收藏 / 分类）')),
+              ),
+            ),
           const Divider(height: 32),
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),

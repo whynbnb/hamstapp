@@ -16,4 +16,16 @@
     <string name="widget_quick_recent">最近</string>
     <string name="widget_quick_search">搜索</string>
     <string name="widget_description">此刻推荐的应用</string>
+    <string name="widget_quick_settings">小组件设置</string>
+    <!-- 收藏 / 某个分类，逐个小组件选择。 -->
+    <string name="collection_widget_label">囤囤 · 收藏/分类</string>
+    <string name="collection_widget_description">收藏或某个分类的应用，按你设置的顺序</string>
+    <string name="collection_widget_title_default">收藏</string>
+    <string name="collection_widget_empty">这里还没有应用</string>
+    <string name="collection_widget_unconfigured">点右上角齿轮选择分类或收藏</string>
+    <string name="collection_widget_missing">这个分类已经不在了，点齿轮重新选择</string>
+    <string name="collection_widget_choose">这个小组件显示什么？</string>
+    <string name="collection_widget_choose_hint">收藏或其中一个分类；顺序跟随囤囤里的设置。</string>
+    <string name="collection_widget_count">显示个数</string>
+    <string name="collection_widget_save">保存</string>
 </resources>

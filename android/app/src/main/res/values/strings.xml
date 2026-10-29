@@ -19,4 +19,16 @@
     <string name="widget_quick_recent">Recent</string>
     <string name="widget_quick_search">Search</string>
     <string name="widget_description">Recommended apps for right now</string>
+    <string name="widget_quick_settings">Widget settings</string>
+    <!-- Favorites / one category, chosen per widget. -->
+    <string name="collection_widget_label">囤囤 · Collection</string>
+    <string name="collection_widget_description">Favorites or a category, in the order you chose</string>
+    <string name="collection_widget_title_default">Favorites</string>
+    <string name="collection_widget_empty">No apps here yet</string>
+    <string name="collection_widget_unconfigured">Tap the gear to choose a collection</string>
+    <string name="collection_widget_missing">That collection is gone — tap the gear to choose another</string>
+    <string name="collection_widget_choose">What should this widget show?</string>
+    <string name="collection_widget_choose_hint">Favorites or one category. The order comes from 囤囤.</string>
+    <string name="collection_widget_count">Apps to show</string>
+    <string name="collection_widget_save">Save</string>
 </resources>

@@ -57,6 +57,11 @@ enum SyncSort { name, modified }
 /// Ordering for the "recent" quick-launch tab.
 enum RecentSort { recent, frequent }
 
+/// How a collection of apps (favorites, one category) is laid out. The sort
+/// choice is independent: both views show the same order, and a manual order
+/// can be dragged in either.
+enum AppViewMode { grid, list }
+
 /// Ordering for the category list on the launch screen.
 enum CategorySort { manual, name, count }
 
@@ -1207,6 +1212,10 @@ class AppState extends ChangeNotifier {
     // The widget draws that entry's icon and label, and launches it; refresh
     // now that the choice changed.
     if (launchActivity != null) unawaited(syncHomeWidget(force: true));
+    // Favorites and categories are the collection widget's sources.
+    if (favorite != null || categoryIds != null) {
+      _scheduleCollectionWidgetSync();
+    }
   }
 
   Future<void> clearMeta(String packageName) async {
@@ -1245,6 +1254,7 @@ class AppState extends ChangeNotifier {
     categories.add(c);
     await _persistCategories();
     notifyListeners();
+    _scheduleCollectionWidgetSync();
     return c;
   }
 
@@ -1259,6 +1269,7 @@ class AppState extends ChangeNotifier {
     if (emoji != null) c.emoji = emoji;
     await _persistCategories();
     notifyListeners();
+    _scheduleCollectionWidgetSync();
   }
 
   Future<void> deleteCategory(String id) async {
@@ -1266,10 +1277,16 @@ class AppState extends ChangeNotifier {
     for (final m in meta.values) {
       m.categoryIds.remove(id);
     }
+    // Its own sort and view choices have no meaning once the category is gone.
+    settings.remove('category_apps_sort_$id');
+    settings.remove('category_apps_sort_asc_$id');
+    settings.remove('category_apps_view_$id');
     await _persistCategories();
     await _persistMeta();
+    await _persistSettings();
     if (filterCategoryId == id) filterCategoryId = null;
     notifyListeners();
+    _scheduleCollectionWidgetSync();
   }
 
   Future<void> _persistCategories() async {
@@ -1282,6 +1299,132 @@ class AppState extends ChangeNotifier {
   /// How many installed apps belong to category [id].
   int categoryAppCount(String id) =>
       apps.where((a) => metaFor(a.packageName).categoryIds.contains(id)).length;
+
+  /// Ordering of one category's app list — on its screen and on the collection
+  /// widget. Stored with the other settings, so it survives restarts/imports.
+  AppSort categoryAppsSort(String id) =>
+      _sortByName(settings['category_apps_sort_$id']);
+
+  bool categoryAppsSortAscending(String id) =>
+      settings['category_apps_sort_asc_$id'] as bool? ?? true;
+
+  Future<void> setCategoryAppsSort(
+    String id,
+    AppSort by,
+    bool ascending,
+  ) async {
+    settings['category_apps_sort_$id'] = by.name;
+    settings['category_apps_sort_asc_$id'] = ascending;
+    await _persistSettings();
+    notifyListeners();
+    _scheduleCollectionWidgetSync();
+  }
+
+  AppSort get favoritesSort => _sortByName(settings['favorites_sort']);
+
+  bool get favoritesSortAscending =>
+      settings['favorites_sort_asc'] as bool? ?? true;
+
+  Future<void> setFavoritesSort(AppSort by, bool ascending) async {
+    settings['favorites_sort'] = by.name;
+    settings['favorites_sort_asc'] = ascending;
+    // Choosing a field order leaves the hand-picked order behind.
+    settings['favorites_manual'] = false;
+    await _persistSettings();
+    notifyListeners();
+    _scheduleCollectionWidgetSync();
+  }
+
+  /// Whether favorites are shown in a hand-picked order instead of
+  /// [favoritesSort].
+  bool get favoritesManual => settings['favorites_manual'] as bool? ?? false;
+
+  /// Package ids in the order the user arranged them. Favorites added later are
+  /// not in here yet; they are appended (by name) until the order is edited.
+  List<String> get favoritesOrder {
+    final raw = settings['favorites_order'];
+    return raw is List ? raw.whereType<String>().toList() : <String>[];
+  }
+
+  /// Layout of the favorites tab. Grid by default, as it always was.
+  AppViewMode get favoritesView =>
+      _viewByName(settings['favorites_view'], AppViewMode.grid);
+
+  Future<void> setFavoritesView(AppViewMode view) async {
+    if (favoritesView == view) return;
+    settings['favorites_view'] = view.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Layout of the list of categories. A list by default, as it always was.
+  AppViewMode get categoryListView =>
+      _viewByName(settings['category_list_view'], AppViewMode.list);
+
+  Future<void> setCategoryListView(AppViewMode view) async {
+    if (categoryListView == view) return;
+    settings['category_list_view'] = view.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  /// Layout of one category's app list. A list by default, as it always was.
+  AppViewMode categoryAppsView(String id) => _viewByName(
+    settings['category_apps_view_$id'],
+    AppViewMode.list,
+  );
+
+  Future<void> setCategoryAppsView(String id, AppViewMode view) async {
+    if (categoryAppsView(id) == view) return;
+    settings['category_apps_view_$id'] = view.name;
+    await _persistSettings();
+    notifyListeners();
+  }
+
+  static AppViewMode _viewByName(Object? raw, AppViewMode fallback) {
+    for (final view in AppViewMode.values) {
+      if (view.name == raw) return view;
+    }
+    return fallback;
+  }
+
+  /// Switches favorites to a hand-picked order, seeded with what is on screen
+  /// right now so enabling it does not shuffle anything.
+  Future<void> setFavoritesManual(bool manual) async {
+    if (favoritesManual == manual) return;
+    if (manual) {
+      settings['favorites_order'] = favoritesOrder.isNotEmpty
+          ? favoritesOrder
+          : [for (final a in favorites) a.packageName];
+    }
+    settings['favorites_manual'] = manual;
+    await _persistSettings();
+    notifyListeners();
+    _scheduleCollectionWidgetSync();
+  }
+
+  /// Moves one favorite to [newIndex].
+  ///
+  /// Indices are the adjusted ones a [ReorderableListView.onReorderItem]
+  /// reports — the moved row has already been taken out of its old slot.
+  Future<void> moveFavorite(int oldIndex, int newIndex) async {
+    final list = [for (final a in favorites) a.packageName];
+    if (oldIndex < 0 || oldIndex >= list.length) return;
+    final item = list.removeAt(oldIndex);
+    list.insert(newIndex.clamp(0, list.length), item);
+    settings['favorites_manual'] = true;
+    settings['favorites_order'] = list;
+    await _persistSettings();
+    notifyListeners();
+    _scheduleCollectionWidgetSync();
+  }
+
+  static AppSort _sortByName(Object? raw) {
+    for (final sort in AppSort.values) {
+      if (sort.name == raw) return sort;
+    }
+    return AppSort.name;
+  }
 
   /// User-selected ordering for the category list. Defaults to manual (the
   /// stored order).
@@ -1334,6 +1477,7 @@ class AppState extends ChangeNotifier {
     categories.insert(target, c);
     await _persistCategories();
     notifyListeners();
+    _scheduleCollectionWidgetSync();
   }
 
   // ---------------------------------------------------------------- snapshots
@@ -2882,10 +3026,63 @@ class AppState extends ChangeNotifier {
       'empty': s.t('在囤囤里启动几次应用，这里就会出现推荐'),
       'slots': slots,
       'fallback': current['apps'],
+      // Everything the collection widgets can show, already in the order each
+      // collection asks for. Only the first eight of each matter: that is the
+      // most a widget can display, and it keeps the document (and its icons)
+      // bounded.
+      'collections': _collectionWidgetData(s, icons),
       // Only the icons the system cannot provide: custom icons and web-app
       // icons. Everything else is read from PackageManager by the widget.
       'icons': icons,
     };
+  }
+
+  /// At most this many apps per collection: the largest widget count, so a
+  /// bigger collection costs nothing.
+  static const int _kCollectionWidgetMax = 8;
+
+  /// Favorites and every category, each with its own order, for the collection
+  /// widget's configuration and its renderer.
+  List<Map<String, dynamic>> _collectionWidgetData(
+    AppStrings s,
+    Map<String, String> icons,
+  ) {
+    final out = <Map<String, dynamic>>[];
+    void add(
+      String key,
+      String title,
+      String empty,
+      List<AppInfo> ordered,
+    ) {
+      out.add({
+        'key': key,
+        'title': title,
+        'empty': empty,
+        'apps': [
+          for (final a in ordered.take(_kCollectionWidgetMax))
+            _homeWidgetApp(a, icons),
+        ],
+      });
+    }
+
+    // [favorites] already applies either the field sort or the hand-picked
+    // order, so it must not be sorted again here.
+    add('fav', s.t('收藏'), s.t('还没有收藏的应用'), favorites);
+    for (final c in sortedCategories) {
+      add(
+        'c:${c.id}',
+        '${c.emoji} ${c.name}',
+        s.t('这个分类还没有应用'),
+        sortApps(
+          apps
+              .where((a) => metaFor(a.packageName).categoryIds.contains(c.id))
+              .toList(),
+          categoryAppsSort(c.id),
+          categoryAppsSortAscending(c.id),
+        ),
+      );
+    }
+    return out;
   }
 
   /// The local hour a pick belongs to, e.g. `2026-10-22-9`.
@@ -2991,6 +3188,23 @@ class AppState extends ChangeNotifier {
 
   static const int _kWidgetPushIntervalMs = 30000;
   int _lastWidgetPushAt = 0;
+
+  /// Collections change in bursts (a sheet toggles favorites one by one), so
+  /// their widget push is coalesced instead of forcing a rebuild per tap.
+  ///
+  /// A microtask is enough: several changes made in one go (a picker saving a
+  /// batch) share a single push, and no timer is left behind when the app goes
+  /// away.
+  bool _collectionPushQueued = false;
+
+  void _scheduleCollectionWidgetSync() {
+    if (_collectionPushQueued) return;
+    _collectionPushQueued = true;
+    scheduleMicrotask(() {
+      _collectionPushQueued = false;
+      unawaited(syncHomeWidget(force: true));
+    });
+  }
   bool _loggedWidgetPush = false;
 
   /// Pushes the current suggestions to the widget. Cheap and best effort: the
@@ -3507,6 +3721,7 @@ class AppState extends ChangeNotifier {
     await _persistCustomIcons();
     await _persistMeta();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
     return true;
   }
 
@@ -3517,6 +3732,7 @@ class AppState extends ChangeNotifier {
     await _persistCustomIcons();
     await _persistMeta();
     notifyListeners();
+    unawaited(syncHomeWidget(force: true));
   }
 
   // ---------------------------------------------------------------- update alerts
@@ -4294,6 +4510,31 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// [source] in the order [by] asks for, using the name the user sees (a
+  /// pinned launcher entry can rename an app).
+  ///
+  /// Shared by the app list, a category's screen, favorites and the collection
+  /// widget, so all four show the same order.
+  List<AppInfo> sortApps(Iterable<AppInfo> source, AppSort by, bool ascending) {
+    late final Comparator<AppInfo> cmp;
+    switch (by) {
+      case AppSort.name:
+        cmp = (a, b) => _sortName(a).compareTo(_sortName(b));
+        break;
+      case AppSort.installTime:
+        cmp = (a, b) => a.firstInstallTime.compareTo(b.firstInstallTime);
+        break;
+      case AppSort.updateTime:
+        cmp = (a, b) => a.lastUpdateTime.compareTo(b.lastUpdateTime);
+        break;
+      case AppSort.size:
+        cmp = (a, b) => a.sizeBytes.compareTo(b.sizeBytes);
+        break;
+    }
+    return List<AppInfo>.from(source)
+      ..sort(ascending ? cmp : (a, b) => cmp(b, a));
+  }
+
   /// The app list a given set of conditions would show, without touching the
   /// current ones. The 搜索与筛选 page uses it for its live result count, and
   /// [visibleApps] is just this with the current state.
@@ -4378,23 +4619,7 @@ class AppState extends ChangeNotifier {
       return list;
     }
 
-    late final Comparator<AppInfo> cmp;
-    switch (sort) {
-      case AppSort.name:
-        cmp = (a, b) => _sortName(a).compareTo(_sortName(b));
-        break;
-      case AppSort.installTime:
-        cmp = (a, b) => a.firstInstallTime.compareTo(b.firstInstallTime);
-        break;
-      case AppSort.updateTime:
-        cmp = (a, b) => a.lastUpdateTime.compareTo(b.lastUpdateTime);
-        break;
-      case AppSort.size:
-        cmp = (a, b) => a.sizeBytes.compareTo(b.sizeBytes);
-        break;
-    }
-    list.sort(sortAscending ? cmp : (a, b) => cmp(b, a));
-    return list;
+    return sortApps(list, sort, sortAscending);
   }
 
   /// Relevance of [app] for [parsed], or null when it does not match. Shared by
@@ -4449,10 +4674,27 @@ class AppState extends ChangeNotifier {
   String _sortName(AppInfo app) =>
       displayNameFor(app.packageName).toLowerCase();
 
-  List<AppInfo> get favorites =>
-      apps.where((a) => metaFor(a.packageName).favorite).toList()..sort(
-        (a, b) => _sortName(a).compareTo(_sortName(b)),
-      );
+  List<AppInfo> get favorites {
+    final list = apps.where((a) => metaFor(a.packageName).favorite).toList();
+    if (!favoritesManual) {
+      return sortApps(list, favoritesSort, favoritesSortAscending);
+    }
+    final order = favoritesOrder;
+    final rank = <String, int>{
+      for (var i = 0; i < order.length; i++) order[i]: i,
+    };
+    // A favorite added after the order was arranged sorts after the known ones,
+    // by name, until it is moved too.
+    list.sort((a, b) {
+      final ra = rank[a.packageName];
+      final rb = rank[b.packageName];
+      if (ra != null && rb != null) return ra.compareTo(rb);
+      if (ra != null) return -1;
+      if (rb != null) return 1;
+      return _sortName(a).compareTo(_sortName(b));
+    });
+    return list;
+  }
 
   /// Apps launched from this app, most recent first.
   /// "Organized" covers anything the user has already invested in from the

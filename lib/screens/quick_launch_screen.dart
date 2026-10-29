@@ -20,10 +20,13 @@ import '../utils/recommender.dart';
 import '../utils/search.dart';
 import '../utils/tile_layout.dart';
 import '../widgets/app_icon.dart';
+import '../widgets/app_icon_tile.dart';
+import '../widgets/app_sort_button.dart';
 import '../widgets/category_editor.dart';
 import '../widgets/collapsed_nav.dart';
 import '../widgets/info_tile.dart';
 import '../widgets/info_tile_sheets.dart';
+import '../widgets/reorderable_grid.dart';
 import '../widgets/search_field.dart';
 import 'app_detail_screen.dart';
 import 'global_search_screen.dart';
@@ -3001,8 +3004,93 @@ class _FavoritesTab extends StatelessWidget {
         text: context.strings.t('还没有收藏的应用\n点击右上角 ➕ 添加，即可在这里一键启动'),
       );
     }
+    final view = state.favoritesView;
+    final manual = state.favoritesManual;
+    final hint = view == AppViewMode.grid
+        ? context.strings.t('长按图标拖动调整顺序')
+        : context.strings.t('拖动右侧的手柄调整收藏顺序');
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 4, 0),
+          child: Row(
+            children: [
+              Text(
+                context.strings.t('{n} 个应用', {'n': favorites.length}),
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: view == AppViewMode.grid
+                    ? context.strings.t('切换为列表')
+                    : context.strings.t('切换为网格'),
+                visualDensity: VisualDensity.compact,
+                icon: Icon(
+                  view == AppViewMode.grid ? Icons.view_list : Icons.grid_view,
+                ),
+                onPressed: () => state.setFavoritesView(
+                  view == AppViewMode.grid
+                      ? AppViewMode.list
+                      : AppViewMode.grid,
+                ),
+              ),
+              AppSortButton(
+                sort: state.favoritesSort,
+                ascending: state.favoritesSortAscending,
+                manual: manual,
+                onManual: () => state.setFavoritesManual(true),
+                onChanged: (sort, ascending) =>
+                    state.setFavoritesSort(sort, ascending),
+              ),
+            ],
+          ),
+        ),
+        if (manual)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 2),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                hint,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ),
+        Expanded(
+          child: switch (view) {
+            AppViewMode.grid => manual
+                ? ReorderableGrid(
+                    itemCount: favorites.length,
+                    onReorder: state.moveFavorite,
+                    itemBuilder: (context, i) {
+                      final app = favorites[i];
+                      final name = state.displayNameFor(app.packageName);
+                      return AppIconTile(
+                        packageName: app.packageName,
+                        label: name,
+                        onTap: () => launchApp(context, app.packageName),
+                      );
+                    },
+                  )
+                : _grid(context, favorites),
+            AppViewMode.list => manual
+                ? _reorderableList(context, favorites)
+                : _list(context, favorites),
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _grid(BuildContext context, List<AppInfo> favorites) {
     return GridView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
       gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
         maxCrossAxisExtent: 110,
         mainAxisSpacing: 12,
@@ -3013,30 +3101,64 @@ class _FavoritesTab extends StatelessWidget {
       itemBuilder: (context, i) {
         final app = favorites[i];
         final name = state.displayNameFor(app.packageName);
-        return InkWell(
-          borderRadius: BorderRadius.circular(16),
+        return AppIconTile(
+          packageName: app.packageName,
+          label: name,
           onTap: () => launchApp(context, app.packageName),
-          onLongPress: () => Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => AppDetailScreen(packageName: app.packageName),
-            ),
-          ),
-          child: Column(
-            children: [
-              AppIcon(packageName: app.packageName, label: name, size: 56),
-              const SizedBox(height: 8),
-              Text(
-                name,
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
-          ),
+          onLongPress: () => _openDetail(context, app.packageName),
         );
       },
+    );
+  }
+
+  Widget _list(BuildContext context, List<AppInfo> favorites) {
+    return ListView.builder(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
+      itemCount: favorites.length,
+      itemBuilder: (context, i) {
+        final app = favorites[i];
+        final name = state.displayNameFor(app.packageName);
+        return ListTile(
+          leading: AppIcon(packageName: app.packageName, label: name, size: 40),
+          title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          onTap: () => launchApp(context, app.packageName),
+          onLongPress: () => _openDetail(context, app.packageName),
+        );
+      },
+    );
+  }
+
+  /// A hand-picked order in list view: drag the handle on the right.
+  Widget _reorderableList(BuildContext context, List<AppInfo> favorites) {
+    return ReorderableListView.builder(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 16),
+      buildDefaultDragHandles: false,
+      itemCount: favorites.length,
+      onReorderItem: state.moveFavorite,
+      itemBuilder: (context, i) {
+        final app = favorites[i];
+        final name = state.displayNameFor(app.packageName);
+        return ListTile(
+          key: ValueKey<String>('favorite-${app.packageName}'),
+          leading: AppIcon(packageName: app.packageName, label: name, size: 40),
+          title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          trailing: ReorderableDragStartListener(
+            index: i,
+            child: const Icon(Icons.drag_handle),
+          ),
+          onTap: () => launchApp(context, app.packageName),
+          onLongPress: () => _openDetail(context, app.packageName),
+        );
+      },
+    );
+  }
+
+  void _openDetail(BuildContext context, String packageName) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AppDetailScreen(packageName: packageName),
+      ),
     );
   }
 }

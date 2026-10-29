@@ -67,6 +67,32 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/hamstapp_widget_info" />
         </receiver>
+        <!-- Favorites or one category, chosen per instance. Like the
+             recommendation widget, the content is pushed by Dart; the count
+             and the source are stored natively per widget id. -->
+        <receiver
+            android:name=".CollectionWidgetProvider"
+            android:exported="true"
+            android:label="@string/collection_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/collection_widget_info" />
+        </receiver>
+        <!-- Shown when the collection widget is added, and from its gear. -->
+        <activity
+            android:name=".CollectionWidgetConfigActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.DeviceDefault.Light">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
         <!-- 4x1 strip with the tile board's page tabs. No periodic updates:
              Dart pushes the page list whenever it changes. -->
         <receiver

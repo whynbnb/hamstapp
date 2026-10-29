@@ -469,7 +469,7 @@ void main() {
 
     // Launch is the default action; removal moved into the "more" menu.
     expect(find.byTooltip('启动'), findsOneWidget);
-    await tester.tap(find.byType(PopupMenuButton<String>));
+    await tester.tap(find.byTooltip('更多'));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('移出分类'), findsOneWidget);
@@ -477,6 +477,42 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(state.metaFor('com.a').categoryIds, isNot(contains('c1')));
+  });
+
+  testWidgets('the category list switches between list and grid', (
+    tester,
+  ) async {
+    final cat = AppCategory(id: 'c1', name: '工具', emoji: '🛠');
+    final state = AppState(_MemStorage())
+      ..initialized = true
+      ..categories = [cat];
+
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(
+          home: Scaffold(
+            body: Consumer<AppState>(
+              builder: (_, s, _) => CategoriesTab(state: s),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byType(ListTile), findsOneWidget);
+    await tester.tap(find.byTooltip('切换为网格'));
+    await tester.pumpAndSettle();
+
+    expect(state.categoryListView, AppViewMode.grid);
+    expect(find.byTooltip('切换为列表'), findsOneWidget);
+    expect(find.text('工具'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('切换为列表'));
+    await tester.pumpAndSettle();
+    expect(state.categoryListView, AppViewMode.list);
+    expect(find.byType(ListTile), findsOneWidget);
   });
 
   testWidgets('category picker keeps the search after toggling an app', (

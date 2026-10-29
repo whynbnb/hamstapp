@@ -727,10 +727,10 @@ class PackageScannerPlugin(
             }
             "widgetStatus" -> {
                 val manager = AppWidgetManager.getInstance(context)
-                val provider = if (call.argument<String>("target") == "pages") {
-                    PageBarWidgetProvider::class.java
-                } else {
-                    HamstappWidgetProvider::class.java
+                val provider = when (call.argument<String>("target")) {
+                    "pages" -> PageBarWidgetProvider::class.java
+                    "collection" -> CollectionWidgetProvider::class.java
+                    else -> HamstappWidgetProvider::class.java
                 }
                 val ids = runCatching {
                     manager?.getAppWidgetIds(ComponentName(context, provider))
@@ -756,10 +756,10 @@ class PackageScannerPlugin(
                     return
                 }
                 val manager = AppWidgetManager.getInstance(context)
-                val provider = if (call.argument<String>("target") == "pages") {
-                    PageBarWidgetProvider::class.java
-                } else {
-                    HamstappWidgetProvider::class.java
+                val provider = when (call.argument<String>("target")) {
+                    "pages" -> PageBarWidgetProvider::class.java
+                    "collection" -> CollectionWidgetProvider::class.java
+                    else -> HamstappWidgetProvider::class.java
                 }
                 val component = ComponentName(context, provider)
                 val ok = manager != null &&
