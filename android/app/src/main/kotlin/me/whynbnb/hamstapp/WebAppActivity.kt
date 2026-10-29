@@ -7,18 +7,26 @@ import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.net.Uri
+import android.net.http.SslError
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import android.view.WindowManager
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -72,23 +80,36 @@ class WebAppActivity : Activity() {
     /** The view the page lives in; its background paints the status-bar strip. */
     private var rootView: View? = null
 
+    /** The retry / browser panel currently over the page, if any. */
+    private var failureView: View? = null
+
+    /** The main frame already reported an error, so a later onPageFinished must
+     *  not hide the failure panel and leave the user on a blank page. */
+    private var loadFailed = false
+
+    /** The renderer is gone: the WebView may not be touched any more. */
+    private var rendererGone = false
+
+    /** When the current main-frame load started (milliseconds), for timing and
+     *  for the "it never finishes" timeout. */
+    private var loadStartedAt = 0L
+
+    private val timeoutHandler = Handler(Looper.getMainLooper())
+    private var loadTimeout: Runnable? = null
+
+    /** Script errors recorded for this window; sites can emit a lot of them. */
+    private var consoleErrors = 0
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // A window that cannot be built must not take the whole app with it:
-        // report it, say so, and close.
+        // report it and hand the site to a browser instead of a dead end.
         try {
             setup()
         } catch (t: Throwable) {
-            NotificationStore.addEvent(
-                "网页应用 · 窗口初始化失败 · ${t.javaClass.simpleName}: ${t.message}"
-            )
-            android.widget.Toast.makeText(
-                this,
-                "无法打开网页窗口",
-                android.widget.Toast.LENGTH_SHORT,
-            ).show()
-            finish()
+            log("窗口初始化失败 · ${describe(t)}", "error")
+            fallBackToBrowser("窗口初始化失败")
         }
     }
 
@@ -106,11 +127,12 @@ class WebAppActivity : Activity() {
         val iconBytes = intent.getByteArrayExtra(EXTRA_ICON)
 
         if (startUrl.isEmpty()) {
+            log("窗口创建失败 · 没有网址", "error")
             finish()
             return
         }
-        NotificationStore.addEvent(
-            "网页应用 · 窗口创建 · $appName · $startUrl · display=$display · " +
+        log(
+            "窗口创建 · $appName · $startUrl · display=$display · " +
                 "状态栏=${if (hideStatusBar) "隐藏" else "显示"} · " +
                 "theme=${Integer.toHexString(themeColor)} · 图标=${iconBytes?.size ?: 0}B"
         )
@@ -148,8 +170,17 @@ class WebAppActivity : Activity() {
             insets
         }
 
-        webView = WebView(this)
+        webView = try {
+            WebView(this)
+        } catch (t: Throwable) {
+            // The system WebView is missing, disabled, or its provider failed to
+            // load — nothing in this window can work, but the site still can.
+            log("系统 WebView 不可用 · ${describe(t)} · ${webViewProviderLabel()}", "error")
+            fallBackToBrowser("系统 WebView 不可用")
+            return
+        }
         configure(webView)
+        log("WebView · ${webViewProviderLabel()}")
         root.addView(
             webView,
             FrameLayout.LayoutParams(
@@ -288,9 +319,11 @@ class WebAppActivity : Activity() {
      */
     private fun tintFromPage(view: WebView) {
         if (hideStatusBar) return
-        view.evaluateJavascript(SAMPLE_COLOR_JS) { value ->
-            val parsed = parseCssColor(unquoteJs(value))
-            if (parsed != 0) tintStatusBar(parsed)
+        runCatching {
+            view.evaluateJavascript(SAMPLE_COLOR_JS) { value ->
+                val parsed = parseCssColor(unquoteJs(value))
+                if (parsed != 0) tintStatusBar(parsed)
+            }
         }
     }
 
@@ -558,20 +591,46 @@ class WebAppActivity : Activity() {
                 }
                 // Anything that is not a web page belongs to its own app: mail,
                 // phone numbers, a site's own app, an intent:// link.
+                log("交给其他应用 · $target")
                 openExternal(target)
                 return true
             }
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                // A new main-frame load: the old failure no longer applies.
+                loadFailed = false
+                removeFailure()
+                loadStartedAt = System.currentTimeMillis()
+                log("开始加载 · $url")
+                scheduleLoadTimeout()
                 // Pretend to be the manifest's display mode: WebView reports
                 // "browser", and sites that ask for standalone would otherwise
                 // render their browser layout.
-                view.evaluateJavascript(displayModeShim(), null)
+                runCatching { view.evaluateJavascript(displayModeShim(), null) }
                 updateChrome(url)
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                if (splash.visibility == View.VISIBLE) splash.visibility = View.GONE
+                cancelLoadTimeout()
+                val elapsed = if (loadStartedAt > 0) {
+                    System.currentTimeMillis() - loadStartedAt
+                } else {
+                    0L
+                }
+                log(
+                    if (loadFailed) {
+                        "页面结束（已报告加载失败） · $url · ${elapsed}ms"
+                    } else {
+                        "页面加载完成 · $url · ${elapsed}ms"
+                    },
+                    if (loadFailed) "warn" else "info",
+                )
+                if (!loadFailed) {
+                    // Only a page that actually loaded replaces the panel; an
+                    // error page finishing must not hide it.
+                    removeFailure()
+                    if (splash.visibility == View.VISIBLE) splash.visibility = View.GONE
+                }
                 // The page may declare (or change) the colour it wants the
                 // browser UI in; ask it now that there is a document.
                 tintFromPage(view)
@@ -588,16 +647,83 @@ class WebAppActivity : Activity() {
             ) {
                 // Single-page apps change views without a page load.
                 tintFromPage(view)
-                if (!url.isNullOrEmpty()) updateChrome(url)
+                if (url.isNullOrEmpty()) return
+                val previous = currentUrl
+                updateChrome(url)
+                if (isReload) {
+                    log("页面重载 · $url")
+                } else if (url != previous && !inScope(url)) {
+                    // A sign-in page on another host is exactly where a PWA
+                    // appears to "stop working"; note it in the log.
+                    log("离开应用范围 · $url（显示地址栏）")
+                }
             }
 
             override fun onReceivedError(
                 view: WebView,
                 request: WebResourceRequest,
-                error: android.webkit.WebResourceError,
+                error: WebResourceError,
             ) {
                 if (!request.isForMainFrame) return
-                showLoadFailure()
+                cancelLoadTimeout()
+                loadFailed = true
+                log(
+                    "页面加载失败 · code=${error.errorCode} · ${error.description}" +
+                        " · ${request.url}",
+                    "warn",
+                )
+                showFailure("无法打开，请检查网络后重试", allowRetry = true)
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView,
+                request: WebResourceRequest,
+                errorResponse: WebResourceResponse,
+            ) {
+                if (!request.isForMainFrame) return
+                // An HTTP error page may still be the site's own content, so it
+                // is logged rather than replaced.
+                log(
+                    "页面返回 HTTP ${errorResponse.statusCode}" +
+                        " · ${errorResponse.reasonPhrase} · ${request.url}",
+                    "warn",
+                )
+            }
+
+            override fun onReceivedSslError(
+                view: WebView,
+                handler: SslErrorHandler,
+                error: SslError,
+            ) {
+                log("证书不被信任 · primary=${error.primaryError} · ${error.url}", "warn")
+                // Never continue past a certificate error; say what happened.
+                handler.cancel()
+                loadFailed = true
+                showFailure("网站证书有问题，已停止打开", allowRetry = false)
+            }
+
+            override fun onRenderProcessGone(
+                view: WebView,
+                detail: RenderProcessGoneDetail,
+            ): Boolean {
+                // The renderer crashed (or was reclaimed for memory). The
+                // WebView cannot be used again, and touching it would take the
+                // whole process down — this is a common "the PWA will not open"
+                // cause, so it is logged with the reason.
+                val crashed = Build.VERSION.SDK_INT >= 26 && detail.didCrash()
+                rendererGone = true
+                cancelLoadTimeout()
+                log(
+                    "渲染进程结束 · ${if (crashed) "崩溃" else "内存不足或被系统回收"}" +
+                        " · 当前=$currentUrl · 起始=$startUrl",
+                    "error",
+                )
+                runCatching { view.stopLoading() }
+                runCatching { (view.parent as? ViewGroup)?.removeView(view) }
+                runCatching { view.destroy() }
+                showFailure("页面进程已停止，请重新打开", allowRetry = false)
+                // Keep the process alive; Android would kill the app otherwise.
+                return true
             }
         }
 
@@ -605,6 +731,24 @@ class WebAppActivity : Activity() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
                 progress.progress = newProgress
                 progress.visibility = if (newProgress in 1..99) View.VISIBLE else View.GONE
+            }
+
+            // A page that fails to start usually says why in its own script
+            // errors (a service worker that cannot register, a missing chunk).
+            // Only errors, capped, so the in-app log stays readable.
+            override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                if (message.messageLevel() != ConsoleMessage.MessageLevel.ERROR) {
+                    return false
+                }
+                if (consoleErrors >= MAX_CONSOLE_ERRORS) return true
+                consoleErrors++
+                val where = message.sourceId().orEmpty().takeLast(80)
+                log(
+                    "页面脚本错误 · $where:${message.lineNumber()} · " +
+                        message.message().take(240),
+                    "error",
+                )
+                return true
             }
 
             // Some sign-in flows ask for a location; granting keeps them usable.
@@ -631,11 +775,9 @@ class WebAppActivity : Activity() {
                         v: WebView,
                         request: WebResourceRequest,
                     ): Boolean {
-                        NotificationStore.addEvent(
-                            "网页应用 · 新窗口链接改在本窗口打开 · ${request.url}"
-                        )
+                        log("新窗口链接改在本窗口打开 · ${request.url}")
                         v.stopLoading()
-                        webView.loadUrl(request.url.toString())
+                        if (!rendererGone) webView.loadUrl(request.url.toString())
                         return true
                     }
                 }
@@ -647,7 +789,7 @@ class WebAppActivity : Activity() {
             override fun onCloseWindow(window: WebView) {
                 // A popup that closes itself: back to whatever opened it.
                 if (window !== webView) window.destroy()
-                if (webView.canGoBack()) webView.goBack()
+                if (!rendererGone && webView.canGoBack()) webView.goBack()
             }
         }
         settings.setSupportMultipleWindows(true)
@@ -690,16 +832,17 @@ class WebAppActivity : Activity() {
             targetUri.path.orEmpty().startsWith(start.path.orEmpty().substringBeforeLast('/') + "/")
     }
 
-    private fun openInBrowser(url: String) {
+    /** Opens [url] in the chosen browser, or whatever the system picks. */
+    private fun openInBrowser(url: String): Boolean {
         // The browser the entry picked, if any; the system's choice otherwise.
         if (browserPackage.isNotEmpty()) {
             val targeted = Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
                 setPackage(browserPackage)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
-            if (runCatching { startActivity(targeted) }.isSuccess) return
+            if (runCatching { startActivity(targeted) }.isSuccess) return true
         }
-        openExternal(url)
+        return openExternal(url)
     }
 
     /**
@@ -707,24 +850,70 @@ class WebAppActivity : Activity() {
      * matching app for anything else (`mailto:`, `tel:`, a site's own app, an
      * `intent://` URL).
      */
-    private fun openExternal(url: String) {
+    private fun openExternal(url: String): Boolean {
         val intent = if (url.startsWith("intent:")) {
             runCatching { Intent.parseUri(url, Intent.URI_INTENT_SCHEME) }.getOrNull()
         } else {
             Intent(Intent.ACTION_VIEW, Uri.parse(url))
-        } ?: return
+        } ?: return false
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        try {
+        return try {
             startActivity(intent)
+            true
         } catch (_: ActivityNotFoundException) {
-            NotificationStore.addEvent("网页应用 · 没人能处理这个链接 · $url")
+            log("没人能处理这个链接 · $url", "warn")
             // Nothing to hand it to; keep it in this window when it is a page.
-            if (url.startsWith("http")) webView.loadUrl(url)
+            if (url.startsWith("http") && !rendererGone && this::webView.isInitialized) {
+                runCatching { webView.loadUrl(url) }
+            }
+            false
+        } catch (t: Throwable) {
+            log("交给其他应用失败 · $url · ${describe(t)}", "warn")
+            false
         }
     }
 
-    private fun showLoadFailure() {
-        splash.visibility = View.GONE
+    /**
+     * When the window itself cannot work — a missing or disabled system
+     * WebView, a failed setup — the site still belongs somewhere: hand it to a
+     * browser and say so, instead of leaving the user with a flash and nothing.
+     */
+    private fun fallBackToBrowser(reason: String) {
+        if (startUrl.isEmpty()) {
+            log("$reason · 没有网址", "error")
+            android.widget.Toast.makeText(
+                this,
+                "无法打开网页窗口",
+                android.widget.Toast.LENGTH_SHORT,
+            ).show()
+            finish()
+            return
+        }
+        val opened = openInBrowser(startUrl)
+        log(
+            "$reason · 改用浏览器${if (opened) "" else "失败"} · $startUrl",
+            "warn",
+        )
+        android.widget.Toast.makeText(
+            this,
+            if (opened) "网页窗口打不开，已改用浏览器" else "网页窗口打不开",
+            android.widget.Toast.LENGTH_LONG,
+        ).show()
+        finish()
+    }
+
+    /**
+     * Puts a retry / browser / close panel over the page.
+     *
+     * [allowRetry] is false when the WebView itself can no longer load anything
+     * (a dead renderer, a rejected certificate), so the panel does not offer an
+     * action that cannot work.
+     */
+    private fun showFailure(message: String, allowRetry: Boolean) {
+        removeFailure()
+        // Deliberately not `loadFailed`: a timeout is only a guess, and if the
+        // page does finish later onPageFinished should take the panel away.
+        if (this::splash.isInitialized) splash.visibility = View.GONE
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
@@ -732,45 +921,121 @@ class WebAppActivity : Activity() {
         }
         column.addView(
             TextView(this).apply {
-                text = getString(android.R.string.cancel)
-                textSize = 14f
-                gravity = Gravity.CENTER
-                visibility = View.GONE
-            },
-        )
-        column.addView(
-            TextView(this).apply {
-                text = "无法打开，请检查网络后重试"
+                text = message
                 textSize = 15f
                 setPadding(dp(24), 0, dp(24), dp(12))
                 gravity = Gravity.CENTER
             },
         )
-        column.addView(
-            TextView(this).apply {
-                text = "重试"
-                textSize = 16f
-                setTextColor(Color.parseColor("#1a73e8"))
-                setPadding(dp(24), dp(8), dp(24), dp(8))
-                setOnClickListener {
-                    (this@WebAppActivity.findViewById<View>(android.R.id.content) as ViewGroup)
-                        .removeView(column)
-                    splash.visibility = View.VISIBLE
-                    webView.loadUrl(startUrl)
-                }
-            },
-        )
-        (findViewById<View>(android.R.id.content) as ViewGroup).addView(
-            column,
-            ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT,
-            ),
+        fun action(label: String, color: Int = Color.parseColor("#1a73e8"), run: () -> Unit) {
+            column.addView(
+                TextView(this).apply {
+                    text = label
+                    textSize = 16f
+                    setTextColor(color)
+                    gravity = Gravity.CENTER
+                    setPadding(dp(24), dp(8), dp(24), dp(8))
+                    setOnClickListener { run() }
+                },
+            )
+        }
+        if (allowRetry) action("重试") { retryLoad() }
+        action("用浏览器打开") {
+            openInBrowser(if (currentUrl.isNotEmpty()) currentUrl else startUrl)
+        }
+        action("关闭", Color.GRAY) { finish() }
+        failureView = column
+        runCatching {
+            (findViewById<View>(android.R.id.content) as ViewGroup).addView(
+                column,
+                ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                ),
+            )
+        }
+    }
+
+    private fun removeFailure() {
+        failureView?.let { view ->
+            runCatching { (view.parent as? ViewGroup)?.removeView(view) }
+        }
+        failureView = null
+    }
+
+    private fun retryLoad() {
+        removeFailure()
+        if (rendererGone || !this::webView.isInitialized) return
+        loadFailed = false
+        splash.visibility = View.VISIBLE
+        loadStartedAt = System.currentTimeMillis()
+        scheduleLoadTimeout()
+        runCatching { webView.loadUrl(startUrl) }
+            .onFailure { log("重新加载失败 · ${describe(it)}", "error") }
+    }
+
+    /**
+     * A page that neither finishes nor reports an error (a redirect loop, a
+     * stalled network, a WebView that hangs) would otherwise leave the splash
+     * up forever — the exact "the PWA will not open" report. Note it in the log
+     * and offer the browser instead.
+     */
+    private fun scheduleLoadTimeout() {
+        cancelLoadTimeout()
+        val runnable = Runnable {
+            loadTimeout = null
+            val waited = if (loadStartedAt > 0) {
+                (System.currentTimeMillis() - loadStartedAt) / 1000
+            } else {
+                LOAD_TIMEOUT_MS / 1000
+            }
+            log(
+                "加载超时 · ${waited}s · 进度=${if (this::progress.isInitialized) progress.progress else 0}%" +
+                    " · 当前=$currentUrl · 起始=$startUrl",
+                "warn",
+            )
+            if (!loadFailed && !rendererGone) {
+                showFailure("打开超时，请检查网络后重试", allowRetry = true)
+            }
+        }
+        loadTimeout = runnable
+        timeoutHandler.postDelayed(runnable, LOAD_TIMEOUT_MS)
+    }
+
+    private fun cancelLoadTimeout() {
+        loadTimeout?.let { timeoutHandler.removeCallbacks(it) }
+        loadTimeout = null
+    }
+
+    /** One line in the in-app log; a no-op unless the user turned logging on. */
+    private fun log(text: String, level: String = "info") {
+        NotificationStore.addEvent(
+            "网页应用 · $text",
+            level = level,
+            module = "launch",
         )
     }
 
+    /** Class, message and the first few frames of [t], for a log line. */
+    private fun describe(t: Throwable): String {
+        val head = "${t.javaClass.simpleName}: ${t.message}"
+        val frames = t.stackTrace.take(4).joinToString(" ← ") {
+            "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}"
+        }
+        return if (frames.isEmpty()) head else "$head · $frames"
+    }
+
+    /** The system WebView provider, so a broken one can be spotted in the log. */
+    private fun webViewProviderLabel(): String {
+        val sdk = "SDK ${Build.VERSION.SDK_INT}"
+        if (Build.VERSION.SDK_INT < 26) return sdk
+        val pkg = runCatching { WebView.getCurrentWebViewPackage() }.getOrNull()
+            ?: return "未找到 WebView 提供者 · $sdk"
+        return "${pkg.packageName} ${pkg.versionName ?: "?"} · $sdk"
+    }
+
     override fun onBackPressed() {
-        if (this::webView.isInitialized && webView.canGoBack()) {
+        if (!rendererGone && this::webView.isInitialized && webView.canGoBack()) {
             webView.goBack()
             return
         }
@@ -779,8 +1044,9 @@ class WebAppActivity : Activity() {
     }
 
     override fun onDestroy() {
-        if (this::webView.isInitialized) {
-            webView.destroy()
+        cancelLoadTimeout()
+        if (!rendererGone && this::webView.isInitialized) {
+            runCatching { webView.destroy() }
         }
         super.onDestroy()
     }
@@ -825,6 +1091,13 @@ class WebAppActivity : Activity() {
 
         /** Beyond this an icon is refused outright; the splash does without. */
         const val MAX_ICON_BYTES = 512 * 1024
+
+        /** How long a main-frame load may stay unfinished before it is called a
+         *  timeout (milliseconds). Slow networks still get a real chance. */
+        const val LOAD_TIMEOUT_MS = 30_000L
+
+        /** Script errors kept per window; beyond this they are only noise. */
+        const val MAX_CONSOLE_ERRORS = 20
 
         /**
          * What colour the strip under the status bar should be.

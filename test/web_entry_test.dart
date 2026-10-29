@@ -9,6 +9,7 @@ import 'package:hamstapp/models/tile.dart';
 import 'package:hamstapp/models/tile_page.dart';
 import 'package:hamstapp/models/web_app.dart';
 import 'package:hamstapp/screens/app_detail_screen.dart';
+import 'package:hamstapp/services/app_log.dart';
 import 'package:hamstapp/services/storage.dart';
 import 'package:hamstapp/state/app_state.dart';
 import 'package:hamstapp/utils/actions.dart';
@@ -222,6 +223,71 @@ void main() {
     // Opening it counts as a launch, like any app.
     expect(state.metaFor(id).launchCount, 1);
     expect(state.metaFor(id).lastLaunchedAt > 0, isTrue);
+  });
+
+  testWidgets('a web entry that cannot open leaves the reason in the log', (
+    tester,
+  ) async {
+    const channel = MethodChannel('hamstapp/apps');
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      switch (call.method) {
+        case 'openWebApp':
+          throw PlatformException(code: 'webview', message: 'missing webview');
+        case 'openUrl':
+          return false;
+      }
+      return null;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final log = AppLog.instance
+      ..setEnabled(true)
+      ..clear();
+    addTearDown(() {
+      log.setEnabled(false);
+      log.clear();
+    });
+
+    final state = AppState(_MemStorage())..initialized = true;
+    await state.addWebApp(name: 'Photos', url: 'https://photos.example/');
+    final id = state.webApps.single.id;
+
+    late BuildContext ctx;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (c) {
+                ctx = c;
+                return const SizedBox();
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+
+    await launchApp(ctx, id);
+    await tester.pump();
+
+    // The user still gets told, and the log carries what was tried.
+    expect(find.textContaining('设备上没有能处理它的应用'), findsOneWidget);
+    final lines = log.entries.map((e) => e.text).join('\n');
+    expect(lines, contains('网页入口 · 打开独立窗口 · Photos'));
+    expect(lines, contains('打开独立窗口异常'));
+    expect(lines, contains('独立窗口启动失败，改用浏览器'));
+    expect(lines, contains('网页入口 · 打不开'));
+    expect(lines, contains('https://photos.example/'));
+    expect(log.countFor(LogModule.launch), greaterThanOrEqualTo(4));
   });
 
   testWidgets('the detail page of a web entry drops the APK-side rows', (

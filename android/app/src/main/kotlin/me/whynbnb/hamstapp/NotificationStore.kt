@@ -60,15 +60,18 @@ object NotificationStore {
     @Volatile
     var eventCount = 0L
 
-    /** Recent notification events, newest last; flushed to the log when it is
-     *  switched on so the history right before is not lost. */
+    /** Recent events, newest last; flushed to the log when it is switched on
+     *  so the history right before is not lost. */
     private const val MAX_EVENTS = 50
 
-    private val events = ArrayDeque<String>()
+    /** One buffered line, with the log module it belongs to. */
+    private class LogEvent(val module: String, val level: String, val line: String)
 
-    /** Set by MainActivity to forward log lines to Dart. */
+    private val events = ArrayDeque<LogEvent>()
+
+    /** Set by MainActivity to forward log lines to Dart (module, level, text). */
     @Volatile
-    var logSink: ((String, String) -> Unit)? = null
+    var logSink: ((String, String, String) -> Unit)? = null
 
     /** Whether the user turned the in-app log on. */
     @Volatile
@@ -83,16 +86,26 @@ object NotificationStore {
         eventCount++
     }
 
-    fun addEvent(line: String, level: String = "info") {
-        events.addLast(line)
+    /**
+     * Buffers one line and, when the in-app log is on, forwards it to Dart.
+     *
+     * [module] selects the log viewer's filter: notification events keep the
+     * default, other native features (a web app window) name their own.
+     */
+    fun addEvent(
+        line: String,
+        level: String = "info",
+        module: String = "notifications",
+    ) {
+        events.addLast(LogEvent(module, level, line))
         while (events.size > MAX_EVENTS) events.removeFirst()
-        if (loggingEnabled) logSink?.invoke(level, line)
+        if (loggingEnabled) logSink?.invoke(module, level, line)
     }
 
     /** Re-sends the buffered events; called right after logging is switched on. */
     fun flushEvents() {
         if (!loggingEnabled) return
-        events.toList().forEach { logSink?.invoke("info", it) }
+        events.toList().forEach { logSink?.invoke(it.module, it.level, it.line) }
     }
 
     @Synchronized

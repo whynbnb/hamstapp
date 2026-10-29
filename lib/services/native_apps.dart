@@ -747,7 +747,13 @@ class NativeApps {
         if (icon != null && icon.isNotEmpty) 'icon': icon,
       });
       return ok ?? false;
-    } catch (_) {
+    } catch (e) {
+      // Bridge failures used to vanish into a plain "false"; keep the reason so
+      // a web entry that will not open can be diagnosed from the log.
+      AppLog.instance.warn(
+        LogModule.launch,
+        '打开独立窗口异常 · $url · $e',
+      );
       return false;
     }
   }
@@ -1000,11 +1006,19 @@ class NativeApps {
 
   /// Opens an http(s) URL (e.g. the project's GitHub page) in a browser.
   static Future<bool> openUrl(String url, {String? package}) async {
-    final ok = await _channel.invokeMethod<bool>('openUrl', {
-      'url': url,
-      if (package != null && package.isNotEmpty) 'package': package,
-    });
-    return ok ?? false;
+    try {
+      final ok = await _channel.invokeMethod<bool>('openUrl', {
+        'url': url,
+        if (package != null && package.isNotEmpty) 'package': package,
+      });
+      return ok ?? false;
+    } catch (e) {
+      AppLog.instance.warn(
+        LogModule.launch,
+        '打开链接异常 · $url${package == null ? '' : ' · $package'} · $e',
+      );
+      return false;
+    }
   }
 
   /// Apps that can open an http(s) address, for the "use this browser" choice.

@@ -79,6 +79,10 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
   final state = context.read<AppState>();
   final web = state.webAppById(entry.packageName);
   if (web == null || web.url.isEmpty) {
+    AppLog.instance.warn(
+      LogModule.launch,
+      '网页入口 · 没有网址 · ${entry.packageName}',
+    );
     if (context.mounted) {
       _snack(context, AppStrings.current.t('这个网页入口没有网址'));
     }
@@ -87,7 +91,18 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
 
   var opened = false;
   final target = web.startUrl.isEmpty ? web.url : web.startUrl;
+  final browserLabel = web.browserPackage.isEmpty
+      ? AppStrings.current.t('系统默认')
+      : (web.browserName.isEmpty ? web.browserPackage : web.browserName);
   if (web.opensStandalone) {
+    // The window's own log (native side) covers the page itself; these lines
+    // tie an attempt to the entry, so a failure can be read without guessing
+    // which website it belonged to.
+    AppLog.instance.log(
+      LogModule.launch,
+      '网页入口 · 打开独立窗口 · ${web.name} · $target · '
+          'display=${web.windowDisplay} · 状态栏=${web.hideStatusBar ? '隐藏' : '显示'}',
+    );
     opened = await NativeApps.openWebApp(
       url: target,
       name: web.name,
@@ -104,8 +119,9 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
       // gets the user to the site. Say so rather than opening something else
       // silently.
       AppLog.instance.warn(
-        LogModule.apps,
-        '网页入口 · 独立窗口启动失败，改用浏览器 · ${web.name} · $target',
+        LogModule.launch,
+        '网页入口 · 独立窗口启动失败，改用浏览器 · ${web.name} · $target · '
+            '浏览器=$browserLabel',
       );
       opened = await NativeApps.openUrl(target, package: web.browserPackage);
       if (opened && context.mounted) {
@@ -118,23 +134,29 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
       // The chosen browser may simply not handle this address; the system's
       // own choice is better than refusing to open it at all.
       AppLog.instance.warn(
-        LogModule.apps,
+        LogModule.launch,
         '网页入口 · 指定浏览器打不开，改用系统默认 · ${web.name} · '
             '${web.browserName.isEmpty ? web.browserPackage : web.browserName}',
       );
       opened = await NativeApps.openUrl(target);
     }
-    final browserLabel = web.browserPackage.isEmpty
-        ? AppStrings.current.t('系统默认')
-        : (web.browserName.isEmpty ? web.browserPackage : web.browserName);
     AppLog.instance.log(
-      LogModule.apps,
+      LogModule.launch,
       '网页入口 · 浏览器打开 · ${web.name} · $target · 浏览器=$browserLabel'
           ' · ${opened ? '已启动' : '失败'}',
     );
   }
 
   if (!opened) {
+    // The one line that matters when a web entry "does not open": the address,
+    // the mode that was tried and the browser that was asked. The native side
+    // logs the window's own reason above it.
+    AppLog.instance.error(
+      LogModule.launch,
+      '网页入口 · 打不开 · ${web.name} · ${web.url} · '
+          '独立窗口=${web.opensStandalone ? '是（${web.windowDisplay}）' : '否'} · '
+          '浏览器=$browserLabel',
+    );
     if (context.mounted) {
       _snack(
         context,

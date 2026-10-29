@@ -173,6 +173,12 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - This is 囤囤's own WebView host, so it does not share cookies with your browser; when a tap needs a real
   browser, 囤囤 asks the system where the URL would go and prefers an installed web app, so it can open in
   the browser's own app window when one exists.
+- A page that will not open does not leave just a splash: a load error, a bad certificate, a dead renderer
+  or 30 seconds without finishing shows **Retry / Open in browser / Close**, and a missing or disabled
+  system WebView falls back to the browser by itself.
+- With the log switched on (Settings → Log), the window creation, the WebView provider and version, load
+  error codes and URLs, HTTP status, certificate errors, renderer termination and load timeouts are
+  written under the **Launch** filter, so a page that will not open can be diagnosed.
 
 ### 🗂 Snapshots & backup
 - **Snapshots** capture the installed list and all your annotations (including app icons), so you can
@@ -293,7 +299,9 @@ back as suggestions:
   the launch tab underline cross-fades between the two ends at a loop wrap instead of sliding
   against the gesture; the virtual page is folded back after each wrap, so repeated swipes cannot
   strand the indicator, and the content always follows the finger; the collapsed nav button's
-  long press is configurable (Launch / Apps / Settings / Sync …).
+  long press is configurable (Launch / Apps / Settings / Sync …); a web entry that cannot open offers
+  Retry / Browser / Close, a missing system WebView falls back to the browser, and with the log on the
+  WebView version, error codes, HTTP / certificate errors, renderer crashes and load timeouts are recorded.
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

@@ -56,12 +56,12 @@ class MainActivity : FlutterActivity() {
         NotificationStore.sink = { counts ->
             runCatching { ch.invokeMethod("notificationsChanged", mapOf("counts" to counts)) }
         }
-        // Forward notification events into the in-app log (only while it is on).
-        NotificationStore.logSink = { level, text ->
+        // Forward native events into the in-app log (only while it is on).
+        NotificationStore.logSink = { module, level, text ->
             runCatching {
                 ch.invokeMethod(
                     "nativeLog",
-                    mapOf("module" to "notifications", "level" to level, "text" to text),
+                    mapOf("module" to module, "level" to level, "text" to text),
                 )
             }
         }

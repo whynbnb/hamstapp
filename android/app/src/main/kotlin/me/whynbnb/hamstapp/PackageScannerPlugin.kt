@@ -338,7 +338,9 @@ class PackageScannerPlugin(
                     val ok = runCatching { startWebAppWindow(call, url) }
                         .onFailure {
                             NotificationStore.addEvent(
-                                "网页应用 · 窗口启动异常 · ${describe(it)}"
+                                "网页应用 · 窗口启动异常 · ${describe(it)}",
+                                level = "error",
+                                module = "launch",
                             )
                         }
                         .getOrDefault(false)
@@ -1581,7 +1583,9 @@ class PackageScannerPlugin(
             "网页应用 · 打开 · $name · $url · display=$display · " +
                 "theme=${Integer.toHexString(theme)} · 状态栏=${if (hideStatusBar) "隐藏" else "显示"} · " +
                 "图标=${icon?.size ?: 0}B · " +
-                (if (started) "已启动窗口" else "启动窗口失败（改用浏览器）")
+                (if (started) "已启动窗口" else "启动窗口失败（改用浏览器）"),
+            level = if (started) "info" else "warn",
+            module = "launch",
         )
         return started
     }
