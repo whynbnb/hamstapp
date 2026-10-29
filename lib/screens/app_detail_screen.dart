@@ -163,7 +163,7 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
         ? s.t('读不到这个网址（网络或站点问题）')
         : site.isPwa
         ? s.t('已识别为 PWA · 显示模式 {mode}', {'mode': site.display})
-        : s.t('这个网站没有 PWA 清单，会用浏览器打开');
+        : s.t('没有 PWA 清单：仍是普通网页，按设置的打开方式启动');
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -714,7 +714,9 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                     app.isWebEntry
                         ? (webEntry == null || !webEntry.isPwa
                               ? context.strings.t(
-                                  '没有 PWA 清单：打开时会交给浏览器，可以放进磁贴、收藏和分类。',
+                                  webEntry?.opensStandalone ?? true
+                                      ? '没有 PWA 清单：仍用囤囤的窗口打开，只是没有站点自己的名称和图标。'
+                                      : '没有 PWA 清单：打开时会交给浏览器，可以放进磁贴、收藏和分类。',
                                 )
                               : context.strings.t(
                                   'PWA · 显示模式 {mode}：打开时用囤囤自己的窗口，没有地址栏。',
@@ -737,6 +739,15 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                     SelectableText(
                       context.strings.t('清单 {url}', {
                         'url': webEntry.manifestUrl,
+                      }),
+                      style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                    ),
+                  ],
+                  if (webEntry != null && webEntry.discoverUrl.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    SelectableText(
+                      context.strings.t('识别地址 {url}', {
+                        'url': webEntry.discoverUrl,
                       }),
                       style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
                     ),

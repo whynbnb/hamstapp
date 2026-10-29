@@ -173,6 +173,12 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
 - This is 囤囤's own WebView host, so it does not share cookies with your browser; when a tap needs a real
   browser, 囤囤 asks the system where the URL would go and prefers an installed web app, so it can open in
   the browser's own app window when one exists.
+- Identification carries the window's own cookies (where the platform exposes them) and probes the standard
+  manifest addresses (`/manifest.json`, `/site.webmanifest`, `/manifest.webmanifest`), so a site that bounces
+  anonymous visitors to a login/activation page can still be recognised; a redirect to a *different* site
+  never donates its manifest. With no manifest the entry always launches the address you typed — not the
+  redirect target — and an advanced **detection address** can name the manifest or a signed-in page when
+  even that is not enough.
 - A page that will not open does not leave just a splash: a load error, a bad certificate, a dead renderer
   or 30 seconds without finishing shows **Retry / Open in browser / Close**, and a missing or disabled
   system WebView falls back to the browser by itself.

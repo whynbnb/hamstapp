@@ -48,6 +48,7 @@ import android.os.storage.StorageManager
 import android.provider.Settings
 import android.service.notification.NotificationListenerService
 import android.util.Base64
+import android.webkit.CookieManager
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import org.xmlpull.v1.XmlPullParser
@@ -345,6 +346,22 @@ class PackageScannerPlugin(
                         }
                         .getOrDefault(false)
                     result.success(ok)
+                }
+            }
+            "webViewCookies" -> {
+                // The window host's own cookie jar, so identification can read
+                // the page a logged-in user sees. HttpOnly cookies are not
+                // visible here; those are still used by the WebView itself.
+                val url = call.argument<String>("url")
+                mainHandler.post {
+                    val cookie = runCatching {
+                        if (url.isNullOrEmpty()) {
+                            ""
+                        } else {
+                            CookieManager.getInstance().getCookie(url).orEmpty()
+                        }
+                    }.getOrDefault("")
+                    result.success(cookie)
                 }
             }
             "uninstallApp" -> {

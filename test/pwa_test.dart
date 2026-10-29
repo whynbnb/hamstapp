@@ -348,16 +348,37 @@ void main() {
       );
     });
 
-    test('repairs a stored relative start URL instead of loading file://', () {
-      final back = WebApp.fromMap({
+    test('a login redirect is never stored as the launch address', () {
+      // What an older build saved when the site bounced it to /activate: every
+      // launch landed on the activation page, even after signing in.
+      final relative = WebApp.fromMap({
         'id': 'web:abc',
         'name': '尽欢',
         'url': 'https://52dmeme.com/',
         'startUrl': '/activate',
         'display': 'browser',
       });
-      expect(back.startUrl, 'https://52dmeme.com/activate');
-      expect(WebApp.isValidUrl(back.startUrl), isTrue);
+      expect(relative.startUrl, 'https://52dmeme.com/');
+
+      final absolute = WebApp.fromMap({
+        'id': 'web:def',
+        'name': '尽欢',
+        'url': 'https://52dmeme.com/',
+        'startUrl': 'https://www.52dmeme.com/activate',
+      });
+      expect(absolute.startUrl, 'https://52dmeme.com/');
+
+      // Re-identification also keeps the typed address when there is no
+      // manifest, whatever page the anonymous request landed on.
+      final entry = WebApp(id: WebApp.newId(), name: 'x', url: 'https://a.example/')
+        ..applySite(
+          const PwaSite(
+            url: 'https://login.example/activate',
+            title: 'Activate',
+            secure: true,
+          ),
+        );
+      expect(entry.startUrl, 'https://a.example/');
 
       // The helper leaves full addresses alone and resolves bare paths.
       expect(
@@ -372,7 +393,7 @@ void main() {
       // A manifest URL saved as a path came from the same bug; it cannot be a
       // base, so the entry's own address is used and the entry is not a PWA.
       final manifestCase = WebApp.fromMap({
-        'id': 'web:def',
+        'id': 'web:ghi',
         'name': 'x',
         'url': 'https://a.example/',
         'startUrl': '/app',
@@ -381,7 +402,27 @@ void main() {
       });
       expect(manifestCase.manifestUrl, '');
       expect(manifestCase.isPwa, isFalse);
-      expect(manifestCase.startUrl, 'https://a.example/app');
+      expect(manifestCase.startUrl, 'https://a.example/');
+    });
+
+    test('an identification address is kept apart from the launch address', () {
+      final entry = WebApp(
+        id: WebApp.newId(),
+        name: '尽欢',
+        url: 'https://52dmeme.com/',
+        discoverUrl: 'https://52dmeme.com/manifest.json',
+      )..applySite(
+        PwaSite(
+          url: 'https://a.example/',
+          title: '',
+          secure: true,
+          manifest: PwaManifest.parse(_manifestJson(), _manifestUrl),
+        ),
+      );
+      expect(entry.startUrl, 'https://photos.example/app');
+      final back = WebApp.fromMap(entry.toMap());
+      expect(back.discoverUrl, 'https://52dmeme.com/manifest.json');
+      expect(back.startUrl, 'https://photos.example/app');
     });
 
     test('a site without a manifest opens in a window too', () {

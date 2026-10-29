@@ -58,6 +58,14 @@ class WebApp {
   /// Where the manifest was read from; '' when the site has none.
   String manifestUrl;
 
+  /// Where identification reads the site from, when it differs from [url].
+  ///
+  /// A site that bounces an anonymous visitor to a login/activation page hides
+  /// its manifest from us. Setting this to the manifest address (or a page that
+  /// is reachable once logged in) lets identification work while the entry
+  /// still launches [url].
+  String discoverUrl;
+
   /// The chosen icon's address, kept so it can be refetched.
   String iconUrl;
 
@@ -92,6 +100,7 @@ class WebApp {
     this.themeColor = 0,
     this.backgroundColor = 0,
     this.manifestUrl = '',
+    this.discoverUrl = '',
     this.iconUrl = '',
     this.openMode = openStandalone,
     this.hideStatusBar = false,
@@ -157,7 +166,12 @@ class WebApp {
     manifestUrl = site.manifest?.manifestUrl ?? '';
     display = site.display;
     scope = site.manifest?.scope ?? '';
-    startUrl = absoluteUrl(site.startUrl, site.url);
+    // A page that redirected is not an app address: reopening the redirect
+    // target would keep landing on a login/activation page even after the
+    // session became valid. Without a manifest the typed address IS the entry.
+    startUrl = site.manifest == null
+        ? url
+        : absoluteUrl(site.startUrl, site.url);
     themeColor = site.manifest?.themeColor ?? site.themeColor;
     backgroundColor = site.manifest?.backgroundColor ?? 0;
     iconUrl = site.icon?.url ?? '';
@@ -179,10 +193,15 @@ class WebApp {
       id: map['id'] as String? ?? '',
       name: map['name'] as String? ?? '',
       url: url,
-      // Older entries may hold a relative start URL; repairing it here means
-      // they open at the site again instead of `file:///...`.
-      startUrl: absoluteUrl(map['startUrl'] as String? ?? url, base),
+      // Without a manifest the typed address is the entry: a redirect target
+      // saved by an older build would otherwise send every launch to a
+      // login/activation page. With a manifest its start_url is authoritative
+      // (a relative one saved by an older build is repaired here too).
+      startUrl: manifestUrl.isEmpty
+          ? url
+          : absoluteUrl(map['startUrl'] as String? ?? url, base),
       scope: absoluteUrl(map['scope'] as String? ?? '', base),
+      discoverUrl: absoluteUrl(map['discoverUrl'] as String? ?? '', url),
       display: map['display'] as String? ?? displayBrowser,
       themeColor: (map['themeColor'] as num?)?.toInt() ?? 0,
       backgroundColor: (map['backgroundColor'] as num?)?.toInt() ?? 0,
@@ -223,6 +242,7 @@ class WebApp {
         'themeColor': themeColor,
         'backgroundColor': backgroundColor,
         'manifestUrl': manifestUrl,
+        'discoverUrl': discoverUrl,
         'iconUrl': iconUrl,
         'openMode': openMode,
         'hideStatusBar': hideStatusBar,

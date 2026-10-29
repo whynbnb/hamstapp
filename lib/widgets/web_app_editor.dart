@@ -10,10 +10,19 @@ import '../state/app_state.dart';
 
 /// What the editor resolved to.
 class _Edited {
-  const _Edited({required this.name, required this.url, this.site, this.icon});
+  const _Edited({
+    required this.name,
+    required this.url,
+    this.discoverUrl = '',
+    this.site,
+    this.icon,
+  });
 
   final String name;
   final String url;
+
+  /// Where identification read the site from, when that is not [url].
+  final String discoverUrl;
   final PwaSite? site;
   final Uint8List? icon;
 }
@@ -40,14 +49,22 @@ Future<void> showWebAppEditor(
     await state.addWebApp(
       url: result.url,
       name: result.name,
+      discoverUrl: result.discoverUrl,
       site: result.site,
       iconBytes: result.icon,
     );
   } else {
     final urlChanged = result.url != entry.url;
-    await state.updateWebApp(entry.id, name: result.name, url: result.url);
-    // A new address means the stored manifest no longer describes the site.
-    if (urlChanged) await state.refreshWebApp(entry.id);
+    final discoverChanged = result.discoverUrl != entry.discoverUrl;
+    await state.updateWebApp(
+      entry.id,
+      name: result.name,
+      url: result.url,
+      discoverUrl: result.discoverUrl,
+    );
+    // A new address (or identification address) means the stored manifest no
+    // longer describes what we would read.
+    if (urlChanged || discoverChanged) await state.refreshWebApp(entry.id);
   }
   if (!context.mounted) return;
   ScaffoldMessenger.of(context)
@@ -81,18 +98,55 @@ class _WebAppEditorDialogState extends State<_WebAppEditorDialog> {
   late final TextEditingController _url = TextEditingController(
     text: widget.entry?.url ?? '',
   );
+  late final TextEditingController _discover = TextEditingController(
+    text: widget.entry?.discoverUrl ?? '',
+  );
 
   bool _identifying = false;
+  bool _advanced = false;
   bool _identified = false;
   PwaSite? _site;
   Uint8List? _icon;
   String _error = '';
 
   @override
+  void initState() {
+    super.initState();
+    // Keep an existing identification address visible, so it is not forgotten.
+    _advanced = _discover.text.trim().isNotEmpty;
+    // A result describes the address it was read from: editing either address
+    // drops it, so saving reads the new one instead of keeping a stale manifest.
+    _url.addListener(_invalidateIdentification);
+    _discover.addListener(_invalidateIdentification);
+  }
+
+  void _invalidateIdentification() {
+    if (!_identified && _site == null && _icon == null) return;
+    setState(() {
+      _identified = false;
+      _site = null;
+      _icon = null;
+    });
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     _url.dispose();
+    _discover.dispose();
     super.dispose();
+  }
+
+  /// The optional identification address, normalized; '' when not set.
+  ///
+  /// Returns null when it was typed but is not a usable address, so callers can
+  /// stop with a message instead of silently ignoring it.
+  String? _discoverAddress() {
+    final text = _discover.text.trim();
+    if (text.isEmpty) return '';
+    final url = WebApp.normalizeUrl(text);
+    if (!WebApp.isValidUrl(url)) return null;
+    return url;
   }
 
   /// Reads the site's manifest and icon, and fills the name in from what the
@@ -103,11 +157,18 @@ class _WebAppEditorDialogState extends State<_WebAppEditorDialog> {
       setState(() => _error = context.strings.t('网址看起来不对，例如 example.com'));
       return;
     }
+    final discover = _discoverAddress();
+    if (discover == null) {
+      setState(() => _error = context.strings.t('识别地址看起来不对，例如 example.com/manifest.json'));
+      return;
+    }
     setState(() {
       _identifying = true;
       _error = '';
     });
-    final site = await PwaDiscovery.discover(url);
+    // Identification carries the window's own cookies (PwaDiscovery asks for
+    // them), so a signed-in site is read instead of its login redirect.
+    final site = await PwaDiscovery.discover(url, source: discover);
     Uint8List? bytes;
     if (site != null) {
       bytes = await PwaDiscovery.fetchBestIcon(site);
@@ -133,10 +194,18 @@ class _WebAppEditorDialogState extends State<_WebAppEditorDialog> {
       setState(() => _error = context.strings.t('网址看起来不对，例如 example.com'));
       return;
     }
+    final discover = _discoverAddress();
+    if (discover == null) {
+      setState(() => _error = context.strings.t('识别地址看起来不对，例如 example.com/manifest.json'));
+      return;
+    }
     // Not identified yet: try once, so a PWA brings its own name and icon even
     // when the user just pastes an address and hits save.
     if (!_identified && !_identifying) {
       await _identify();
+      if (!mounted) return;
+      // A site that cannot be read is still saveable as a plain website; the
+      // address itself was validated above.
       url = WebApp.normalizeUrl(_url.text);
     }
     if (!mounted) return;
@@ -145,7 +214,13 @@ class _WebAppEditorDialogState extends State<_WebAppEditorDialog> {
     if (name.isEmpty) name = Uri.tryParse(url)?.host ?? url;
     Navigator.pop(
       context,
-      _Edited(name: name, url: url, site: _site, icon: _icon),
+      _Edited(
+        name: name,
+        url: url,
+        discoverUrl: discover,
+        site: _site,
+        icon: _icon,
+      ),
     );
   }
 
@@ -177,6 +252,40 @@ class _WebAppEditorDialogState extends State<_WebAppEditorDialog> {
               ),
               onSubmitted: (_) => _identify(),
             ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => setState(() => _advanced = !_advanced),
+                icon: Icon(
+                  _advanced ? Icons.expand_less : Icons.expand_more,
+                  size: 18,
+                ),
+                label: Text(s.t('高级选项')),
+                style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(0, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+              ),
+            ),
+            if (_advanced) ...[
+              TextField(
+                controller: _discover,
+                keyboardType: TextInputType.url,
+                decoration: InputDecoration(
+                  labelText: s.t('识别地址（可选）'),
+                  hintText: s.t('例如：example.com/manifest.json'),
+                ),
+                onSubmitted: (_) => _identify(),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                s.t(
+                  '站点会跳到登录页时，在这里填清单地址或登录后才能访问的页面；启动仍用上面的网址。',
+                ),
+                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              ),
+            ],
             const SizedBox(height: 12),
             if (_identifying)
               Row(

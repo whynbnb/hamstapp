@@ -880,12 +880,19 @@ const Map<String, String> _en = <String, String>{
   '重新识别': 'Detect again',
   '正在读取网站信息…': 'Reading the site…',
   '识别后自动填写，也可以自己改': 'Filled in from the site, editable',
+  '高级选项': 'Advanced',
+  '识别地址（可选）': 'Detection address (optional)',
+  '例如：example.com/manifest.json': 'e.g. example.com/manifest.json',
+  '站点会跳到登录页时，在这里填清单地址或登录后才能访问的页面；启动仍用上面的网址。':
+      'If the site redirects to a login page, put the manifest address (or a page reachable once signed in) here; launching still uses the address above.',
+  '识别地址看起来不对，例如 example.com/manifest.json':
+      'That detection address does not look right — try example.com/manifest.json',
   '保存后会像普通应用一样放进磁贴、收藏和分类；点按默认用独立窗口（无地址栏）打开，可在详情页改成浏览器。':
       'Once saved it works on tiles, favorites and categories; tapping it opens in its own window (no address bar) by default — switch it to a browser on its detail page.',
   '没有找到 PWA 清单（manifest），会当作普通网页':
       'No web app manifest found — treated as a plain website',
-  '这个网站没有 PWA 清单，会用浏览器打开':
-      'This site has no manifest, so it opens in the browser',
+  '没有 PWA 清单：仍是普通网页，按设置的打开方式启动':
+      'No manifest: it stays a plain website and opens the way this entry is set to',
   'PWA · 显示模式 {mode}': 'PWA · display mode {mode}',
   '已识别为 PWA · 显示模式 {mode}': 'Detected a PWA · display mode {mode}',
   '读不到这个网址（网络或站点问题）': 'Could not read that address (network or site)',
@@ -893,11 +900,14 @@ const Map<String, String> _en = <String, String>{
       'Could not read that address (network or site); it can still be saved as a plain website',
   '不是 HTTPS，无法作为 PWA 独立打开':
       'Not HTTPS, so it cannot run as a standalone PWA',
+  '没有 PWA 清单：仍用囤囤的窗口打开，只是没有站点自己的名称和图标。':
+      'No manifest: it still opens in 囤囤’s window, just without the site’s own name and icon.',
   '没有 PWA 清单：打开时会交给浏览器，可以放进磁贴、收藏和分类。':
       'No manifest: it opens in the browser and still works on tiles, favorites and categories.',
   'PWA · 显示模式 {mode}：打开时用囤囤自己的窗口，没有地址栏。':
       'PWA · display mode {mode}: opens in an app window of its own, with no address bar.',
   '清单 {url}': 'Manifest {url}',
+  '识别地址 {url}': 'Detection address {url}',
   '编辑名称 / 网址': 'Edit name / address',
   '删除网页入口': 'Remove web entry',
   '网址': 'Address',

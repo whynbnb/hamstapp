@@ -4,6 +4,9 @@ import 'dart:io';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'app_log.dart';
+import 'native_apps.dart';
+
 /// Width icons are stored at; launcher tiles scale down from here.
 const int iconTargetSize = 192;
 
@@ -354,38 +357,169 @@ class PwaSite {
 /// window, it just cannot work offline.
 class PwaDiscovery {
   /// Fetches [rawUrl], its manifest and the best icon it can find.
+  ///
+  /// Every request carries the window host's cookies for its own address, so
+  /// identification sees the page a signed-in user sees instead of the
+  /// login/activation page an anonymous request is bounced to. [source]
+  /// overrides the address that is read (the entry still launches [rawUrl]); it
+  /// may be a manifest address or a page that is only reachable once signed in.
   static Future<PwaSite?> discover(
     String rawUrl, {
     Duration timeout = const Duration(seconds: 12),
+    String source = '',
   }) async {
     final url = _normalize(rawUrl);
     if (url.isEmpty) return null;
     final security = _security(url);
+    final query = _normalize(source.trim().isEmpty ? rawUrl : source);
+    if (query.isEmpty) return null;
 
-    final page = await _get(url, timeout: timeout, limit: 1024 * 1024);
-    if (page == null) return null;
-
-    final href = findManifestHref(page.text, page.url);
-    PwaManifest? manifest;
-    if (href != null) {
-      final json = await _get(href, timeout: timeout, limit: 512 * 1024);
-      if (json != null) {
-        final parsed = _decodeManifest(json.text, json.url);
-        if (parsed != null) manifest = parsed;
-      }
+    final page = await _get(query, timeout: timeout, limit: 1024 * 1024);
+    if (page == null) {
+      AppLog.instance.warn(LogModule.apps, '网页识别 · 读取失败 · $query');
+      return null;
+    }
+    AppLog.instance.log(
+      LogModule.apps,
+      '网页识别 · 读取 · $query · ${page.withCookies ? '带登录状态' : '无登录状态'}'
+          '${query == url ? '' : ' · 启动地址=$url'}',
+    );
+    if (page.url != query) {
+      AppLog.instance.log(LogModule.apps, '网页识别 · 重定向 · $query → ${page.url}');
     }
 
+    // A manifest address pasted as the identification address, or a site that
+    // serves JSON at the root: read it directly.
+    final direct = _manifestFromJson(page.text, page.url);
+    if (direct != null) {
+      AppLog.instance.log(LogModule.apps, '网页识别 · 清单 · ${direct.manifestUrl}');
+      return PwaSite(
+        url: url,
+        title: '',
+        secure: security.secure,
+        manifest: direct,
+        icon: direct.bestIcon(),
+      );
+    }
+
+    // A redirect to another site is a login/activation portal, not the entry:
+    // its manifest, title and colours must not be adopted. The manifest at the
+    // address the user entered is still worth looking for.
+    final sameSite = _sameSite(query, page.url);
+    if (!sameSite) {
+      AppLog.instance.log(
+        LogModule.apps,
+        '网页识别 · 跳到其它站点，跳过该页面的清单 · ${page.url}',
+      );
+    }
+
+    PwaManifest? manifest;
+    final href = sameSite ? findManifestHref(page.text, page.url) : null;
+    if (href != null) {
+      final json = await _get(href, timeout: timeout, limit: 512 * 1024);
+      if (json != null) manifest = _decodeManifest(json.text, json.url);
+    }
+    if (!_usable(manifest)) {
+      // The page may be a shell that builds its manifest later, or the login
+      // page: the standard addresses on the entered site still deserve a try.
+      manifest = await _probeManifests(url);
+    }
+    if (!_usable(manifest)) manifest = null;
+    AppLog.instance.log(
+      LogModule.apps,
+      manifest == null || manifest.manifestUrl.isEmpty
+          ? '网页识别 · 没有清单 · $url'
+          : '网页识别 · 清单 · ${manifest.manifestUrl}',
+    );
+
     final manifestIcon = manifest?.bestIcon();
-    final pageIcon = findPageIcon(page.text, page.url);
+    final pageIcon = sameSite ? findPageIcon(page.text, page.url) : null;
     return PwaSite(
-      url: page.url,
-      title: findTitle(page.text),
+      url: sameSite ? page.url : query,
+      title: sameSite ? findTitle(page.text) : '',
       secure: security.secure,
       manifest: manifest,
       icon: manifestIcon ?? pageIcon,
       pageIcon: pageIcon,
-      themeColor: findThemeColor(page.text),
+      themeColor: sameSite ? findThemeColor(page.text) : 0,
     );
+  }
+
+  /// A manifest pasted (or served) as JSON; null when [text] is not one.
+  static PwaManifest? _manifestFromJson(String text, String url) {
+    // A UTF-8 BOM is invisible but would stop the `{` test and jsonDecode.
+    final body = text.replaceFirst('\uFEFF', '').trimLeft();
+    if (!body.startsWith('{')) return null;
+    final manifest = _decodeManifest(body, url);
+    return _usable(manifest) ? manifest : null;
+  }
+
+  /// Rejects an empty object: a random JSON endpoint is not a manifest.
+  static bool _usable(PwaManifest? manifest) =>
+      manifest != null &&
+      (manifest.label.isNotEmpty ||
+          manifest.startUrl.isNotEmpty ||
+          manifest.icons.isNotEmpty);
+
+  /// The manifest addresses the standard names, tried in order.
+  ///
+  /// Some sites answer the document with a login/activation redirect but leave
+  /// the manifest itself public; asking for it directly is what lets such an
+  /// entry still get its name, icon and display mode.
+  ///
+  /// A single-page app often serves its shell for any unknown path, so an HTML
+  /// answer is read for its own `<link rel="manifest">` rather than discarded —
+  /// that is exactly how 52dmeme.com's manifest is reachable.
+  static Future<PwaManifest?> _probeManifests(String url) async {
+    final base = Uri.tryParse(url);
+    if (base == null || !base.hasScheme) return null;
+    for (final path in const [
+      '/manifest.json',
+      '/site.webmanifest',
+      '/manifest.webmanifest',
+    ]) {
+      final probe = base.resolve(path).toString();
+      final response = await _get(
+        probe,
+        timeout: const Duration(seconds: 6),
+        limit: 512 * 1024,
+      );
+      if (response == null) continue;
+      final direct = _manifestFromJson(response.text, response.url);
+      if (direct != null) {
+        AppLog.instance.log(LogModule.apps, '网页识别 · 在 $probe 找到清单');
+        return direct;
+      }
+      final href = findManifestHref(response.text, response.url);
+      if (href == null || href == probe) continue;
+      final json = await _get(
+        href,
+        timeout: const Duration(seconds: 6),
+        limit: 512 * 1024,
+      );
+      if (json == null) continue;
+      final manifest = _decodeManifest(json.text, json.url);
+      if (!_usable(manifest)) continue;
+      AppLog.instance.log(LogModule.apps, '网页识别 · 在 $probe 的页面里找到清单 $href');
+      return manifest;
+    }
+    return null;
+  }
+
+  /// Whether two addresses belong to the same site, treating
+  /// `www.example.com` / `m.example.com` / `example.com` as one. A redirect
+  /// within it is a normal move; another domain is a sign-in portal.
+  static bool _sameSite(String a, String b) {
+    final ha = Uri.tryParse(a)?.host ?? '';
+    final hb = Uri.tryParse(b)?.host ?? '';
+    if (ha.isEmpty || hb.isEmpty || ha == hb) return true;
+    List<String> labels(String host) =>
+        host.toLowerCase().split('.').where((e) => e.isNotEmpty).toList();
+    final la = labels(ha);
+    final lb = labels(hb);
+    if (la.length < 2 || lb.length < 2) return false;
+    return la.sublist(la.length - 2).join('.') ==
+        lb.sublist(lb.length - 2).join('.');
   }
 
   /// `<meta name="theme-color">`, the colour a page declares for the browser
@@ -596,12 +730,21 @@ class PwaDiscovery {
     final uri = Uri.tryParse(url);
     if (uri == null || !uri.hasScheme) return null;
     final client = HttpClient()..connectionTimeout = timeout;
+    var withCookies = false;
     try {
       final request = await client.getUrl(uri).timeout(timeout);
       request.headers.set(HttpHeaders.userAgentHeader, _userAgent);
       request.headers.set(HttpHeaders.acceptLanguageHeader, 'zh-CN,zh;q=0.9,en;q=0.8');
       if (referer.isNotEmpty) {
         request.headers.set(HttpHeaders.refererHeader, referer);
+      }
+      // Asked per request, so a cookie is only ever sent to the address it
+      // belongs to. HttpOnly cookies stay invisible here; the window itself
+      // still has them.
+      final cookies = await NativeApps.webViewCookies(url);
+      if (cookies.isNotEmpty) {
+        request.headers.set(HttpHeaders.cookieHeader, cookies);
+        withCookies = true;
       }
       final response = await request.close().timeout(timeout);
       if (response.statusCode >= 400) return null;
@@ -616,6 +759,7 @@ class PwaDiscovery {
         bytes: bytes,
         text: text,
         url: finalUrl(url, response.redirects.map((r) => r.location)),
+        withCookies: withCookies,
       );
     } catch (_) {
       return null;
@@ -667,5 +811,13 @@ class _Fetched {
   final String text;
   final String url;
 
-  const _Fetched({required this.bytes, required this.text, required this.url});
+  /// Whether the request carried the WebView's cookies.
+  final bool withCookies;
+
+  const _Fetched({
+    required this.bytes,
+    required this.text,
+    required this.url,
+    this.withCookies = false,
+  });
 }

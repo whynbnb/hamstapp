@@ -1004,6 +1004,22 @@ class NativeApps {
     return ok ?? false;
   }
 
+  /// The WebView's cookies for [url], as a `Cookie` header value.
+  ///
+  /// Empty when the platform cannot answer or nothing is stored. HttpOnly
+  /// cookies are not exposed by the platform, so this is the best effort a
+  /// plain HTTP request can make; the WebView itself still has all of them.
+  static Future<String> webViewCookies(String url) async {
+    try {
+      return await _channel.invokeMethod<String>('webViewCookies', {
+            'url': url,
+          }) ??
+          '';
+    } catch (_) {
+      return '';
+    }
+  }
+
   /// Opens an http(s) URL (e.g. the project's GitHub page) in a browser.
   static Future<bool> openUrl(String url, {String? package}) async {
     try {

@@ -769,6 +769,7 @@ class AppState extends ChangeNotifier {
   Future<void> addWebApp({
     required String url,
     String name = '',
+    String discoverUrl = '',
     PwaSite? site,
     Uint8List? iconBytes,
   }) async {
@@ -777,6 +778,7 @@ class AppState extends ChangeNotifier {
       id: WebApp.newId(now),
       name: name.trim(),
       url: url.trim(),
+      discoverUrl: discoverUrl.trim(),
       createdAt: now.millisecondsSinceEpoch,
     );
     if (site != null) entry.applySite(site);
@@ -801,10 +803,17 @@ class AppState extends ChangeNotifier {
 
   /// Re-reads the address: a site may have gained a manifest (or changed its
   /// name/icon) since it was added. Returns what was found, or null.
+  ///
+  /// The request carries the window's cookies: a site that redirects an
+  /// anonymous visitor to a login/activation page otherwise hides its manifest
+  /// from identification even after the user has signed in.
   Future<PwaSite?> refreshWebApp(String id) async {
     final entry = webAppById(id);
     if (entry == null) return null;
-    final site = await PwaDiscovery.discover(entry.url);
+    final site = await PwaDiscovery.discover(
+      entry.url,
+      source: entry.discoverUrl,
+    );
     if (site == null) return null;
     entry.applySite(site);
     if (entry.name.trim().isEmpty) entry.name = entry.url;
@@ -821,8 +830,9 @@ class AppState extends ChangeNotifier {
     await _persistMeta();
     AppLog.instance.log(
       LogModule.apps,
-      '网页入口 · 识别 · ${entry.name} · ${entry.url} · '
-          '${entry.isPwa ? 'PWA ${entry.display} · ${entry.manifestUrl}' : '无清单'}',
+      '网页入口 · 识别 · ${entry.name} · ${entry.url}'
+          '${entry.discoverUrl.isEmpty ? '' : ' · 识别地址=${entry.discoverUrl}'}'
+          ' · ${entry.isPwa ? 'PWA ${entry.display} · ${entry.manifestUrl}' : '无清单'}',
     );
     notifyListeners();
     unawaited(syncHomeWidget());
@@ -833,6 +843,7 @@ class AppState extends ChangeNotifier {
     String id, {
     String? name,
     String? url,
+    String? discoverUrl,
     String? openMode,
     bool? hideStatusBar,
     String? browserPackage,
@@ -842,6 +853,7 @@ class AppState extends ChangeNotifier {
     if (index < 0) return;
     final entry = webApps[index];
     if (name != null && name.trim().isNotEmpty) entry.name = name.trim();
+    if (discoverUrl != null) entry.discoverUrl = discoverUrl.trim();
     if (openMode != null) entry.openMode = openMode;
     if (hideStatusBar != null) entry.hideStatusBar = hideStatusBar;
     if (browserPackage != null) entry.browserPackage = browserPackage;
