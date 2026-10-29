@@ -151,6 +151,25 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
     super.dispose();
   }
 
+  /// Re-downloads just the web entry's icon, leaving its name and address
+  /// alone. The site says a new icon is at the same place, or it does not.
+  Future<void> _refreshWebIcon(AppState state) async {
+    final s = context.strings;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(s.t('正在获取图标…')),
+          duration: const Duration(seconds: 30),
+        ),
+      );
+    final ok = await state.refreshWebAppIcon(widget.packageName);
+    if (!mounted) return;
+    _snack(
+      ok ? s.t('图标已刷新') : s.t('刷新失败，站点没有返回图标'),
+    );
+  }
+
   /// Re-reads the site's manifest and icon (a site may have become a PWA, or
   /// changed its name), and reports what was found.
   Future<void> _identifyEntry(AppState state) async {
@@ -499,6 +518,8 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                             state,
                             entry: webAppFor(state, widget.packageName),
                           );
+                        case 'refreshWebIcon':
+                          await _refreshWebIcon(state);
                         case 'removeWeb':
                           _removeWebEntry(state);
                         case 'hide':
@@ -553,6 +574,17 @@ class _AppDetailScreenState extends State<AppDetailScreen> {
                                 title: Text(ctx.strings.t('编辑名称 / 网址')),
                               ),
                             ),
+                            // A custom icon wins over the site's, so a
+                            // re-fetch would change nothing (same rule as for
+                            // installed apps).
+                            if (meta.customIcon.isEmpty)
+                              PopupMenuItem(
+                                value: 'refreshWebIcon',
+                                child: ListTile(
+                                  leading: const Icon(Icons.refresh),
+                                  title: Text(ctx.strings.t('重新获取图标')),
+                                ),
+                              ),
                             PopupMenuItem(
                               value: 'removeWeb',
                               child: ListTile(

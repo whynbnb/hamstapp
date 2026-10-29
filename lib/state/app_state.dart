@@ -839,6 +839,53 @@ class AppState extends ChangeNotifier {
     return site;
   }
 
+  /// Re-downloads the site's icon without touching its name, address or
+  /// display mode.
+  ///
+  /// A site can change its icon (or the one cached when the entry was added
+  /// may simply be wrong); this is the web-entry counterpart of the installed
+  /// app's "force refresh icon".
+  Future<bool> refreshWebAppIcon(String id) async {
+    final entry = webAppById(id);
+    if (entry == null) return false;
+    final site = await PwaDiscovery.discover(
+      entry.url,
+      source: entry.discoverUrl,
+    );
+    Uint8List? bytes;
+    if (site != null) {
+      bytes = await PwaDiscovery.fetchBestIcon(site);
+    }
+    // A transient page error must not discard an icon whose address we already
+    // know; the old address is still worth one try.
+    if ((bytes == null || bytes.isEmpty) && entry.iconUrl.isNotEmpty) {
+      bytes = await PwaDiscovery.fetchIconBytes(
+        PwaIcon(url: entry.iconUrl, size: 0),
+        referer: entry.url,
+      );
+    }
+    if (bytes == null || bytes.isEmpty) {
+      AppLog.instance.log(
+        LogModule.apps,
+        '网页入口 · 图标刷新失败 · ${entry.name} · ${entry.url}',
+      );
+      return false;
+    }
+    IconCache.instance.put(entry.id, bytes);
+    IconCache.instance.notifyUpdated();
+    final iconUrl = site?.icon?.url ?? '';
+    if (iconUrl.isNotEmpty && iconUrl != entry.iconUrl) {
+      entry.iconUrl = iconUrl;
+      await _persistWebApps();
+    }
+    notifyListeners();
+    AppLog.instance.log(
+      LogModule.apps,
+      '网页入口 · 图标已刷新 · ${entry.name} · ${bytes.length}B',
+    );
+    return true;
+  }
+
   Future<void> updateWebApp(
     String id, {
     String? name,

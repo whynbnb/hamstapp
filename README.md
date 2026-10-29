@@ -178,7 +178,9 @@ into a fast, fully customisable launcher. Everything is stored locally: no accou
   anonymous visitors to a login/activation page can still be recognised; a redirect to a *different* site
   never donates its manifest. With no manifest the entry always launches the address you typed — not the
   redirect target — and an advanced **detection address** can name the manifest or a signed-in page when
-  even that is not enough.
+  even that is not enough; a web entry's icon can also be re-fetched on its own.
+- A web entry's detail menu can **fetch the icon again** on its own (manifest icon first, then the page's),
+  leaving its name, address and open mode untouched.
 - A page that will not open does not leave just a splash: a load error, a bad certificate, a dead renderer
   or 30 seconds without finishing shows **Retry / Open in browser / Close**, and a missing or disabled
   system WebView falls back to the browser by itself.

@@ -377,6 +377,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text(s.t('编辑名称 / 网址')), findsOneWidget);
+    // The site's icon can be re-fetched without re-identifying the entry.
+    expect(find.text(s.t('重新获取图标')), findsOneWidget);
     expect(find.text(s.t('删除网页入口')), findsOneWidget);
     expect(find.text(s.t('导出 APK（分享）')), findsNothing);
     expect(find.text(s.t('卸载')), findsNothing);

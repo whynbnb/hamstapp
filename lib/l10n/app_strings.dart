@@ -878,6 +878,9 @@ const Map<String, String> _en = <String, String>{
   '退出后下次打开应用列表时，沿用现在的筛选与排序':
       'Keeps these filters and the sort order for the next time the app list is opened',
   '重新识别': 'Detect again',
+  '重新获取图标': 'Fetch the icon again',
+  '正在获取图标…': 'Fetching the icon…',
+  '刷新失败，站点没有返回图标': 'Could not refresh: the site returned no icon',
   '正在读取网站信息…': 'Reading the site…',
   '识别后自动填写，也可以自己改': 'Filled in from the site, editable',
   '高级选项': 'Advanced',
