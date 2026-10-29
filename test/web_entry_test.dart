@@ -225,6 +225,63 @@ void main() {
     expect(state.metaFor(id).lastLaunchedAt > 0, isTrue);
   });
 
+  testWidgets('a stored relative start URL opens the entry address instead', (
+    tester,
+  ) async {
+    const channel = MethodChannel('hamstapp/apps');
+    final calls = <MethodCall>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+      call,
+    ) async {
+      calls.add(call);
+      return true;
+    });
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        channel,
+        null,
+      ),
+    );
+
+    final log = AppLog.instance
+      ..setEnabled(true)
+      ..clear();
+    addTearDown(() {
+      log.setEnabled(false);
+      log.clear();
+    });
+
+    final state = AppState(_MemStorage())..initialized = true;
+    await state.addWebApp(name: '尽欢', url: 'https://52dmeme.com/');
+    // The shape an older build saved after a redirect with a relative
+    // Location: the window host would load file:///activate and be refused.
+    final web = state.webApps.single..startUrl = '/activate';
+
+    late BuildContext ctx;
+    await tester.pumpWidget(
+      ChangeNotifierProvider<AppState>.value(
+        value: state,
+        child: MaterialApp(
+          home: Builder(
+            builder: (c) {
+              ctx = c;
+              return const SizedBox();
+            },
+          ),
+        ),
+      ),
+    );
+
+    await launchApp(ctx, web.id);
+
+    final open = calls.singleWhere((c) => c.method == 'openWebApp');
+    expect((open.arguments as Map)['url'], 'https://52dmeme.com/');
+    expect(
+      log.entries.map((e) => e.text).join('\n'),
+      contains('启动地址不是网址，改用入口地址'),
+    );
+  });
+
   testWidgets('a web entry that cannot open leaves the reason in the log', (
     tester,
   ) async {

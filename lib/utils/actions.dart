@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../l10n/app_strings.dart';
 import '../models/app_info.dart';
+import '../models/web_app.dart';
 import '../services/app_log.dart';
 import '../services/icon_cache.dart';
 import '../services/native_apps.dart';
@@ -90,7 +91,27 @@ Future<void> launchWebEntry(BuildContext context, AppInfo entry) async {
   }
 
   var opened = false;
-  final target = web.startUrl.isEmpty ? web.url : web.startUrl;
+  var target = web.startUrl.isEmpty ? web.url : web.startUrl;
+  if (!WebApp.isValidUrl(target)) {
+    // A stored `start_url` without a scheme (an older entry saved during a
+    // redirect) would reach the WebView as `file:///activate`. The entry's own
+    // address is always a full URL, so use that.
+    AppLog.instance.warn(
+      LogModule.launch,
+      '网页入口 · 启动地址不是网址，改用入口地址 · ${web.name} · $target',
+    );
+    target = web.url;
+  }
+  if (!WebApp.isValidUrl(target)) {
+    AppLog.instance.error(
+      LogModule.launch,
+      '网页入口 · 网址无效 · ${web.name} · ${web.url}',
+    );
+    if (context.mounted) {
+      _snack(context, AppStrings.current.t('这个网页入口没有网址'));
+    }
+    return;
+  }
   final browserLabel = web.browserPackage.isEmpty
       ? AppStrings.current.t('系统默认')
       : (web.browserName.isEmpty ? web.browserPackage : web.browserName);

@@ -327,6 +327,63 @@ void main() {
       expect(back.browserPackage, 'com.android.chrome');
     });
 
+    test('resolves a relative redirect Location against the hop before it', () {
+      // The reported case: the site redirected to `/activate`, and taking the
+      // raw Location made the entry's URL look like a path.
+      expect(
+        PwaDiscovery.finalUrl('https://52dmeme.com/', [Uri.parse('/activate')]),
+        'https://52dmeme.com/activate',
+      );
+      // An absolute Location is kept, and a chain resolves step by step.
+      expect(
+        PwaDiscovery.finalUrl('https://a.example/x/y', [
+          Uri.parse('next'),
+          Uri.parse('/z'),
+        ]),
+        'https://a.example/z',
+      );
+      expect(
+        PwaDiscovery.finalUrl('https://a.example/x', const []),
+        'https://a.example/x',
+      );
+    });
+
+    test('repairs a stored relative start URL instead of loading file://', () {
+      final back = WebApp.fromMap({
+        'id': 'web:abc',
+        'name': '尽欢',
+        'url': 'https://52dmeme.com/',
+        'startUrl': '/activate',
+        'display': 'browser',
+      });
+      expect(back.startUrl, 'https://52dmeme.com/activate');
+      expect(WebApp.isValidUrl(back.startUrl), isTrue);
+
+      // The helper leaves full addresses alone and resolves bare paths.
+      expect(
+        WebApp.absoluteUrl('https://b.example/x', 'https://a.example/'),
+        'https://b.example/x',
+      );
+      expect(
+        WebApp.absoluteUrl('/activate', 'https://a.example/'),
+        'https://a.example/activate',
+      );
+
+      // A manifest URL saved as a path came from the same bug; it cannot be a
+      // base, so the entry's own address is used and the entry is not a PWA.
+      final manifestCase = WebApp.fromMap({
+        'id': 'web:def',
+        'name': 'x',
+        'url': 'https://a.example/',
+        'startUrl': '/app',
+        'manifestUrl': '/manifest.json',
+        'display': 'standalone',
+      });
+      expect(manifestCase.manifestUrl, '');
+      expect(manifestCase.isPwa, isFalse);
+      expect(manifestCase.startUrl, 'https://a.example/app');
+    });
+
     test('a site without a manifest opens in a window too', () {
       final entry = WebApp(id: WebApp.newId(), name: 'x', url: 'https://a.example/page')
         ..applySite(

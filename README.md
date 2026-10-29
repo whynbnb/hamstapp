@@ -301,7 +301,9 @@ back as suggestions:
   strand the indicator, and the content always follows the finger; the collapsed nav button's
   long press is configurable (Launch / Apps / Settings / Sync …); a web entry that cannot open offers
   Retry / Browser / Close, a missing system WebView falls back to the browser, and with the log on the
-  WebView version, error codes, HTTP / certificate errors, renderer crashes and load timeouts are recorded.
+  WebView version, error codes, HTTP / certificate errors, renderer crashes and load timeouts are recorded;
+  web-entry start URLs are resolved against the redirected address, and a relative one saved by an older
+  build is repaired on open instead of being loaded as file:///… .
 - **1.0** — first release: app manager, tile board and categories, snapshots and backup lists,
   remote APK sources with the APK analyzer, usage insights, export / import.
 

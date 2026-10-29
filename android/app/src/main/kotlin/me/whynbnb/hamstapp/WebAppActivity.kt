@@ -131,6 +131,13 @@ class WebAppActivity : Activity() {
             finish()
             return
         }
+        if (!startUrl.startsWith("http://") && !startUrl.startsWith("https://")) {
+            // A relative address would be loaded as file:///… and fail with
+            // ERR_ACCESS_DENIED; never put anything but the web in a web window.
+            log("窗口创建失败 · 地址不是网页 · $startUrl", "error")
+            finish()
+            return
+        }
         log(
             "窗口创建 · $appName · $startUrl · display=$display · " +
                 "状态栏=${if (hideStatusBar) "隐藏" else "显示"} · " +

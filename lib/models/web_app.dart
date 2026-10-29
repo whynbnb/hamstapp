@@ -102,6 +102,24 @@ class WebApp {
 
   static bool isWebId(String packageName) => packageName.startsWith(idPrefix);
 
+  /// Turns a possibly relative manifest member into a full address.
+  ///
+  /// Entries saved before redirects were followed correctly can hold a bare
+  /// path such as `/activate`. Passing that to the window host makes Android
+  /// load `file:///activate`, so it is resolved against [base] on the way in
+  /// (and on the way out of storage).
+  static String absoluteUrl(String value, String base) {
+    final raw = value.trim();
+    if (raw.isEmpty || raw.contains('://')) return raw;
+    // A base that is itself a path cannot make the result absolute.
+    if (!base.contains('://')) return raw;
+    try {
+      return Uri.parse(base).resolve(raw).toString();
+    } catch (_) {
+      return raw;
+    }
+  }
+
   static String newId([DateTime? now]) =>
       '$idPrefix${(now ?? DateTime.now()).millisecondsSinceEpoch.toRadixString(36)}';
 
@@ -139,7 +157,7 @@ class WebApp {
     manifestUrl = site.manifest?.manifestUrl ?? '';
     display = site.display;
     scope = site.manifest?.scope ?? '';
-    startUrl = site.startUrl;
+    startUrl = absoluteUrl(site.startUrl, site.url);
     themeColor = site.manifest?.themeColor ?? site.themeColor;
     backgroundColor = site.manifest?.backgroundColor ?? 0;
     iconUrl = site.icon?.url ?? '';
@@ -152,16 +170,23 @@ class WebApp {
 
   factory WebApp.fromMap(Map<dynamic, dynamic> map) {
     final url = map['url'] as String? ?? '';
+    final rawManifestUrl = map['manifestUrl'] as String? ?? '';
+    // A manifest URL without a scheme came from the same redirect bug; it can
+    // neither be fetched nor serve as a base, so drop it.
+    final manifestUrl = rawManifestUrl.contains('://') ? rawManifestUrl : '';
+    final base = manifestUrl.isEmpty ? url : manifestUrl;
     return WebApp(
       id: map['id'] as String? ?? '',
       name: map['name'] as String? ?? '',
       url: url,
-      startUrl: map['startUrl'] as String? ?? url,
-      scope: map['scope'] as String? ?? '',
+      // Older entries may hold a relative start URL; repairing it here means
+      // they open at the site again instead of `file:///...`.
+      startUrl: absoluteUrl(map['startUrl'] as String? ?? url, base),
+      scope: absoluteUrl(map['scope'] as String? ?? '', base),
       display: map['display'] as String? ?? displayBrowser,
       themeColor: (map['themeColor'] as num?)?.toInt() ?? 0,
       backgroundColor: (map['backgroundColor'] as num?)?.toInt() ?? 0,
-      manifestUrl: map['manifestUrl'] as String? ?? '',
+      manifestUrl: manifestUrl,
       iconUrl: map['iconUrl'] as String? ?? '',
       // Entries added before the window host existed have no mode stored; they
       // open in their own window too, which is what a launcher should do — but

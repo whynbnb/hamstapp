@@ -615,15 +615,28 @@ class PwaDiscovery {
       return _Fetched(
         bytes: bytes,
         text: text,
-        url: response.redirects.isEmpty
-            ? url
-            : response.redirects.last.location.toString(),
+        url: finalUrl(url, response.redirects.map((r) => r.location)),
       );
     } catch (_) {
       return null;
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// The address a response ended up at.
+  ///
+  /// A server may send a relative `Location` (`/activate`), which Dart keeps
+  /// as-is in [HttpClientResponse.redirects]; resolving each hop against the
+  /// one before it is what the HTTP client itself did. Taking the raw header
+  /// instead made a site's final URL look like a path, and the entry was later
+  /// loaded as `file:///activate`.
+  static String finalUrl(String url, Iterable<Uri> locations) {
+    var current = url;
+    for (final location in locations) {
+      current = Uri.parse(current).resolveUri(location).toString();
+    }
+    return current;
   }
 
   /// UTF-8 unless the server says otherwise. Anything undecodable is replaced
